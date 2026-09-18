@@ -1,3 +1,5 @@
+> 후속 상태: 공급자 어댑터는 이제 [단계별 제작·게시](CONNECTED_WORKFLOW.md)에 연결되어 있습니다. 아래 초기 검증 기록과 구분하세요.
+
 # 오픈소스 통합 현황
 
 2026-09-18 사용자 요청에 따라 GitHub 프로젝트를 조사하고 기존 코드에 필요한 라이브러리와 연결 코드를 추가했습니다. 외부 저장소 전체를 복사하거나 하위 Git 저장소를 포함하지 않고 정식 패키지를 버전 고정해 사용합니다. 직접 작성한 연결 코드는 이 저장소에서 관리합니다.
@@ -54,7 +56,7 @@ python -m worker.cli suggest /path/to/transcript.json /path/to/candidates.json -
 
 `examples/clip.json`은 10~40초 구간 예시입니다. 원본 길이에 맞게 수정합니다. 로컬 명령은 전체 DB·예산·승인 흐름을 사용하지 않는 파일 도구입니다. 실행 결과는 Git에 커밋하지 않습니다.
 
-웹·워커 실행은 [개발 환경](DEVELOPMENT.md)을 따릅니다. 기존 DB에는 `alembic upgrade head`로 `0002_media_tasks`를 적용합니다. Docker를 사용하면 새 워커 이미지를 빌드해야 합니다. `R4_S3_ENDPOINT_URL`은 서버 내부 접속 주소, `R4_S3_PUBLIC_ENDPOINT_URL`은 브라우저가 접근할 수 있는 서명 URL 주소입니다. 서명 후 호스트를 바꾸면 서명이 깨지므로 별도 클라이언트로 발급합니다.
+웹·워커 실행은 [개발 환경](DEVELOPMENT.md)을 따릅니다. 기존 DB에는 `alembic upgrade head`로 `0003_workflow`를 적용합니다. Docker를 사용하면 새 워커 이미지를 빌드해야 합니다. `R4_S3_ENDPOINT_URL`은 서버 내부 접속 주소, `R4_S3_PUBLIC_ENDPOINT_URL`은 브라우저가 접근할 수 있는 서명 URL 주소입니다. 서명 후 호스트를 바꾸면 서명이 깨지므로 별도 클라이언트로 발급합니다.
 
 ## 검증 범위
 
@@ -68,4 +70,4 @@ python -m worker.cli suggest /path/to/transcript.json /path/to/candidates.json -
 
 ## 남은 제품 기능
 
-LLM 하이라이트 추천, 자동 얼굴 추적, 다중 구간 조합, 정교한 타임라인 UI, 단어별 자막 강조, 프리뷰 전용 저해상도 렌더, 전체 유료 파이프라인·게시 UI 연결은 별도 구현 대상입니다. 현재 편집기는 원어 음성을 유지합니다.
+LLM 하이라이트 추천, 자동 얼굴 추적, 다중 구간 조합, 정교한 타임라인 UI, 단어별 자막 강조, 프리뷰 전용 저해상도 렌더, 정교한 오디오 믹싱은 별도 구현 대상입니다. 단계별 더빙·게시 연결은 [후속 구현](CONNECTED_WORKFLOW.md)을 참고하세요.

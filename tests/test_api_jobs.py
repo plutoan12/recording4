@@ -83,7 +83,7 @@ def test_job_list_and_filter(client: TestClient, auth_headers, session: Session,
     assert client.get("/jobs?state=approved", headers=auth_headers).json() == []
 
 
-def test_allowed_transition_updates_state(
+def test_worker_only_transition_is_rejected(
     client: TestClient, auth_headers, session: Session, user
 ) -> None:  # noqa: ANN001
     asset = make_verified_asset(session, user)
@@ -96,12 +96,11 @@ def test_allowed_transition_updates_state(
     response = client.post(
         f"/jobs/{job_id}/transitions", headers=auth_headers, json={"event": "start"}
     )
-    assert response.status_code == 200
-    assert response.json()["state"] == JobState.PROCESSING
+    assert response.status_code == 409
 
     stored = session.get(Job, uuid.UUID(job_id))
     session.refresh(stored)
-    assert stored.state is JobState.PROCESSING
+    assert stored.state is JobState.QUEUED
 
 
 def test_transition_outside_table_is_rejected(
@@ -129,8 +128,8 @@ def test_reject_records_reason(client: TestClient, auth_headers, session: Sessio
         headers=auth_headers,
         json={"source_asset_id": str(asset.id), "target_language": "en"},
     ).json()["id"]
-    for event in ("start", "complete"):
-        client.post(f"/jobs/{job_id}/transitions", headers=auth_headers, json={"event": event})
+    session.get(Job, uuid.UUID(job_id)).state = JobState.REVIEW_REQUIRED
+    session.commit()
 
     response = client.post(
         f"/jobs/{job_id}/transitions",

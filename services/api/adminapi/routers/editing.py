@@ -16,6 +16,7 @@ from adminapi.models import (
     Artifact,
     ClipEdit,
     ClipRange,
+    Job,
     MediaTask,
     SourceAsset,
     TranscriptSegment,
@@ -23,6 +24,7 @@ from adminapi.models import (
 from adminapi.outbox import enqueue
 from adminapi.storage import ObjectStorage, get_storage
 from pipeline.editing import Cue, EditSpec, suggest_clips
+from pipeline.states import JobState
 
 router = APIRouter(tags=["editing"])
 
@@ -244,6 +246,13 @@ def approve(artifact_id: uuid.UUID, user: CurrentUser, session: SessionDep):
     artifact = session.scalar(select(Artifact).where(Artifact.id == artifact_id).with_for_update())
     if artifact is None:
         raise HTTPException(404, "결과물을 찾을 수 없습니다.")
+    if artifact.job_id:
+        job = session.scalar(select(Job).where(Job.id == artifact.job_id).with_for_update())
+        if job.state not in (JobState.REVIEW_REQUIRED, JobState.APPROVED) or job.workflow_data.get(
+            "artifact_id"
+        ) != str(artifact.id):
+            raise HTTPException(409, "현재 검수 대상 결과물만 승인할 수 있습니다.")
+        job.state = JobState.APPROVED
     existing = session.scalar(
         select(Approval).where(Approval.artifact_id == artifact_id, Approval.metadata_version == 1)
     )

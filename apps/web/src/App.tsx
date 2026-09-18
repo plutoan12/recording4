@@ -4,7 +4,6 @@ import {
   ApiError,
   type Job,
   type SourceAsset,
-  createJob,
   getToken,
   listAssets,
   listJobs,
@@ -14,6 +13,7 @@ import {
 } from './api'
 
 import { ClipEditor } from './ClipEditor'
+import { WorkflowPanel, type WorkflowDraft } from './WorkflowPanel'
 
 const REFRESH_MS = 5000
 
@@ -65,6 +65,7 @@ function Login({ onSuccess }: { onSuccess: () => void }) {
 function Dashboard({ onSignOut }: { onSignOut: () => void }) {
   const [assets, setAssets] = useState<SourceAsset[]>([])
   const [jobs, setJobs] = useState<Job[]>([])
+  const [workflowDraft, setWorkflowDraft] = useState<WorkflowDraft|null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
@@ -107,16 +108,6 @@ function Dashboard({ onSignOut }: { onSignOut: () => void }) {
     }
   }
 
-  async function onCreateJob(assetId: string) {
-    const language = window.prompt('대상 언어 코드를 입력합니다. 예: en')
-    if (language === null || language.trim() === '') return
-    try {
-      await createJob(assetId, language.trim())
-      await refresh()
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : '작업 생성에 실패했습니다.')
-    }
-  }
 
   return (
     <>
@@ -160,11 +151,7 @@ function Dashboard({ onSignOut }: { onSignOut: () => void }) {
               <td>{asset.duration_seconds ?? '-'}</td>
               <td>{asset.width !== null ? `${asset.width}×${asset.height}` : '-'}</td>
               <td>
-                {asset.upload_state === 'verified' && (
-                  <button type="button" onClick={() => void onCreateJob(asset.id)}>
-                    작업 만들기
-                  </button>
-                )}
+                아래 제작 양식에서 선택
               </td>
             </tr>
           ))}
@@ -176,7 +163,8 @@ function Dashboard({ onSignOut }: { onSignOut: () => void }) {
         </tbody>
       </table>
 
-      <ClipEditor assets={assets} />
+      <ClipEditor assets={assets} onWorkflow={setWorkflowDraft} />
+      <WorkflowPanel assets={assets} jobs={jobs} draft={workflowDraft} onCreated={refresh} />
 
       <h2>작업</h2>
       <table>

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from decimal import Decimal
 from functools import lru_cache
 
 from pydantic import Field
@@ -30,6 +31,18 @@ class Settings(BaseSettings):
     s3_public_endpoint_url: str | None = None
     whisper_model: str = "small"
     whisper_device: str = "cpu"
+
+    # Explicit deployment switches: tests and default installs never call paid APIs.
+    paid_processing_enabled: bool = False
+    google_cloud_project: str | None = None
+    elevenlabs_api_key: str | None = None
+    sync_api_key: str | None = None
+    translate_usd_per_1k_chars: Decimal | None = None
+    tts_usd_per_1k_chars: Decimal | None = None
+    lipsync_usd_per_second: Decimal | None = None
+    youtube_upload_enabled: bool = False
+    youtube_credentials_file: str | None = None
+    youtube_channel_id: str | None = None
 
     # 업로드 제한
     upload_url_ttl_seconds: int = 15 * 60

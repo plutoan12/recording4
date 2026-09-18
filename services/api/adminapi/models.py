@@ -144,6 +144,11 @@ class Job(Base, TimestampMixin):
     state_reason: Mapped[str | None] = mapped_column(Text, default=None)
     created_by_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"))
 
+    workflow_config: Mapped[dict] = mapped_column(JSON, default=dict)
+    workflow_data: Mapped[dict] = mapped_column(JSON, default=dict)
+    lease_token: Mapped[str | None] = mapped_column(String(36), default=None)
+    lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+
     source_asset: Mapped[SourceAsset] = relationship(back_populates="jobs")
     stage_runs: Mapped[list[StageRun]] = relationship(back_populates="job")
 
@@ -175,6 +180,8 @@ class StageRun(Base, TimestampMixin):
     error: Mapped[str | None] = mapped_column(Text, default=None)
     estimated_cost: Mapped[Decimal | None] = mapped_column(Numeric(12, 4), default=None)
     actual_cost: Mapped[Decimal | None] = mapped_column(Numeric(12, 4), default=None)
+
+    outputs: Mapped[dict] = mapped_column(JSON, default=dict)
 
     job: Mapped[Job | None] = relationship(back_populates="stage_runs")
 
@@ -325,6 +332,11 @@ class Publication(Base, TimestampMixin):
     state: Mapped[PublicationState] = mapped_column(
         state_column(PublicationState, 32), default=PublicationState.PENDING
     )
+    metadata_snapshot: Mapped[dict] = mapped_column(JSON, default=dict)
+    checkpoint: Mapped[dict] = mapped_column(JSON, default=dict)
+    error: Mapped[str | None] = mapped_column(Text, default=None)
+    lease_token: Mapped[str | None] = mapped_column(String(36), default=None)
+    lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
     replaces_publication_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("publications.id"), default=None
     )
@@ -421,6 +433,7 @@ class OutboxMessage(Base, TimestampMixin):
     payload: Mapped[dict] = mapped_column(JSON)
     dedupe_key: Mapped[str] = mapped_column(String(255), unique=True)
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    available_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     attempts: Mapped[int] = mapped_column(Integer, default=0)
     last_error: Mapped[str | None] = mapped_column(Text, default=None)
 

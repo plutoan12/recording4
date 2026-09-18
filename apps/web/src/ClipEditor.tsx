@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { request, type SourceAsset } from './api'
+import { PublicationForm } from './PublicationForm'
+import type { WorkflowDraft } from './WorkflowPanel'
 
 type Cue = { start: number; end: number; text: string }
 type Suggestion = { start: number; end: number; title: string; reason: string }
 type Task = { id: string; source_asset_id: string; kind: string; state: string; error: string | null;
   result: { artifact_id?: string; scenes?: {start: number; end: number}[] } }
 
-export function ClipEditor({ assets }: { assets: SourceAsset[] }) {
+export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWorkflow: (draft:WorkflowDraft)=>void }) {
   const [assetId, setAssetId] = useState('')
   const [sourceUrl, setSourceUrl] = useState('')
   const [start, setStart] = useState(0)
@@ -20,6 +22,7 @@ export function ClipEditor({ assets }: { assets: SourceAsset[] }) {
   const [outputUrl, setOutputUrl] = useState('')
   const [previewed, setPreviewed] = useState('')
   const [previewId, setPreviewId] = useState('')
+  const [approvedId,setApprovedId] = useState('')
   const [message, setMessage] = useState('')
   const [busy, setBusy] = useState(false)
   const video = useRef<HTMLVideoElement>(null)
@@ -114,6 +117,7 @@ export function ClipEditor({ assets }: { assets: SourceAsset[] }) {
           setMessage('새 편집본의 렌더를 요청했습니다.'); await refresh()
         })}>숏폼 렌더</button>
       </div>
+      <button disabled={busy||end<=start||end-start>180} onClick={()=>{onWorkflow({source_asset_id:assetId,start,end,mode,focus_x:focus,title,cues:captions});setMessage('아래 단계별 제작 화면에 선택 구간을 전달했습니다.')}}>선택 구간을 번역·더빙 단계로 보내기</button>
       {suggestions.map((s,i) => <button key={i} onClick={() => {setStart(s.start);setEnd(s.end);setTitle(s.title)}}>{s.start.toFixed(1)}–{s.end.toFixed(1)}초 · {s.title}</button>)}
     </>}
     {message && <p role="status">{message}</p>}
@@ -130,10 +134,11 @@ export function ClipEditor({ assets }: { assets: SourceAsset[] }) {
           setOutputUrl(p.url); setPreviewed(''); setPreviewId(t.result.artifact_id ?? '')
         })}>최종 영상 보기</button>
         <button disabled={busy || previewed !== t.result.artifact_id} onClick={() => void act(async () => {
-          await request(`/artifacts/${t.result.artifact_id}/approve`, {method:'POST'}); setMessage('이 결과물 버전을 승인했습니다. 자동으로 공개되지는 않습니다.')
+          await request(`/artifacts/${t.result.artifact_id}/approve`, {method:'POST'}); setApprovedId(t.result.artifact_id ?? '');setMessage('이 결과물 버전을 승인했습니다. 아래에서 공개 예약을 요청할 수 있습니다.')
         })}>이 버전 승인</button>
       </>}
     </li>)}</ul>
+    {approvedId && <PublicationForm artifactId={approvedId} />}
     {outputUrl && <><video src={outputUrl} controls onPlay={() => {
       setPreviewed(previewId)
     }} /><a href={outputUrl} target="_blank" rel="noreferrer">영상 열기·다운로드</a></>}
