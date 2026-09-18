@@ -132,7 +132,7 @@ jobs:
       # 빌드 로그가 길어서 중간 출력은 찾기 어렵습니다. 잡 끝에서 한 번 더 모읍니다.
       - name: 이미지 요약
         run: |
-          docker image ls recording4-worker:ci recording4-api:ci \
-            --format '{{.Repository}}:{{.Tag}} {{.Size}}'
+          docker image ls recording4-worker:ci --format '{{.Repository}}:{{.Tag}} {{.Size}}'
+          docker image ls recording4-api:ci --format '{{.Repository}}:{{.Tag}} {{.Size}}'
           docker run --rm --entrypoint python recording4-worker:ci \
             -c "import torch; print('torch', torch.__version__)"
