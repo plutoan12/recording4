@@ -182,3 +182,12 @@ R8은 이번 세션에서 developers.google.com 접근이 네트워크 정책으
 - 로그인 자동 시작은 실제 kickstart 실행 종료 코드 0 확인. 백그라운드 Docker 자격증명 도우미 대기를 피하도록 프로젝트 전용 공개 이미지 클라이언트 설정을 사용하며, 사용자 Docker 인증 설정은 보존함.
 - 실행 위치 `/Users/an-youwon/Projects/recording4`, 관리화면 http://localhost:18444, 비공개 로그인 파일 `.runtime/LOGIN.txt`. Mac 로그인 시 시작하며 Mac이 꺼지거나 잠자면 처리할 수 없음.
 - 다음 설정: 공급자 키·음성·월/건별 예산, YouTube OAuth, 필요시 도메인/HTTPS·외부 알림·기기 외부 백업·보관/삭제 정책. 유료 처리와 YouTube 업로드는 계속 비활성화. 실제 공급자/YouTube 전체 검증은 이 설정 후 수행해야 함.
+
+
+## 무료 모드·YouTube 계정 연결 (2026-09-18)
+
+- 사용자가 무료 기능만 사용하도록 선택했으므로 유료 번역·더빙·립싱크는 비활성화 유지. 원어 음성, 로컬 STT, 숏폼·자막·렌더 기능 사용 가능.
+- 사용자 승인 후 YouTube Data API 활성화, recording4 OAuth 앱 및 Mac 데스크톱 클라이언트 생성, 본인 테스트 사용자 등록과 명시적 OAuth 동의 완료.
+- 인증 JSON과 토큰은 Git에서 제외되는 `.runtime/provider-secrets`에 권한 0600으로 저장. 실행 토큰은 Docker `provider_secrets` 볼륨에 UID 10001/0600으로 설치하고 워커에 읽기 전용 마운트. 서버 환경에 인증 파일 경로·채널 ID 적용 및 YouTube 실행 활성화. 비밀·개인 계정 식별자는 이 기록에 포함하지 않음.
+- 실제 워커에서 토큰 갱신 및 연결 채널 조회 성공. 전체 컨테이너 Healthy. 실제 영상 업로드·예약 공개는 수행하지 않았으며 결과물별 검수·승인을 유지함.
+- OAuth 앱은 테스트 상태이므로 YouTube 범위의 refresh token은 7일 후 만료됨. 장기 무인 운영에는 Google 앱 게시 준비와 재인증이 필요. [Google 토큰 만료 문서](https://developers.google.com/identity/protocols/oauth2#expiration). 현재 연결을 영구 인증으로 오인하지 말 것.
