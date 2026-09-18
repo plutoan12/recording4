@@ -32,6 +32,23 @@ def squeeze(text: str) -> str:
     return _SPACE.sub("", text)
 
 
+def onsets_from_timestamps(stamps: list, rate: int = 16000) -> list[float]:
+    """VAD가 준 발화 구간에서 시작 시각만 초 단위로 뽑습니다.
+
+    공급자 버전에 따라 표본 번호를 주기도 하고 초를 주기도 합니다. 값이
+    너무 크면 표본 번호로 보고 나눕니다. 형식이 다르면 건너뜁니다.
+    """
+    found: list[float] = []
+    for stamp in stamps:
+        value = stamp.get("start") if isinstance(stamp, dict) else getattr(stamp, "start", None)
+        if value is None:
+            continue
+        number = float(value)
+        # 초 단위로 1000을 넘는 발화 시작은 16분이 넘는 지점입니다. 표본으로 봅니다.
+        found.append(number / rate if number > 1000 else number)
+    return sorted(set(found))
+
+
 def snap_starts(cues: list[Cue], onsets: list[float], *, window: float = 2.0) -> list[Cue]:
     """자막 시작을 실제 발화가 시작되는 지점으로 맞춥니다.
 

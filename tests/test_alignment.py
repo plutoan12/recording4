@@ -102,3 +102,29 @@ def test_no_onsets_changes_nothing() -> None:
 
     cues = [Cue(start=3.0, end=4.0, text="자막")]
     assert snap_starts(cues, []) == cues
+
+
+def test_onsets_from_timestamps_accepts_samples_and_seconds() -> None:
+    """VAD 버전에 따라 표본 번호를 주기도 하고 초를 주기도 합니다."""
+    from pipeline.alignment import onsets_from_timestamps
+
+    # 표본 번호(16kHz): 16000표본 = 1초
+    assert onsets_from_timestamps([{"start": 16000, "end": 32000}]) == [1.0]
+    # 초 단위로 주는 경우
+    assert onsets_from_timestamps([{"start": 1.0, "end": 2.0}]) == [1.0]
+
+
+def test_onsets_from_timestamps_reads_objects_and_skips_junk() -> None:
+    from types import SimpleNamespace
+
+    from pipeline.alignment import onsets_from_timestamps
+
+    stamps = [SimpleNamespace(start=32000, end=48000), {"end": 5}, {"start": 16000}]
+    assert onsets_from_timestamps(stamps) == [1.0, 2.0]
+
+
+def test_onsets_from_timestamps_sorts_and_deduplicates() -> None:
+    from pipeline.alignment import onsets_from_timestamps
+
+    stamps = [{"start": 32000}, {"start": 16000}, {"start": 32000}]
+    assert onsets_from_timestamps(stamps) == [1.0, 2.0]

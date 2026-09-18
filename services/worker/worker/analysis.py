@@ -6,7 +6,12 @@ import re
 import subprocess
 from pathlib import Path
 
-from pipeline.alignment import WordTiming, cues_for_lines, snap_starts
+from pipeline.alignment import (
+    WordTiming,
+    cues_for_lines,
+    onsets_from_timestamps,
+    snap_starts,
+)
 from pipeline.editing import Cue
 from pipeline.speakers import SpeakerTurn
 from worker.rendering import ffmpeg_binary
@@ -84,11 +89,32 @@ _SILENCE_END = re.compile(r"silence_end:\s*(-?[\d.]+)")
 _SILENCE_START = re.compile(r"silence_start:\s*(-?[\d.]+)")
 
 
-def speech_onsets(source: Path, *, noise: str = "-35dB", minimum: float = 0.25) -> list[float]:
-    """말이 시작되는 시각 목록. FFmpeg가 없거나 실패하면 빈 목록입니다.
+def vad_onsets(source: Path) -> list[float]:
+    """Silero VAD로 말이 시작되는 시각을 찾습니다. 못 쓰면 빈 목록입니다.
 
-    무음을 찾아 그 사이를 발화로 봅니다. 파일 맨 앞이 무음이 아니면 0초도
-    발화 시작입니다. 이 값은 자막 시작을 다듬는 데만 씁니다.
+    faster-whisper에 들어 있는 VAD라 새 의존성이 없습니다. 실제 녹음은
+    배경 잡음이 있어서 무음 감지(FFmpeg silencedetect)로는 발화 구간을
+    찾지 못합니다(측정: 사람 목소리에서 자막이 1.57초 늦게 시작). VAD는
+    잡음이 있어도 사람 목소리를 찾습니다.
+    """
+    try:
+        from faster_whisper.audio import decode_audio
+        from faster_whisper.vad import get_speech_timestamps
+    except ImportError:
+        return []
+    try:
+        audio = decode_audio(str(source), sampling_rate=16000)
+        stamps = get_speech_timestamps(audio)
+    except Exception:  # noqa: BLE001 - 다듬기 실패가 정렬을 막지 않습니다.
+        return []
+    return onsets_from_timestamps(stamps)
+
+
+def silence_onsets(source: Path, *, noise: str = "-35dB", minimum: float = 0.25) -> list[float]:
+    """무음 사이를 발화로 보고 시작 시각을 찾습니다. VAD를 못 쓸 때의 대안입니다.
+
+    디지털 무음이 또렷한 음성에서만 믿을 만합니다. FFmpeg가 없거나 실패하면
+    빈 목록입니다.
     """
     try:
         binary = ffmpeg_binary()
@@ -119,6 +145,12 @@ def speech_onsets(source: Path, *, noise: str = "-35dB", minimum: float = 0.25) 
     onsets = [] if starts and starts[0] <= 0.01 else [0.0]
     onsets.extend(ends)
     return sorted(set(onsets))
+
+
+def speech_onsets(source: Path) -> list[float]:
+    """말이 시작되는 시각 목록. VAD를 먼저 쓰고 안 되면 무음 감지로 내려갑니다."""
+    found = vad_onsets(source)
+    return found if found else silence_onsets(source)
 
 
 def diarize(
