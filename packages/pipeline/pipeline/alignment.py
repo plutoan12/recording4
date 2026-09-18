@@ -32,6 +32,33 @@ def squeeze(text: str) -> str:
     return _SPACE.sub("", text)
 
 
+def snap_starts(cues: list[Cue], onsets: list[float], *, window: float = 2.0) -> list[Cue]:
+    """자막 시작을 실제 발화가 시작되는 지점으로 맞춥니다.
+
+    정렬기의 단어 시각은 무음 구간 안쪽으로 당겨지기도 합니다(측정: 마지막
+    문장이 1.73초 이르게 시작). 그러면 아무도 말하지 않는데 자막이 먼저
+    뜹니다. 가까운 발화 시작이 `window` 안에 있으면 거기에 맞춥니다.
+
+    옮겨도 되는 경우만 옮깁니다. 앞 자막을 침범하거나 자막이 사라질 만큼
+    뒤로 가면 그대로 둡니다. 멀리 있는 발화 시작에는 손대지 않습니다.
+    """
+    if not onsets:
+        return cues
+    ordered = sorted(onsets)
+    result: list[Cue] = []
+    previous_end = 0.0
+    for cue in cues:
+        onset = min(ordered, key=lambda value: abs(value - cue.start))
+        moved = (
+            onset
+            if abs(onset - cue.start) <= window and previous_end <= onset < cue.end
+            else cue.start
+        )
+        result.append(cue if moved == cue.start else cue.model_copy(update={"start": moved}))
+        previous_end = cue.end
+    return result
+
+
 def cues_for_lines(lines: list[str], words: list[WordTiming]) -> list[Cue] | None:
     """대본의 줄마다 자막 하나를 만듭니다. 맞출 수 없으면 None입니다.
 

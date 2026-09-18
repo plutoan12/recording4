@@ -58,3 +58,47 @@ def test_zero_length_cue_gives_up() -> None:
 def test_empty_input_gives_up() -> None:
     assert cues_for_lines([], words((0.0, 1.0, "가"))) is None
     assert cues_for_lines(["가"], []) is None
+
+
+def test_start_snaps_to_the_nearest_speech_onset() -> None:
+    """무음에서 자막이 먼저 뜨지 않게 발화 시작으로 맞춥니다."""
+    from pipeline.alignment import snap_starts
+    from pipeline.editing import Cue
+
+    cues = [Cue(start=10.5, end=16.5, text="마지막 문장입니다")]
+    assert [c.start for c in snap_starts(cues, [1.0, 6.45, 12.23])] == [12.23]
+
+
+def test_far_onsets_are_left_alone() -> None:
+    """멀리 있는 발화 시작에는 손대지 않습니다. 잘못 당기면 더 나쁩니다."""
+    from pipeline.alignment import snap_starts
+    from pipeline.editing import Cue
+
+    cues = [Cue(start=10.5, end=20.0, text="문장")]
+    assert [c.start for c in snap_starts(cues, [1.0, 18.0])] == [10.5]
+
+
+def test_snap_never_overlaps_the_previous_cue() -> None:
+    from pipeline.alignment import snap_starts
+    from pipeline.editing import Cue
+
+    cues = [Cue(start=1.0, end=5.0, text="첫째"), Cue(start=5.2, end=9.0, text="둘째")]
+    # 4.0은 앞 자막이 아직 끝나지 않은 시점이라 옮기지 않습니다.
+    assert [c.start for c in snap_starts(cues, [1.0, 4.0])] == [1.0, 5.2]
+
+
+def test_snap_never_makes_a_cue_disappear() -> None:
+    from pipeline.alignment import snap_starts
+    from pipeline.editing import Cue
+
+    cues = [Cue(start=3.0, end=4.0, text="짧은 자막")]
+    # 4.5는 자막 끝을 넘어서므로 옮기지 않습니다.
+    assert [c.start for c in snap_starts(cues, [4.5])] == [3.0]
+
+
+def test_no_onsets_changes_nothing() -> None:
+    from pipeline.alignment import snap_starts
+    from pipeline.editing import Cue
+
+    cues = [Cue(start=3.0, end=4.0, text="자막")]
+    assert snap_starts(cues, []) == cues

@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import re
+import subprocess
 from pathlib import Path
 
-from pipeline.alignment import WordTiming, cues_for_lines
+from pipeline.alignment import WordTiming, cues_for_lines, snap_starts
 from pipeline.editing import Cue
 from pipeline.speakers import SpeakerTurn
+from worker.rendering import ffmpeg_binary
 
 
 class MissingDependency(RuntimeError):
@@ -70,9 +73,52 @@ def align_text(
         for s in result.segments
         if s.text.strip() and s.end > s.start
     ]
+    # 단어 시각이 무음 안쪽으로 당겨지는 경우가 있어 발화 시작에 맞춥니다.
+    cues = snap_starts(cues, speech_onsets(source))
     if not cues:
         raise RuntimeError("대본을 오디오에 맞추지 못했습니다. 언어와 음성을 확인하세요.")
     return cues
+
+
+_SILENCE_END = re.compile(r"silence_end:\s*(-?[\d.]+)")
+_SILENCE_START = re.compile(r"silence_start:\s*(-?[\d.]+)")
+
+
+def speech_onsets(source: Path, *, noise: str = "-35dB", minimum: float = 0.25) -> list[float]:
+    """말이 시작되는 시각 목록. FFmpeg가 없거나 실패하면 빈 목록입니다.
+
+    무음을 찾아 그 사이를 발화로 봅니다. 파일 맨 앞이 무음이 아니면 0초도
+    발화 시작입니다. 이 값은 자막 시작을 다듬는 데만 씁니다.
+    """
+    try:
+        binary = ffmpeg_binary()
+    except Exception:  # noqa: BLE001 - FFmpeg가 없으면 다듬지 않고 넘어갑니다.
+        return []
+    try:
+        done = subprocess.run(
+            [
+                binary,
+                "-hide_banner",
+                "-nostats",
+                "-i",
+                str(source),
+                "-af",
+                f"silencedetect=noise={noise}:duration={minimum}",
+                "-f",
+                "null",
+                "-",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=600,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return []
+    starts = [float(v) for v in _SILENCE_START.findall(done.stderr)]
+    ends = [float(v) for v in _SILENCE_END.findall(done.stderr)]
+    onsets = [] if starts and starts[0] <= 0.01 else [0.0]
+    onsets.extend(ends)
+    return sorted(set(onsets))
 
 
 def diarize(
