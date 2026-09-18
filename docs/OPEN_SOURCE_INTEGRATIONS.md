@@ -16,7 +16,7 @@
 | Google API Python Client 2.160.0 | YouTube 이어 올리기·공개 예약 어댑터 | [GitHub](https://github.com/googleapis/google-api-python-client), Apache-2.0 |
 | google-auth-oauthlib 1.2.1 | 호출자가 YouTube OAuth 인증 클라이언트를 준비할 때 사용 | [GitHub](https://github.com/googleapis/google-auth-library-python-oauthlib), Apache-2.0 |
 
-### 자막 정밀화 (`[subtitles]`, 설치만 완료·미연결)
+### 자막 정밀화 (`[subtitles]`)
 
 | 프로젝트 | 도입 목적 | 라이선스 / 출처 |
 |---|---|---|
@@ -24,7 +24,10 @@
 | WhisperX 3.8.6 | wav2vec2 강제 정렬 기반 단어 타이밍, 화자 분리 | [GitHub](https://github.com/m-bain/whisperx), BSD-2-Clause |
 | kss 6.0.6 | 한국어 문장 분리. 자막 줄바꿈을 어절·문장 경계에 맞춤 | [GitHub](https://github.com/hyunwoongko/kss), BSD-3-Clause |
 
-**아직 코드에 연결하지 않았습니다.** 의존성과 라이선스만 등록했으며 `analysis.py`·`rendering.py`는 그대로입니다.
+연결한 범위는 다음과 같습니다. **WhisperX는 아직 코드에서 쓰지 않습니다**(화자 분리용으로 등록만 했습니다).
+
+- stable-ts → `worker/analysis.py:align_text()`. `POST /source-assets/{id}/align`이 타이밍 없는 대본을 원본 음성에 맞춰 새 대본 버전을 만듭니다. 전사가 아니라 정렬이라 글자는 그대로 둡니다.
+- kss → `pipeline/subtitles.py:sentences()`. 자막을 나눌 때 문장 경계를 먼저 찾습니다. kss가 없으면 구두점 기준으로 내려갑니다.
 
 검토한 뒤 채택하지 않은 후보도 남깁니다. [aeneas](https://github.com/readbeyond/aeneas)는 **AGPL v3**이라 네트워크 서비스 제공 시 서버 소스 공개 의무가 생깁니다. [ctc-forced-aligner](https://github.com/MahmoudAshraf97/ctc-forced-aligner)는 코드가 BSD이나 **기본 모델이 CC-BY-NC 4.0(비상업)** 입니다. 두 경우 모두 이 저장소의 사용 형태와 맞지 않아 제외했습니다.
 

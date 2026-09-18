@@ -14,9 +14,10 @@ from adminapi.db import get_session_factory
 from adminapi.models import Artifact, MediaTask, SourceAsset, TranscriptSegment, utcnow
 from adminapi.storage import get_storage
 from pipeline.editing import EditSpec
-from worker.analysis import detect_scenes, transcribe
+from worker.analysis import MissingDependency, align_text, detect_scenes, transcribe
 from worker.celery_app import celery_app
 from worker.rendering import render_clip
+from worker.subtitle_rules import rules_from_settings
 
 
 @celery_app.task(name="worker.media_tasks.run_media", soft_time_limit=3500, time_limit=3600)
@@ -44,9 +45,16 @@ def run_media(task_id: str) -> dict:
             storage.download_file(source_key, source)
             result = {}
             checksum = None
+            settings = get_settings()
+            cues = []
             if kind == "render":
                 output = directory / "clip.mp4"
-                render_clip(source, output, EditSpec.model_validate(spec))
+                render_clip(
+                    source,
+                    output,
+                    EditSpec.model_validate(spec),
+                    rules=rules_from_settings(settings),
+                )
                 with output.open("rb") as stream:
                     checksum = hashlib.file_digest(stream, "sha256").hexdigest()
                 output_key = f"renders/{task_id}/{attempt}.mp4"
@@ -54,8 +62,17 @@ def run_media(task_id: str) -> dict:
                 result = {"storage_key": output_key}
             elif kind == "scenes":
                 result = {"scenes": detect_scenes(source)}
+            elif kind == "align":
+                # 전사가 아니라 정렬입니다. 대본 글자는 그대로 두고 시각만 찾습니다.
+                cues = align_text(
+                    source,
+                    spec["text"],
+                    model=settings.whisper_model,
+                    language=spec.get("language"),
+                    device=settings.whisper_device,
+                )
+                result = {"cues": [c.model_dump() for c in cues]}
             else:
-                settings = get_settings()
                 cues = transcribe(
                     source,
                     model=settings.whisper_model,
@@ -81,7 +98,7 @@ def run_media(task_id: str) -> dict:
                     session.add(artifact)
                     session.flush()
                     result["artifact_id"] = str(artifact.id)
-                elif kind == "transcribe":
+                elif kind in ("transcribe", "align"):
                     # Serialize transcript imports and STT completion on the source row.
                     session.scalar(
                         select(SourceAsset)
@@ -116,7 +133,12 @@ def run_media(task_id: str) -> dict:
             if task and task.attempt == attempt and task.state == "running":
                 task.state = "failed"
                 # Exceptions from SDKs can contain credentials/URLs. Expose type only.
-                task.error = f"{type(exc).__name__}: 처리 실패. 워커 설정과 입력을 확인하세요."
+                # 설치 안내는 저희가 쓴 고정 문구라 그대로 보여 줍니다.
+                task.error = (
+                    str(exc)
+                    if isinstance(exc, MissingDependency)
+                    else f"{type(exc).__name__}: 처리 실패. 워커 설정과 입력을 확인하세요."
+                )
                 task.finished_at = utcnow()
                 session.commit()
         return {"status": "failed"}

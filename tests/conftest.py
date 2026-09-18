@@ -91,6 +91,7 @@ class FakeStorage:
 
     def __init__(self) -> None:
         self.objects: dict[str, FakeObject] = {}
+        self.contents: dict[str, bytes] = {}
 
     def presigned_put_url(self, key: str, ttl_seconds: int) -> str:
         return f"https://storage.test/put/{key}?ttl={ttl_seconds}"
@@ -103,6 +104,14 @@ class FakeStorage:
 
     def put(self, key: str, byte_size: int, checksum: str | None = "fake-checksum") -> None:
         self.objects[key] = FakeObject(byte_size=byte_size, checksum=checksum)
+
+    def download_file(self, key: str, destination) -> None:  # noqa: ANN001
+        """워커가 내려받는 경로. 내용은 검사하지 않는 테스트용 자리표시자입니다."""
+        destination.write_bytes(self.contents.get(key, b"fake-media"))
+
+    def upload_file(self, key: str, source, content_type: str) -> None:  # noqa: ANN001
+        self.contents[key] = source.read_bytes()
+        self.objects[key] = FakeObject(byte_size=len(self.contents[key]))
 
 
 @pytest.fixture

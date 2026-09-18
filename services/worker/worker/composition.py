@@ -10,6 +10,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from pipeline.editing import Cue, EditSpec
+from pipeline.subtitles import DEFAULT_RULES, SubtitleRules
 from worker.rendering import ffmpeg_binary, video_filter, write_subtitles
 
 RATE = 48000
@@ -137,6 +138,7 @@ def render_final(
     clip: EditSpec | None = None,
     width: int = 1920,
     height: int = 1080,
+    rules: SubtitleRules = DEFAULT_RULES,
 ) -> None:
     with tempfile.TemporaryDirectory(prefix="r4-final-") as directory:
         temp = Path(directory)
@@ -154,7 +156,7 @@ def render_final(
             title=clip.title if clip else "",
             font_size=clip.font_size if clip else max(20, height // 24),
         )
-        write_subtitles(temp / "captions.ass", captions)
+        write_subtitles(temp / "captions.ass", captions, rules)
         filters = (
             video_filter(clip)
             if clip
