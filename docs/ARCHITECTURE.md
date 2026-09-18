@@ -35,7 +35,7 @@ GitHub Actions는 배포와 작업 요청을 담당합니다. 실제 작업 실�
 3. 오디오를 추출하고 STT를 수행합니다. 문장별 시간과 지원되는 경우 화자를 기록합니다.
 4. 문맥과 용어집을 사용해 번역하고 관리자가 수정할 수 있도록 저장합니다.
 5. 문장별 음성을 만들고 실제 길이를 측정합니다. 허용 범위 안에서 길이를 조정하고 차이가 큰 구간은 번역 수정·재생성 대상으로 표시합니다.
-6. 배경음 트랙을 합성합니다. 별도 트랙이 없으면 음원 분리 품질 검증이 필요합니다. 원음 전체를 그대로 섞어 원래 대사가 중복되지 않도록 합니다.
+6. 배경음 트랙을 합성합니다. 별도 트랙이 없으면 음원 분리 품질 검증이 필요합니다. 원음 전체를 그대로 섞지 않습니다. 원래 대사가 더빙 음성과 중복되지 않도록 대사를 제거한 배경음만 사용합니다.
 7. 선택적으로 립싱크를 수행한 뒤 최종 음성·영상·자막을 합성합니다. 자막 시간은 최종 음성 타이밍에 맞춥니다.
 8. 결과물을 검수하고 정확한 버전을 승인합니다.
 9. 승인된 파일을 비공개 업로드하고 YouTube 처리 상태를 확인한 뒤 공개 예약을 설정·확인합니다.
@@ -47,18 +47,37 @@ GitHub Actions는 배포와 작업 요청을 담당합니다. 실제 작업 실�
 | source_assets | 파일 키, 체크섬, 길이, 해상도, 원본 언어 |
 | jobs | 원본 ID, 대상 언어, 설정 버전, 현재 단계, 상태 |
 | stage_runs | 단계, 입력 해시, 시도 번호, 공급자 작업 ID, 시작·종료, 오류, 비용 |
-| segments | 화자, 시작·종료, 원문, 번역문, 편집 버전 |
+| transcript_segments | 원본 ID, 화자, 시작·종료, 원문, 생성한 STT 단계 실행 ID |
+| translated_segments | 작업 ID, 원문 세그먼트 ID, 번역문, 편집 버전, 더빙 음성 키 |
 | artifacts | 작업 ID, 종류, 버전, 저장소 키, 체크섬, 생성 설정 |
 | approvals | 결과물 ID, 승인자, 승인 시각, 승인 대상 메타데이터 버전 |
 | publications | 승인 ID, 채널 ID, 업로드 세션, YouTube 영상 ID, 예약 UTC, 게시 상태 |
 
-테이블명과 API 경로는 구현 시 확정합니다. 대본이나 음성 변경은 후속 산출물을 새 버전으로 만들고 과거 승인과 분리합니다. 언어를 추가할 때는 동일 원본·STT를 재사용하고 별도 작업을 생성합니다.
+테이블명과 API 경로는 구현 시 확정합니다. 대본이나 음성 변경은 후속 산출물을 새 버전으로 만들고 과거 승인과 분리합니다.
+
+원문 세그먼트는 원본에, 번역 세그먼트는 작업에 소속시킵니다. 언어를 추가할 때는 동일 원본의 원문 세그먼트를 그대로 참조하고 번역 세그먼트만 새 작업으로 생성합니다. 원문을 언어별로 복제하지 않으므로 STT 재사용과 원문 수정의 단일 기준이 유지됩니다.
 
 ## 상태와 복구
 
-영상 제작 상태: `queued → processing → review_required → approved`.
+영상 제작 상태: `queued / processing / review_required / approved / rejected / failed / cancelled`.
 
-게시 상태: `pending → uploading → processing_on_youtube → scheduled → published`.
+게시 상태: `pending / uploading / processing_on_youtube / scheduled / published / failed / cancelled`.
+
+전이는 아래를 제안합니다.
+
+| 현재 상태 | 이벤트 | 다음 상태 |
+|---|---|---|
+| queued | 워커가 단계 실행을 시작 | processing |
+| processing | 제작 단계를 모두 완료 | review_required |
+| processing | 재시도 한도까지 실패 | failed |
+| processing | 관리자가 취소 | cancelled |
+| review_required | 승인 | approved |
+| review_required | 반려(사유 기록) | rejected |
+| rejected | 대본·설정 수정 후 재실행 | queued |
+| failed | 실패 단계부터 재실행 | processing |
+| approved | 승인 이후 수정으로 새 버전 생성 | review_required |
+
+게시는 승인된 버전에 대해 `pending`으로 시작하고, 업로드나 예약 설정이 확정적으로 실패하면 `failed`, 관리자가 예약을 취소하면 `cancelled`로 둡니다. 결과가 불명확한 상태는 실패로 단정하지 않고 기존 업로드 세션·영상 ID를 조회해 판정합니다.
 
 단계 실행은 `pending / running / succeeded / failed / cancelled`를 별도로 관리합니다. 실패 단계·마지막 성공 산출물·오류 이유를 보존합니다. 수정 요청은 새 버전을 생성하며 새 버전은 다시 `review_required`가 됩니다.
 
