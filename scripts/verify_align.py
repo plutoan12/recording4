@@ -7,11 +7,15 @@ make_speech_sample.py가 만든 음성은 문장 시작 시각을 우리가 알�
 
     python scripts/verify_align.py --directory /audio --model tiny
 
+대본은 한 줄에 한 문장씩 넣습니다. 줄바꿈이 있으면 정렬기가 그 줄을 자막
+경계로 유지하므로 문장별 시각을 곧바로 비교할 수 있습니다.
+
 판정 기준:
 
 - 글자가 하나도 바뀌지 않을 것. 정렬은 전사가 아닙니다.
 - 자막이 시간순이고 서로 겹치지 않을 것.
-- 문장 시작 시각 오차가 한계(기본 3초) 안일 것. 실제 오차는 항상 출력합니다.
+- 자막마다 시작 시각 오차가 한계(기본 1초) 안일 것. 실제 오차는 항상 출력합니다.
+- 문장 경계가 자막 경계로 남을 것. 여러 문장이 한 자막으로 합쳐지면 보고합니다.
 """
 
 from __future__ import annotations
@@ -37,12 +41,13 @@ def main() -> int:
     parser.add_argument("--directory", type=Path, required=True)
     parser.add_argument("--model", default="tiny")
     parser.add_argument("--language", default="ko")
-    parser.add_argument("--tolerance", type=float, default=3.0)
+    parser.add_argument("--tolerance", type=float, default=1.0)
     args = parser.parse_args()
 
     expected = json.loads((args.directory / "expected.json").read_text(encoding="utf-8"))
     sentences = expected["sentences"]
-    script = " ".join(item["text"] for item in sentences)
+    # 한 줄에 한 문장. 줄바꿈이 자막 경계가 됩니다.
+    script = "\n".join(item["text"] for item in sentences)
     audio = args.directory / "sample.wav"
 
     print(f"모델 {args.model}, 음성 {audio}, 문장 {len(sentences)}개")
@@ -61,32 +66,30 @@ def main() -> int:
             problems.append(f"자막이 겹칩니다: {earlier.end:.2f} 다음에 {later.start:.2f}")
             break
 
-    # 글자 위치 → 시각 지도를 만들어 문장 시작 시각을 찾습니다. 자막 나눔이
-    # 문장 경계와 달라도 비교할 수 있습니다.
-    spans: list[tuple[int, int, float]] = []
-    offset = 0
-    for cue in cues:
-        length = len(squeeze(cue.text))
-        spans.append((offset, offset + length, cue.start))
-        offset += length
-
-    print(f"\n{'문장':>4} {'실제 시작':>10} {'정렬 시작':>10} {'오차':>8}")
+    # 자막 시작마다 가장 가까운 실제 문장 시작과의 거리를 잽니다. 자막 수가
+    # 문장 수와 달라도(정렬기가 합치거나 더 나눠도) 비교할 수 있습니다.
+    starts = [item["start"] for item in sentences]
+    print(f"\n{'자막':>4} {'정렬 시작':>10} {'가장 가까운 실제':>16} {'오차':>8}")
     worst = 0.0
-    cursor = 0
-    for index, item in enumerate(sentences, start=1):
-        measured = next((start for begin, end, start in spans if end > cursor >= begin), None)
-        if measured is None:
-            problems.append(f"{index}번 문장의 시각을 찾지 못했습니다.")
-            cursor += len(squeeze(item["text"]))
-            continue
-        gap = abs(measured - item["start"])
+    matched: set[float] = set()
+    for index, cue in enumerate(cues, start=1):
+        nearest = min(starts, key=lambda s: abs(s - cue.start))
+        gap = abs(nearest - cue.start)
         worst = max(worst, gap)
-        print(f"{index:>4} {item['start']:>9.2f}초 {measured:>9.2f}초 {gap:>7.2f}초")
-        cursor += len(squeeze(item["text"]))
+        if gap <= args.tolerance:
+            matched.add(nearest)
+        print(f"{index:>4} {cue.start:>9.2f}초 {nearest:>15.2f}초 {gap:>7.2f}초")
 
-    print(f"\n문장 시작 시각 최대 오차 {worst:.2f}초 (한계 {args.tolerance:.1f}초)")
+    print(f"\n자막 시작 시각 최대 오차 {worst:.2f}초 (한계 {args.tolerance:.1f}초)")
+    print(f"문장 경계 {len(matched)}/{len(sentences)}개를 자막 경계로 찾았습니다.")
     if worst > args.tolerance:
-        problems.append(f"문장 시작 오차 {worst:.2f}초가 한계를 넘습니다.")
+        problems.append(f"자막 시작 오차 {worst:.2f}초가 한계를 넘습니다.")
+    if len(matched) < len(sentences):
+        missing = [f"{s:.2f}초" for s in starts if s not in matched]
+        problems.append(
+            "문장 경계를 자막 경계로 남기지 못했습니다: " + ", ".join(missing) + ". "
+            "줄바꿈이 있는 대본인데도 합쳐졌다면 정렬기의 줄 유지 옵션을 확인하세요."
+        )
 
     if problems:
         print("\n문제:")

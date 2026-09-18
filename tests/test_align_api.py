@@ -176,3 +176,27 @@ def test_missing_dependency_message_reaches_the_operator(
     media_tasks.run_media.run(str(task.id))
     session.expire_all()
     assert "[subtitles]" in session.get(MediaTask, task.id).error
+
+
+def test_align_keeps_line_breaks_as_cue_boundaries() -> None:
+    """줄바꿈이 있는 대본은 그 줄을 자막 경계로 유지하도록 옵션을 켭니다."""
+    from worker.analysis import align_options
+
+    def with_option(audio, text, *, language=None, original_split=False):  # noqa: ANN001, ANN202
+        return None
+
+    def without_option(audio, text, *, language=None):  # noqa: ANN001, ANN202
+        return None
+
+    assert align_options(with_option, "첫 줄\n두 번째 줄") == {"original_split": True}
+    # 한 줄짜리 대본은 정렬기가 알아서 나눕니다.
+    assert align_options(with_option, "한 줄짜리 대본") == {}
+    # 옵션이 없는 버전에서도 정렬 자체는 그대로 진행합니다.
+    assert align_options(without_option, "첫 줄\n두 번째 줄") == {}
+
+
+def test_align_options_survive_unreadable_signatures() -> None:
+    """서명을 못 읽는 호출체여도 정렬을 막지 않습니다."""
+    from worker.analysis import align_options
+
+    assert align_options(print, "첫 줄\n두 번째 줄") == {}

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 from pathlib import Path
 
 from pipeline.editing import Cue
@@ -46,6 +47,9 @@ def align_text(
 
     전사가 아니라 정렬입니다. 글자는 입력한 그대로 두고 시간만 찾습니다.
     사용자가 손으로 고친 대본이나 타이밍 없이 받은 대본에 씁니다.
+
+    대본에 줄바꿈이 있으면 그 줄을 자막 경계로 유지합니다. 줄바꿈이 없으면
+    정렬기가 알아서 나누며, 이때 여러 문장이 한 자막으로 합쳐질 수 있습니다.
     """
     if not text.strip():
         raise ValueError("정렬할 대본이 비어 있습니다.")
@@ -58,7 +62,7 @@ def align_text(
     engine = stable_whisper.load_faster_whisper(
         model, device=device, compute_type="int8" if device == "cpu" else "float16"
     )
-    result = engine.align(str(source), text, language=language)
+    result = engine.align(str(source), text, language=language, **align_options(engine.align, text))
     cues = [
         Cue(start=s.start, end=s.end, text=s.text.strip())
         for s in result.segments
@@ -107,6 +111,21 @@ def diarize(
     if not turns:
         raise RuntimeError("화자를 찾지 못했습니다. 음성이 있는 원본인지 확인하세요.")
     return sorted(turns, key=lambda t: t.start)
+
+
+def align_options(align, text: str) -> dict:  # noqa: ANN001
+    """줄바꿈이 있는 대본은 그 줄을 자막 경계로 유지하도록 옵션을 고릅니다.
+
+    stable-ts 버전에 따라 옵션 이름이 없을 수 있어 서명을 보고 정합니다.
+    없으면 빈 설정으로 돌려 정렬 자체는 그대로 진행합니다.
+    """
+    if "\n" not in text.strip():
+        return {}
+    try:
+        parameters = inspect.signature(align).parameters
+    except (TypeError, ValueError):
+        return {}
+    return {"original_split": True} if "original_split" in parameters else {}
 
 
 def detect_scenes(source: Path, *, threshold: float = 27.0) -> list[dict]:
