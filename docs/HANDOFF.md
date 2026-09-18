@@ -453,3 +453,63 @@ SRT/VTT 내보내기는 이미 쓰는 pysubs2로 가능하므로 새 의존성�
 
 - 사람 목소리 검증은 네트워크로 공개 데이터셋을 받습니다. 이 작업 환경에서는 `huggingface.co`와 `openslr.org`가 모두 막혀 있어 **CI에서만 확인됩니다**. 데이터셋 주소나 응답 형식이 바뀌면 그 단계가 실패합니다.
 - 화자 분리의 정확도(경계 오차 등)는 재지 않습니다. 화자가 갈리는지만 봅니다.
+
+
+## 로컬(VS Code)에서 이어서 하기 (2026-09-18)
+
+클라우드 세션에서 하던 작업을 로컬로 옮깁니다. 코드와 상태는 모두 브랜치와 이 문서에 있습니다.
+
+```bash
+git clone https://github.com/plutoan12/recording4.git
+cd recording4
+git checkout claude/claude-md-design-review-v8qdz4   # PR #7
+pip install -e ".[dev]"
+pytest -q && ruff check . && ruff format --check .
+```
+
+### 로컬에서 하면 빨라지는 것
+
+클라우드 세션은 Docker 데몬이 없고 `huggingface.co`·`download.pytorch.org`·`openslr.org`가 모두 막혀 있어, 아래를 전부 CI로 보내고 한 번에 6분씩 기다렸습니다. 로컬에서는 바로 돌아갑니다.
+
+```bash
+# 워커 이미지 (4.66GB, 첫 빌드는 오래 걸립니다)
+docker build -f infra/Dockerfile.worker -t recording4-worker:local .
+
+# 자막이 세로 화면 여백 안에 들어가는지 실측
+docker run --rm -v "$PWD/scripts:/work:ro" --entrypoint python \
+  recording4-worker:local /work/measure_subtitles.py
+
+# 합성 음성으로 정렬 정확도 측정
+sudo apt-get install -y espeak-ng ffmpeg   # macOS: brew install espeak-ng ffmpeg
+python3 scripts/make_speech_sample.py --out /tmp/align
+docker run --rm -v /tmp/align:/audio -v "$PWD/scripts:/work:ro" \
+  --entrypoint python recording4-worker:local /work/verify_align.py \
+  --directory /audio --model small
+
+# 사람 목소리로 같은 측정 (공개 데이터셋을 내려받습니다)
+python3 scripts/fetch_korean_speech.py --out /tmp/human --count 3
+docker run --rm -v /tmp/human:/audio -v "$PWD/scripts:/work:ro" \
+  --entrypoint python recording4-worker:local /work/verify_align.py \
+  --directory /audio --model small
+```
+
+**`fetch_korean_speech.py`는 클라우드에서 한 번도 실행하지 못했습니다.** 네트워크가 막혀 CI에서만 처음 돌아갑니다. datasets-server 응답 형식이 가정과 다르면 여기서 실패하니, 로컬에서 먼저 돌려 보는 편이 빠릅니다.
+
+### 토큰이 있어야 되는 것
+
+화자 분리(pyannote)는 게이트 모델입니다. 환경을 옮겨도 토큰 없이는 못 돌립니다.
+
+1. https://huggingface.co/pyannote/speaker-diarization-3.1 약관 동의
+2. 같은 계정에서 읽기 토큰 발급
+3. 로컬은 `R4_HF_TOKEN`, CI는 저장소 시크릿 `HF_TOKEN`
+
+```bash
+python3 scripts/make_two_speaker_sample.py --out /tmp/two --human /tmp/human
+docker run --rm -v /tmp/two:/audio -v "$PWD/scripts:/work:ro" \
+  -e R4_HF_TOKEN --entrypoint python recording4-worker:local \
+  /work/verify_diarize.py --directory /audio --max-speakers 2
+```
+
+### 같은 브랜치를 두 곳에서 밀지 않기
+
+클라우드 세션이 PR #7을 감시하며 CI 실패를 고쳐 왔습니다. 로컬에서 같은 브랜치에 커밋한다면 한쪽만 푸시해야 충돌이 없습니다.
