@@ -25,6 +25,7 @@ from adminapi.outbox import enqueue
 from adminapi.storage import ObjectStorage, get_storage
 from pipeline.editing import Cue, EditSpec, suggest_clips
 from pipeline.states import JobState
+from pipeline.time import as_utc
 
 router = APIRouter(tags=["editing"])
 
@@ -219,7 +220,7 @@ def retry_task(task_id: uuid.UUID, user: CurrentUser, session: SessionDep):
     stale = (
         task.state == "running"
         and task.started_at
-        and (datetime.now(UTC) - task.started_at.replace(tzinfo=UTC)).total_seconds() > 7200
+        and (datetime.now(UTC) - as_utc(task.started_at)).total_seconds() > 7200
     )
     if task.state != "failed" and not stale:
         raise HTTPException(409, "실패하거나 2시간 이상 정체된 작업만 재시도할 수 있습니다.")

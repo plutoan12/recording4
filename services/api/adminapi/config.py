@@ -36,6 +36,9 @@ class Settings(BaseSettings):
     paid_processing_enabled: bool = False
     google_cloud_project: str | None = None
     elevenlabs_api_key: str | None = None
+    tts_model: str = "eleven_multilingual_v2"
+    tts_model_version: str | None = None
+    tts_voice_version: str | None = None
     sync_api_key: str | None = None
     translate_usd_per_1k_chars: Decimal | None = None
     tts_usd_per_1k_chars: Decimal | None = None

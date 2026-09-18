@@ -19,6 +19,7 @@ from worker import workflow_tasks as wf
 def setup_flow(client, auth_headers, session, user, monkeypatch):
     objects = {"source": b"source bytes"}
     storage = SimpleNamespace(
+        head=lambda key: object() if key in objects else None,
         download_file=lambda key, path: path.write_bytes(objects[key]),
         upload_file=lambda key, path, content_type: objects.update({key: path.read_bytes()}),
         presigned_get_url=lambda key, ttl: f"https://storage.test/{key}",
@@ -94,7 +95,7 @@ def test_budget_blocks_before_call_and_uncertain_call_needs_resolution(
         def __init__(self, *args, **kwargs):
             pass
 
-        def synthesize(self, *args):
+        def synthesize(self, *args, **kwargs):
             calls.append(1)
             raise RuntimeError("response lost")
 
@@ -147,7 +148,7 @@ def test_full_dub_stages_and_budget_settlement(
         def __init__(self, *args, **kwargs):
             pass
 
-        def synthesize(self, text, voice, output):
+        def synthesize(self, text, voice, output, **kwargs):
             output.write_bytes(b"voice")
 
     monkeypatch.setattr(wf, "ElevenLabsSpeech", Speech)
@@ -348,3 +349,146 @@ def test_real_dub_mix_composition_and_subtitles(tmp_path):
     assert final.stat().st_size > 1000
     with pytest.raises(TimingError):
         mix_speech([speech], [Cue(start=0, end=0.1, text="Too long")], 0.1, tmp_path / "bad.wav")
+
+
+def test_terminal_lipsync_can_be_reconciled_and_retried_without_redoing_tts(
+    setup_flow, client, auth_headers, session, monkeypatch
+):
+    from adminapi.services.budget import held_total
+
+    create, _ = setup_flow
+    settings = get_settings().model_copy(
+        update={
+            "paid_processing_enabled": True,
+            "sync_api_key": "test",
+            "lipsync_usd_per_second": Decimal("0.1"),
+        }
+    )
+    monkeypatch.setattr(wf, "get_settings", lambda: settings)
+    submitted = []
+    status = ["FAILED"]
+
+    class Sync:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def submit(self, *args):
+            submitted.append(args)
+            return f"remote-{len(submitted)}"
+
+        def status(self, remote):
+            return {"status": status[0]}
+
+    monkeypatch.setattr(wf, "SyncLipsync", Sync)
+    client.put("/workflow/monthly-budget", headers=auth_headers, json={"limit_usd": "10"})
+    jid = create(audio_mode="dub", lipsync=True, budget_usd="2", voice_id="voice")
+    job = session.get(Job, uuid.UUID(jid))
+    job.workflow_data = {
+        "cues": [{"start": 1, "end": 2, "text": "hello"}],
+        "translated": [{"start": 1, "end": 2, "text": "hello"}],
+        "voices": ["voice"],
+        "audio_key": "audio",
+        "base_key": "base",
+        "start": 0,
+        "duration": 10,
+        "target": "en",
+    }
+    session.commit()
+    assert wf.run_job(jid)["status"] == "blocked_or_failed"
+    detail = client.get(f"/jobs/{jid}/workflow", headers=auth_headers).json()
+    assert detail["stages"][0]["state"] == "failed"
+    assert detail["stages"][0]["uncertain"] is True
+    assert client.post(f"/jobs/{jid}/resume", headers=auth_headers).status_code == 409
+    sid = detail["stages"][0]["id"]
+    assert (
+        client.post(
+            f"/jobs/{jid}/stages/{sid}/resolve",
+            headers=auth_headers,
+            json={"outcome": "confirmed_no_charge", "note": "Provider confirmed no charge"},
+        ).status_code
+        == 200
+    )
+    session.expire_all()
+    assert all(held_total(session, b.id) == 0 for b in session.query(Budget))
+    status[0] = "PROCESSING"
+    assert client.post(f"/jobs/{jid}/resume", headers=auth_headers).status_code == 202
+    assert wf.run_job(jid)["status"] == "waiting"
+    assert len(submitted) == 2
+    session.expire_all()
+    assert session.get(Job, uuid.UUID(jid)).workflow_data["voices"] == ["voice"]
+    assert session.query(StageRun).filter_by(job_id=uuid.UUID(jid), stage="lipsync").count() == 2
+
+
+def test_explicit_parent_reuses_only_unchanged_voice_and_charges_only_changed_sentence(
+    setup_flow, client, auth_headers, session, monkeypatch
+):
+    create, objects = setup_flow
+    settings = get_settings().model_copy(
+        update={
+            "paid_processing_enabled": True,
+            "elevenlabs_api_key": "test",
+            "tts_usd_per_1k_chars": Decimal("1"),
+        }
+    )
+    monkeypatch.setattr(wf, "get_settings", lambda: settings)
+    calls = []
+
+    class Speech:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def synthesize(self, text, voice, output, **kwargs):
+            calls.append(text)
+            output.write_bytes(text.encode())
+
+    monkeypatch.setattr(wf, "ElevenLabsSpeech", Speech)
+    client.put("/workflow/monthly-budget", headers=auth_headers, json={"limit_usd": "10"})
+    cues = [{"start": 1, "end": 2, "text": "hello"}, {"start": 3, "end": 4, "text": "world"}]
+    parent = create(
+        audio_mode="dub", source_language="en", voice_id="voice", budget_usd="1", transcript=cues
+    )
+    for _ in range(4):
+        wf.run_job(parent)
+    assert calls == ["hello", "world"]
+    child = create(
+        audio_mode="dub",
+        source_language="en",
+        voice_id="voice",
+        budget_usd="1",
+        transcript=cues,
+        translated_cues=[cues[0], {**cues[1], "text": "changed"}],
+        reuse_from_job_id=parent,
+    )
+    results = [wf.run_job(child) for _ in range(4)]
+    assert results[2]["status"] == "reused"
+    assert calls == ["hello", "world", "changed"]
+    session.expire_all()
+    parent_job, child_job = session.get(Job, uuid.UUID(parent)), session.get(Job, uuid.UUID(child))
+    assert parent_job.workflow_data["voices"][0] == child_job.workflow_data["voices"][0]
+    assert parent_job.workflow_data["voices"][1] != child_job.workflow_data["voices"][1]
+    child_budget = session.query(Budget).filter_by(scope="job", scope_ref=child).one()
+    assert child_budget.spent_amount == Decimal("0.0070")
+    # Unknown provider revisions never enable implicit cross-job cache reuse.
+    independent = create(
+        audio_mode="dub", source_language="en", voice_id="voice", budget_usd="1", transcript=cues
+    )
+    for _ in range(3):
+        wf.run_job(independent)
+    assert calls[-1] == "hello" and len(calls) == 4
+
+
+def test_tts_hash_changes_for_voice_and_model_revision():
+    from pipeline.workflow import WorkflowOptions
+
+    data = {"translated": [{"text": "hello"}], "target": "en"}
+    settings = get_settings()
+    original = wf.tts_inputs(data, WorkflowOptions(voice_id="one"), settings).digest()
+    assert original != wf.tts_inputs(data, WorkflowOptions(voice_id="two"), settings).digest()
+    assert (
+        original
+        != wf.tts_inputs(
+            data,
+            WorkflowOptions(voice_id="one"),
+            settings.model_copy(update={"tts_model_version": "new-revision"}),
+        ).digest()
+    )
