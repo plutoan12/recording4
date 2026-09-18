@@ -63,9 +63,7 @@ def main() -> int:
         print(f"  {turn.start:>6.2f} ~ {turn.end:>6.2f}  {turn.speaker}")
     print(f"화자별 발화 시간: {speaker_totals(turns)}")
 
-    cues = [
-        Cue(start=item["start"], end=item["end"], text=item["text"]) for item in sentences
-    ]
+    cues = [Cue(start=item["start"], end=item["end"], text=item["text"]) for item in sentences]
     labels = assign_speakers(cues, turns)
 
     print(f"\n{'문장':>4} {'정답':>6} {'분리 결과':>12}")
