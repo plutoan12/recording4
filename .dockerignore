@@ -1,0 +1,13 @@
+.git
+.runtime
+.env*
+**/node_modules
+**/__pycache__
+**/.pytest_cache
+**/.ruff_cache
+**/.venv
+**/dist
+*.mp4
+*.mp3
+*.wav
+secrets

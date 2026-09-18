@@ -159,3 +159,26 @@ R8은 이번 세션에서 developers.google.com 접근이 네트워크 정책으
 - 로컬 검증: Python 146개 통과/1개 PostgreSQL 전용 skip, 실제 FFmpeg 합성·디코딩, SQLite 마이그레이션 왕복, ruff, 프런트엔드 타입·빌드, 브라우저 로그인→제작 요청→실제 워커 처리→검수 필요 표시 확인.
 - 실제 STT 추론·유료 공급자·OAuth·업로드·S3·Compose 전체 기동은 미검증. 모든 외부 공급자 테스트는 대역 사용. 자동 얼굴 추적·음원 분리·LLM 하이라이트 추천은 미구현.
 - 다음 담당자는 [CONNECTED_WORKFLOW.md](CONNECTED_WORKFLOW.md)를 먼저 읽고 서버별 인증/가격 상한/예산을 설정한 뒤 비공개 샘플을 검증할 것. 업로드 결과 불명확 상태를 임의 초기화하지 말 것.
+
+
+## Codex 후속: Mac 운영 자동화 (2026-09-18)
+
+- 사용자는 PR 검토·병합과 전체 운영 자동화를 요청한 뒤, 이 Mac에서 먼저 가동하고 유료 처리는 설정 후 시작하도록 선택함.
+- `infra/compose.runtime.yml`, Caddy 관리화면, `scripts/ops.py`와 `smoke.py`, 관리자/버킷 초기화, 자동 점검·만료 작업 재큐잉, DB·미디어 백업·복원 검증, 로그인 시 자동 시작을 추가함. 로컬 주소는 http://localhost:18444. 영구 경로는 `/Users/an-youwon/Projects/recording4`.
+- 실제 PostgreSQL·Redis·MinIO·FFmpeg 워커와 관리화면을 기동. 실제 S3 업로드→ffprobe 검사→큐→세로 렌더→다운로드/디코딩 성공. 무료 합성 내레이션으로 faster-whisper 모델 추론→자막 합성→검수 대기 성공.
+- 발견/수정: Docker Hub MinIO 이미지 다운로드 실패→공식 Quay 경로, 호스트 포트 충돌→전용 18444 포트, 워커 내부 원본 검사 URL 분리, ffprobe 오류의 서명 URL 노출 방지, STT 모델 캐시 권한 수정. 캐시 실패 작업의 재개 성공도 확인함.
+- DB 및 영상 백업 생성, 별도 임시 DB의 실제 복원·조회 검증 후 임시 DB만 삭제. 로그인 LaunchAgent `com.recording4.stack` 등록. 비밀은 `.runtime`에만 저장하고 Git/이미지에서 제외함.
+- 로컬 Python 151 통과/1 PostgreSQL 전용 skip. 실제 유료 번역·더빙·립싱크와 YouTube OAuth·업로드는 실행하지 않음. 실제 비용 한도·음성·계정 연결은 다음 설정 단계.
+- Claude 데스크톱의 기존 recording4 세션에 ff725de 기준 PR #4 독립 리뷰를 요청함. 리뷰 및 병합 결과는 후속 기록 참조.
+- 운영 안내: [LOCAL_OPERATIONS.md](LOCAL_OPERATIONS.md). 외부 HTTPS 도메인, 외부 알림 수신처, 기기 외부 백업과 보관/삭제 기간은 미설정. 원본·백업 자동 삭제는 하지 않음.
+
+
+## Codex·Claude 검토 및 운영 최종 검증 (2026-09-18)
+
+- Claude 데스크톱의 독립 리뷰에서 립싱크 종결 실패의 재개 불가, 타임존 변환, 수정 문장 TTS 재사용 누락을 확인했고 PR #4의 `7b4db34`에서 수정함. 상태 전이·예약 만료 관측·음원 보존/실제 비용 문서도 정정함. 후속 재검토는 요청했으나 Mac 화면 잠금으로 답변 확인 전이며, Claude의 최종 승인을 받았다고 간주하지 않음.
+- 로컬 Python 160 통과/2 PostgreSQL 전용 skip, ruff 및 관리화면 빌드 통과. PR #4의 정확한 수정 커밋에 대한 GitHub Python·관리화면 CI 모두 통과. 실제 PostgreSQL의 Asia/Seoul 시간도 UTC로 정상 변환 확인.
+- 수정 후 실제 내레이션 영상으로 업로드→원본 검사→로컬 STT→숏폼 렌더→검수 대기→다운로드/디코딩 재검증 성공. 유료 호출 0, YouTube 업로드 0.
+- 최종 점검: DB·Redis·S3·워커 정상, 실패/차단 작업·만료 실행 점유·outbox 오류 0. DB 백업 및 미디어 7개 스냅샷 생성, 별도 DB 복원 후 작업 3개 조회 성공.
+- 로그인 자동 시작은 실제 kickstart 실행 종료 코드 0 확인. 백그라운드 Docker 자격증명 도우미 대기를 피하도록 프로젝트 전용 공개 이미지 클라이언트 설정을 사용하며, 사용자 Docker 인증 설정은 보존함.
+- 실행 위치 `/Users/an-youwon/Projects/recording4`, 관리화면 http://localhost:18444, 비공개 로그인 파일 `.runtime/LOGIN.txt`. Mac 로그인 시 시작하며 Mac이 꺼지거나 잠자면 처리할 수 없음.
+- 다음 설정: 공급자 키·음성·월/건별 예산, YouTube OAuth, 필요시 도메인/HTTPS·외부 알림·기기 외부 백업·보관/삭제 정책. 유료 처리와 YouTube 업로드는 계속 비활성화. 실제 공급자/YouTube 전체 검증은 이 설정 후 수행해야 함.
