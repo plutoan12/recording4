@@ -86,3 +86,45 @@ jobs:
 
       - name: 빌드
         run: npm run build
+
+  images:
+    name: 워커 이미지 빌드
+    runs-on: ubuntu-latest
+    # 느린 잡이라 PR과 main에서만 돌립니다. 중간 브랜치 푸시마다 반복하지 않습니다.
+    if: github.event_name == 'pull_request' || github.ref == 'refs/heads/main'
+    # CPU 전용 PyTorch와 자막 의존성을 내려받으므로 오래 걸립니다.
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # 러너 기본 디스크로는 PyTorch 계열 설치가 빠듯합니다. 쓰지 않는 도구를 지웁니다.
+      - name: 디스크 확보
+        run: |
+          df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+            /usr/local/share/boost "$AGENT_TOOLSDIRECTORY" || true
+          df -h /
+
+      # 이 저장소에서 유일하게 CI가 검증하지 못하던 부분입니다. 워커 이미지는
+      # FFmpeg·글꼴·CPU PyTorch·자막 의존성을 설치하므로 설치 해결이 깨지면
+      # 배포 시점에야 드러납니다. 밀어 올리지 않고 빌드만 확인합니다.
+      - name: 워커 이미지 빌드
+        run: docker build -f infra/Dockerfile.worker -t recording4-worker:ci .
+
+      - name: 이미지 크기 확인
+        run: docker image ls recording4-worker:ci --format '{{.Repository}}:{{.Tag}} {{.Size}}'
+
+      # 설치 결과가 실제로 쓸 수 있는 상태인지 확인합니다. 모델은 내려받지 않습니다.
+      - name: 워커 의존성 임포트 확인
+        run: |
+          docker run --rm --entrypoint python recording4-worker:ci -c "
+          import torch, stable_whisper, whisperx, kss, pysubs2, faster_whisper
+          from worker.analysis import align_text
+          from pipeline.subtitles import apply_rules
+          assert '+cpu' in torch.__version__, torch.__version__
+          print('torch', torch.__version__, '/ 워커 모듈 임포트 ok')
+          "
+
+      - name: API 이미지 빌드
+        run: docker build -f infra/Dockerfile.api -t recording4-api:ci .

@@ -315,5 +315,5 @@ SRT/VTT 내보내기는 이미 쓰는 pysubs2로 가능하므로 새 의존성�
 
 - WhisperX는 여전히 미사용입니다. 화자 분리로 `voice_assignments`를 채우는 작업이 남아 있습니다.
 - 자막 기본값(줄 길이 20자·2줄·20 CPS)은 측정 근거가 없는 제안값입니다.
-- 워커 이미지에 `[subtitles]`와 CPU 전용 PyTorch를 추가했습니다. **이미지 빌드는 검증하지 못했습니다**(작업 환경에 Docker 데몬이 없고 `download.pytorch.org`가 차단됨). 배포 전에 `docker compose -f infra/docker-compose.yml build worker`로 확인해야 합니다.
+- 워커 이미지에 `[subtitles]`와 CPU 전용 PyTorch를 추가했습니다. 작업 환경에는 Docker 데몬이 없고 `download.pytorch.org`가 차단되어 빌드를 돌릴 수 없었으므로, CI에 **워커 이미지 빌드 잡**을 추가해 거기서 검증합니다. 잡은 이미지를 빌드하고 컨테이너 안에서 `torch.__version__`에 `+cpu`가 들어 있는지와 워커 모듈 임포트를 확인합니다. PR과 main에서만 돌아갑니다.
 - Dockerfile의 torch 고정값은 whisperx 요구 범위와 연동됩니다. whisperx를 올릴 때 함께 고치지 않으면 빌드가 실패합니다.
