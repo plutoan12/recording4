@@ -424,3 +424,32 @@ SRT/VTT 내보내기는 이미 쓰는 pysubs2로 가능하므로 새 의존성�
 
 - 합성 음성(espeak) 기준입니다. 사람 목소리에서의 정확도는 여전히 미검증입니다.
 - 화자 분리(pyannote) 실제 추론은 게이트 모델 토큰이 없어 미검증입니다.
+
+
+## 사람 목소리·실제 화자 분리 검증 연결 (2026-09-18)
+
+- 사용자 요청: 남은 두 한계(합성 음성 기준 정확도, pyannote 실추론 미검증)를 처리. 브랜치 `claude/claude-md-design-review-v8qdz4`(PR #7).
+- 담당 파일: `scripts/{speech_sample,fetch_korean_speech,make_speech_sample,make_two_speaker_sample,verify_diarize}.py`, `.github/workflows/ci.yml`, 문서.
+
+### 한 것
+
+- `speech_sample.py`로 음성 묶음 만드는 공통 도구를 분리했습니다. 합성 음성과 사람 목소리가 같은 형식(sample.wav + expected.json)을 만들어 같은 검증기가 읽습니다.
+- `fetch_korean_speech.py`: 공개 한국어 낭독 음성을 datasets-server에서 받아 검증용 음성을 만듭니다. CI가 합성 음성 검사에 이어 사람 목소리 검사를 한 번 더 돌립니다.
+- `make_two_speaker_sample.py`: 서로 다른 두 목소리를 번갈아 넣고 조각마다 정답 화자를 기록합니다. 사람 목소리 조각이 있으면 한쪽 화자로 씁니다.
+- `verify_diarize.py`: pyannote를 실제로 돌려 화자가 둘 이상 갈리는지, 정답 화자별로 결과가 한 표시로 몰리는지 확인합니다.
+- CI: 사람 목소리 검사는 `verify-align` 라벨로, 화자 분리 검사는 저장소 시크릿 `HF_TOKEN`으로 켜집니다. 단계 `if`에서는 `secrets` 컨텍스트를 못 쓰므로 잡 수준 env로 받아 `env.HF_TOKEN != ''`로 판정합니다.
+
+### 사용자 조치가 필요한 것
+
+**화자 분리 실검증은 `HF_TOKEN` 시크릿 없이는 돌지 않습니다.** 제가 대신 만들 수 없는 값입니다.
+
+1. https://huggingface.co/pyannote/speaker-diarization-3.1 에서 약관에 동의합니다.
+2. 같은 계정에서 읽기 토큰을 발급합니다.
+3. 저장소 Settings → Secrets and variables → Actions에 `HF_TOKEN`으로 넣습니다.
+
+시크릿이 없으면 이 단계는 건너뛰고 나머지는 그대로 돕니다.
+
+### 남은 한계
+
+- 사람 목소리 검증은 네트워크로 공개 데이터셋을 받습니다. 이 작업 환경에서는 `huggingface.co`와 `openslr.org`가 모두 막혀 있어 **CI에서만 확인됩니다**. 데이터셋 주소나 응답 형식이 바뀌면 그 단계가 실패합니다.
+- 화자 분리의 정확도(경계 오차 등)는 재지 않습니다. 화자가 갈리는지만 봅니다.

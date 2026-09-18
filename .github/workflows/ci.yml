@@ -95,6 +95,11 @@ jobs:
     # CPU 전용 PyTorch와 자막 의존성을 내려받으므로 오래 걸립니다.
     timeout-minutes: 45
 
+    # 단계 if에서는 secrets 컨텍스트를 쓸 수 없어 잡 수준 env로 받습니다.
+    # 시크릿이 없으면 빈 값이 되고, 그 값을 보고 화자 분리 검증을 건너뜁니다.
+    env:
+      HF_TOKEN: ${{ secrets.HF_TOKEN }}
+
     steps:
       - uses: actions/checkout@v4
 
@@ -153,6 +158,33 @@ jobs:
           docker run --rm -v /tmp/align-sample:/audio -v "$PWD/scripts:/work:ro" \
             --entrypoint python recording4-worker:ci /work/verify_align.py \
             --directory /audio --model small --no-diagnose
+
+      # 합성 음성만으로는 사람 목소리 정확도를 말할 수 없습니다. 공개 한국어
+      # 낭독 음성을 받아 같은 검사를 한 번 더 돌립니다. 받지 못하면 실패합니다.
+      # 건너뛴 것과 통과한 것은 구분해야 합니다.
+      - name: 정렬 품질 검증 (사람 목소리)
+        if: |
+          contains(github.event.pull_request.labels.*.name, 'verify-align') ||
+          contains(github.event.head_commit.message, '[verify-align]')
+        run: |
+          python3 scripts/fetch_korean_speech.py --out /tmp/human-sample --count 3
+          docker run --rm -v /tmp/human-sample:/audio -v "$PWD/scripts:/work:ro" \
+            --entrypoint python recording4-worker:ci /work/verify_align.py \
+            --directory /audio --model small --no-diagnose
+
+      # pyannote는 게이트 모델이라 토큰이 있어야 돌아갑니다. 저장소 시크릿에
+      # HF_TOKEN을 넣으면 이 단계가 켜집니다. 없으면 건너뜁니다.
+      - name: 화자 분리 검증
+        if: ${{ env.HF_TOKEN != '' }}
+        env:
+          R4_HF_TOKEN: ${{ env.HF_TOKEN }}
+        run: |
+          sudo apt-get update && sudo apt-get install -y espeak-ng ffmpeg
+          python3 scripts/make_two_speaker_sample.py --out /tmp/two-speaker \
+            --human /tmp/human-sample
+          docker run --rm -v /tmp/two-speaker:/audio -v "$PWD/scripts:/work:ro" \
+            -e R4_HF_TOKEN --entrypoint python recording4-worker:ci \
+            /work/verify_diarize.py --directory /audio --max-speakers 2
 
       # 자막 기본값이 실제 세로 화면에서 여백 안에 한 줄로 들어가는지 렌더해서 잽니다.
       # 폰트 메트릭 계산이 아니라 libass 렌더 결과를 FFmpeg cropdetect로 측정합니다.
