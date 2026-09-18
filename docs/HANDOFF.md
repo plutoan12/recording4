@@ -226,4 +226,4 @@ R8은 이번 세션에서 developers.google.com 접근이 네트워크 정책으
 - 해당 결과물 버전만 승인 API로 승인하고, 승인 ID·채널·SHA-256 검증 후 기존 resumable upload 어댑터로 실제 비공개 업로드 1회 성공. YouTube processed/succeeded, privacyStatus private, publishAt 없음 확인.
 - 현재 게시 API는 공개 예약 시각을 필수로 요구하므로 이번 비공개 검증은 독립 운영 스크립트로 수행함. DB Publication 행은 생성하지 않았으며 예약 워커 전체 경로를 검증했다고 간주하지 말 것. 중복 방지 체크포인트는 비공개 객체 저장소 ops/private-upload-test/ 아래에 보존함. 같은 결과물을 관리화면에서 새 게시 요청하면 별도 업로드가 될 수 있으므로 기존 영상의 예약 검증 시 이 체크포인트·영상 ID를 재사용할 것.
 - 영상 ID와 승인 ID는 로컬 .runtime/private-upload-report.json, 처리 상태는 .runtime/private-upload-status.json에 보관. 공개 저장소에는 계정별 영상 링크를 기록하지 않음.
-- 수동 DB 백업과 미디어 13개 스냅샷 완료. 공개 예약 방식은 사용자 선택 대기: 테스트 샘플 비공개 유지 후 실제 영상 예약 또는 샘플의 지정 시각 공개.
+- 수동 DB 백업과 미디어 13개 스냅샷 완료. 사용자가 테스트 샘플 비공개 유지·실제 영상으로 예약을 선택함. 실제 영상 경로, 공개 시각(한국시간), 대상 언어 입력 대기. 샘플에 공개 예약을 설정하지 말 것.
