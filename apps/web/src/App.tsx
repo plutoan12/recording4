@@ -13,6 +13,8 @@ import {
   uploadSource,
 } from './api'
 
+import { ClipEditor } from './ClipEditor'
+
 const REFRESH_MS = 5000
 
 export function App() {
@@ -173,6 +175,8 @@ function Dashboard({ onSignOut }: { onSignOut: () => void }) {
           )}
         </tbody>
       </table>
+
+      <ClipEditor assets={assets} />
 
       <h2>작업</h2>
       <table>

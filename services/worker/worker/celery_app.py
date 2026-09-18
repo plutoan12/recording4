@@ -14,6 +14,7 @@ settings = get_settings()
 
 celery_app = Celery("recording4", broker=settings.redis_url, backend=None)
 celery_app.conf.update(
+    imports=("worker.tasks", "worker.media_tasks"),
     # 늦은 확인. 워커가 죽으면 다른 워커가 다시 받습니다.
     task_acks_late=True,
     task_reject_on_worker_lost=True,
@@ -22,6 +23,7 @@ celery_app.conf.update(
     task_default_queue="default",
     task_routes={
         # CPU 합성과 업로드는 큐와 동시 실행 수를 분리합니다.
+        "worker.media_tasks.run_media": {"queue": "render"},
         "worker.tasks.render_*": {"queue": "render"},
         "worker.tasks.upload_*": {"queue": "upload"},
     },

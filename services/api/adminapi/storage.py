@@ -10,7 +10,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from functools import lru_cache
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 from typing import Protocol
 
 import boto3
@@ -34,6 +34,10 @@ class ObjectStorage(Protocol):
 
     def head(self, key: str) -> ObjectInfo | None: ...
 
+    def download_file(self, key: str, destination: Path) -> None: ...
+
+    def upload_file(self, key: str, source: Path, content_type: str) -> None: ...
+
 
 class S3Storage:
     def __init__(self, settings: Settings) -> None:
@@ -50,15 +54,37 @@ class S3Storage:
             ),
         )
 
+        # The browser cannot resolve Compose's internal minio hostname.
+        self._signer = (
+            self._client
+            if not settings.s3_public_endpoint_url
+            else boto3.client(
+                "s3",
+                region_name=settings.s3_region,
+                endpoint_url=settings.s3_public_endpoint_url,
+                aws_access_key_id=settings.s3_access_key_id,
+                aws_secret_access_key=settings.s3_secret_access_key,
+                config=Config(signature_version="s3v4", s3={"addressing_style": "path"}),
+            )
+        )
+
+    def download_file(self, key: str, destination: Path) -> None:
+        self._client.download_file(self._bucket, key, str(destination))
+
+    def upload_file(self, key: str, source: Path, content_type: str) -> None:
+        self._client.upload_file(
+            str(source), self._bucket, key, ExtraArgs={"ContentType": content_type}
+        )
+
     def presigned_put_url(self, key: str, ttl_seconds: int) -> str:
-        return self._client.generate_presigned_url(
+        return self._signer.generate_presigned_url(
             "put_object",
             Params={"Bucket": self._bucket, "Key": key},
             ExpiresIn=ttl_seconds,
         )
 
     def presigned_get_url(self, key: str, ttl_seconds: int) -> str:
-        return self._client.generate_presigned_url(
+        return self._signer.generate_presigned_url(
             "get_object",
             Params={"Bucket": self._bucket, "Key": key},
             ExpiresIn=ttl_seconds,

@@ -425,3 +425,28 @@ class OutboxMessage(Base, TimestampMixin):
     last_error: Mapped[str | None] = mapped_column(Text, default=None)
 
     __table_args__ = (Index("ix_outbox_unpublished", "published_at", "created_at"),)
+
+
+class MediaTask(Base, TimestampMixin):
+    """Durable local analysis/render request; settings snapshot cannot be edited."""
+
+    __tablename__ = "media_tasks"
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=new_id)
+    source_asset_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("source_assets.id"), index=True)
+    clip_edit_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("clip_edits.id"), default=None
+    )
+    kind: Mapped[str] = mapped_column(String(32))
+    state: Mapped[str] = mapped_column(String(16), default="pending")
+    settings: Mapped[dict] = mapped_column(JSON, default=dict)
+    result: Mapped[dict] = mapped_column(JSON, default=dict)
+    error: Mapped[str | None] = mapped_column(Text, default=None)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    attempt: Mapped[int] = mapped_column(Integer, default=1)
+    __table_args__ = (
+        CheckConstraint(
+            "state in ('pending','running','succeeded','failed')", name="ck_media_task_state"
+        ),
+        CheckConstraint("kind in ('render','transcribe','scenes')", name="ck_media_task_kind"),
+    )

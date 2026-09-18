@@ -27,6 +27,10 @@ class Settings(BaseSettings):
     s3_secret_access_key: str | None = "minioadmin"
     s3_force_path_style: bool = True
 
+    s3_public_endpoint_url: str | None = None
+    whisper_model: str = "small"
+    whisper_device: str = "cpu"
+
     # 업로드 제한
     upload_url_ttl_seconds: int = 15 * 60
     max_source_bytes: int = 20 * 1024 * 1024 * 1024

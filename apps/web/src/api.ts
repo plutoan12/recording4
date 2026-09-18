@@ -55,7 +55,7 @@ export function setToken(token: string | null): void {
   else sessionStorage.setItem(TOKEN_KEY, token)
 }
 
-async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+export async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const token = getToken()
   const response = await fetch(`${BASE}${path}`, {
     ...init,
@@ -70,7 +70,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
       .json()
       .then((body: { detail?: string }) => body.detail)
       .catch(() => undefined)
-    throw new ApiError(response.status, detail ?? `요청이 실패했습니다 (${response.status})`)
+    throw new ApiError(response.status, (typeof detail === "string" ? detail : JSON.stringify(detail)) ?? `요청이 실패했습니다 (${response.status})`)
   }
   return response.status === 204 ? (undefined as T) : ((await response.json()) as T)
 }

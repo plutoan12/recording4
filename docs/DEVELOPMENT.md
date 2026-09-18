@@ -93,3 +93,7 @@ infra/                  Dockerfile과 Compose 구성
 - 비밀키, OAuth 토큰, 실제 영상, 개인정보가 담긴 로그를 커밋하지 않습니다.
 - `.env`는 커밋하지 않습니다. `.env.example`만 저장소에 둡니다.
 - 서명 URL은 API만 발급하고 로그에 남기지 않습니다.
+
+## 추가된 영상 기능
+
+[오픈소스 통합·실행 안내](OPEN_SOURCE_INTEGRATIONS.md)에 로컬 CLI, 선택 의존성, 미디어 작업 API, 실행 및 검증 한계를 정리했습니다. 기존 DB는 `alembic upgrade head`가 필요합니다. Docker 워커 이미지를 다시 빌드하면 FFmpeg·한국어 글꼴·분석 라이브러리가 설치됩니다.

@@ -7,7 +7,7 @@ import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from adminapi.routers import assets, auth, health, jobs
+from adminapi.routers import assets, auth, editing, health, jobs
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 
@@ -32,3 +32,5 @@ app.include_router(health.router)
 app.include_router(auth.router)
 app.include_router(assets.router)
 app.include_router(jobs.router)
+
+app.include_router(editing.router)
