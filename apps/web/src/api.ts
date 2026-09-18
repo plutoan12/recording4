@@ -112,3 +112,7 @@ export const createJob = (sourceAssetId: string, targetLanguage: string) =>
     method: 'POST',
     body: JSON.stringify({ source_asset_id: sourceAssetId, target_language: targetLanguage }),
   })
+
+export const importSourceLink = (url: string) => request<SourceAsset>('/source-assets/import-link', {
+  method: 'POST', body: JSON.stringify({url}),
+})

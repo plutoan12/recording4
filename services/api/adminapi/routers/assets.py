@@ -10,6 +10,7 @@ import uuid
 from pathlib import PurePosixPath
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 
 from adminapi.config import Settings, get_settings
@@ -24,6 +25,7 @@ from adminapi.schemas import (
     UploadResponse,
 )
 from adminapi.storage import ObjectStorage, build_source_key, get_storage
+from pipeline.source_links import youtube_url
 
 router = APIRouter(prefix="/source-assets", tags=["source-assets"])
 
@@ -69,6 +71,35 @@ def request_upload(
     )
 
 
+class LinkImportRequest(BaseModel):
+    url: str = Field(min_length=1, max_length=2048)
+
+
+@router.post("/import-link", response_model=SourceAssetResponse, status_code=202)
+def import_link(payload: LinkImportRequest, user: CurrentUser, session: SessionDep):
+    try:
+        url = youtube_url(payload.url)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from None
+    filename = f"youtube-{url.rsplit('=', 1)[1]}.mp4"
+    asset = SourceAsset(
+        storage_key=build_source_key(filename),
+        original_filename=filename,
+        byte_size=None,
+        created_by_id=user.id,
+        upload_state="awaiting_upload",
+    )
+    session.add(asset)
+    session.flush()
+    enqueue(
+        session,
+        topic="source_asset.import_link",
+        payload={"source_asset_id": str(asset.id), "url": url},
+        dedupe_key=f"source_asset.import_link:{asset.id}",
+    )
+    return asset
+
+
 @router.post("/{asset_id}/complete", response_model=SourceAssetResponse)
 def complete_upload(
     asset_id: uuid.UUID,
@@ -83,6 +114,8 @@ def complete_upload(
     확인한 뒤에만 uploaded로 둡니다. 형식과 길이는 워커가 ffprobe로 검사합니다.
     """
     asset = _get_asset(session, asset_id)
+    if asset.byte_size is None:
+        raise HTTPException(409, "링크 가져오기가 아직 완료되지 않았습니다.")
     info = storage.head(asset.storage_key)
     if info is None:
         raise HTTPException(

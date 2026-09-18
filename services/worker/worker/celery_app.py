@@ -16,6 +16,7 @@ celery_app = Celery("recording4", broker=settings.redis_url, backend=None)
 celery_app.conf.update(
     imports=(
         "worker.tasks",
+        "worker.link_import",
         "worker.media_tasks",
         "worker.workflow_tasks",
         "worker.publication_tasks",

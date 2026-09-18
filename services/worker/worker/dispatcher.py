@@ -17,6 +17,7 @@ from adminapi.outbox import unpublished
 logger = logging.getLogger(__name__)
 
 TOPIC_TASKS: dict[str, str] = {
+    "source_asset.import_link": "worker.link_import.import_source_link",
     "source_asset.verify": "worker.tasks.verify_source_asset",
     "media.run": "worker.media_tasks.run_media",
     "job.start": "worker.workflow_tasks.run_job",

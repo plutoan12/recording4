@@ -10,6 +10,8 @@ import {
   login,
   setToken,
   uploadSource,
+  importSourceLink,
+  request,
 } from './api'
 
 import { ClipEditor } from './ClipEditor'
@@ -68,6 +70,7 @@ function Dashboard({ onSignOut }: { onSignOut: () => void }) {
   const [workflowDraft, setWorkflowDraft] = useState<WorkflowDraft|null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [sourceLink, setSourceLink] = useState('')
 
   const refresh = useCallback(async () => {
     try {
@@ -91,6 +94,33 @@ function Dashboard({ onSignOut }: { onSignOut: () => void }) {
     const timer = setInterval(() => void refresh(), REFRESH_MS)
     return () => clearInterval(timer)
   }, [refresh])
+
+  async function onImport(event: React.FormEvent) {
+    event.preventDefault()
+    setBusy(true)
+    setError(null)
+    try {
+      await importSourceLink(sourceLink)
+      setSourceLink('')
+      await refresh()
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : '링크 등록에 실패했습니다.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function download(asset: SourceAsset) {
+    try {
+      const result = await request<{url: string}>(`/source-assets/${asset.id}/preview-url`)
+      const anchor = document.createElement('a')
+      anchor.href = result.url
+      anchor.download = asset.original_filename
+      anchor.click()
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : '다운로드에 실패했습니다.')
+    }
+  }
 
   async function onUpload(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0]
@@ -129,6 +159,15 @@ function Dashboard({ onSignOut }: { onSignOut: () => void }) {
       </p>
       {error !== null && <p className="error">{error}</p>}
 
+      <form onSubmit={onImport}>
+        <label> YouTube 링크로 가져오기
+          <input type="url" required maxLength={2048} value={sourceLink}
+            placeholder="https://youtu.be/..." onChange={e => setSourceLink(e.target.value)} />
+        </label>
+        <button type="submit" disabled={busy}>{busy ? '등록 중…' : '영상 가져오기'}</button>
+        <p>공개된 단일 영상·Shorts 링크를 지원합니다. 최대 720p·500MB이며,
+          다운로드 제한이 있는 영상은 원본 파일로 등록해 주세요.</p>
+      </form>
       <h2>원본</h2>
       <table>
         <thead>
@@ -145,13 +184,15 @@ function Dashboard({ onSignOut }: { onSignOut: () => void }) {
             <tr key={asset.id}>
               <td>{asset.original_filename}</td>
               <td className="state">
-                {asset.upload_state}
+                {asset.upload_state === 'awaiting_upload' ? '파일 업로드 / 링크 가져오기 대기' : asset.upload_state}
                 {asset.probe_error !== null && <div className="error">{asset.probe_error}</div>}
               </td>
               <td>{asset.duration_seconds ?? '-'}</td>
               <td>{asset.width !== null ? `${asset.width}×${asset.height}` : '-'}</td>
               <td>
-                아래 제작 양식에서 선택
+                {asset.upload_state === 'verified' && <button type="button"
+                  onClick={() => void download(asset)}>원본 다운로드</button>}
+                {' '}아래 제작 양식에서 선택
               </td>
             </tr>
           ))}
