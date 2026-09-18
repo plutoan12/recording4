@@ -87,6 +87,7 @@ R8은 이번 세션에서 developers.google.com 접근이 네트워크 정책으
 | 2026-09-18 | Claude | 설계 검토. 브랜치 `claude/claude-md-design-review-v8qdz4`. 담당 파일 docs/ARCHITECTURE.md, docs/TECH_DECISIONS.md, docs/HANDOFF.md | 문서 오류·불일치 3건 수정, 남은 문제 R1~R10 등록 |
 | 2026-09-18 | Claude | R1~R10 반영. 같은 브랜치. 담당 파일 docs/ARCHITECTURE.md, docs/IMPLEMENTATION_PLAN.md, docs/PROJECT_BRIEF.md, docs/TECH_DECISIONS.md, docs/HANDOFF.md | 설계 공백 10건을 문서에 반영 |
 | 2026-09-18 | Claude | 사용자 검토 지적 반영. PR https://github.com/plutoan12/recording4/pull/1 (main 병합) | 더빙 구간 겹침 조건, 영상 교체 시 공개 공백, 예산 예약·정산 3건 수정. 다음은 "확정이 필요한 값" 질의와 1단계 측정 |
+| 2026-09-18 | Claude | 2단계 기본 기반 구현. 브랜치 `claude/claude-md-design-review-v8qdz4`. 담당 파일은 아래 후속 기록 참조 | API·워커·관리화면·마이그레이션·CI 추가. 테스트 117개 통과. 다음은 실제 S3·FFmpeg 연동 확인과 3단계 |
 
 향후 기록에는 브랜치·커밋 또는 PR 링크, 변경 파일, 실제 검증 결과, 미해결 문제를 포함합니다. 완료되지 않은 항목은 완료로 표시하지 않습니다.
 
@@ -99,3 +100,40 @@ R8은 이번 세션에서 developers.google.com 접근이 네트워크 정책으
 - 현재 구현 없음. 문서 상대 링크·코드 펜스 및 git diff 공백 검사 수행. API·영상·브라우저 실행 검증은 수행하지 않음.
 - 동시 협업 변경 확인: Claude가 ff17e8c에서 구간 겹침 금지, 새 영상 실제 공개 후 기존 영상 전환, 동시 호출 예산 예약·정산을 문서에 반영함. 숏폼 변경을 최신 main 위에 통합함. 구현 검증은 아직 수행하지 않음.
 - 다음 작업: 사용자 요청에 따라 구현 단계 진행. 숏폼 기본 길이·개수·추천 모델은 구현 전 확인 또는 샘플 평가 대상.
+
+## Claude 후속: 2단계 기본 기반 구현 (2026-09-18)
+
+- 사용자 요청: 추가된 설계 내용을 반영해 필요한 코드를 구현. 범위는 사용자 선택으로 [구현 계획](IMPLEMENTATION_PLAN.md) 2단계(기본 기반)로 한정함.
+- 통합 기준: Codex의 숏폼 편집 문서가 병합된 main(6ab6156). 문서는 고치지 않고 코드만 추가함. 단 README·IMPLEMENTATION_PLAN·TECH_DECISIONS는 실제 상태를 반영해 갱신함.
+- 담당 파일: `pyproject.toml`, `alembic.ini`, `packages/pipeline/**`, `services/api/**`, `services/worker/**`, `migrations/**`, `tests/**`, `apps/web/**`, `infra/**`, `.github/workflows/ci.yml`, `docs/DEVELOPMENT.md`.
+
+### 구현한 것
+
+- 공유 도메인 패키지 `pipeline`: 상태 전이표(제작·게시·단계 실행), 입력 해시, 예산 계산 규칙. 설계 문서의 표를 그대로 옮겼습니다.
+- 관리 API: 로그인(JWT), 원본 업로드 URL 발급·완료 검증·미리보기 URL, 작업 생성·목록·조회·전이. 서명 URL은 API만 발급합니다.
+- 워커: ffprobe 기반 원본 검사 태스크, outbox 디스패처, Celery 설정(acks_late, prefetch 1, 큐 분리).
+- DB: 17개 테이블 마이그레이션. 롱폼 엔터티와 숏폼 엔터티(clip_candidates, clip_edits, clip_ranges)를 함께 만들었습니다. `render_jobs`는 stage_runs 통합 여부가 미확정이라 만들지 않았습니다.
+- 예산 예약·정산: 잔액 확인과 예약을 한 트랜잭션에서 수행하고 예산 행을 잠급니다.
+- 관리화면: 로그인, 원본 등록(저장소 직접 업로드), 원본·작업 목록, 작업 생성.
+- 개발 환경: Docker Compose(PostgreSQL, Redis, MinIO, API, 워커, 디스패처), CI(린트·포맷·마이그레이션 왕복·테스트·프런트엔드 빌드).
+
+### 구현 중 발견해 고친 것
+
+- 상태 컬럼을 `String`으로 두면 DB에서 읽을 때 평범한 문자열이 되어 전이표 조회가 TypeError로 깨졌습니다. `Enum(native_enum=False)`로 바꿨습니다.
+- 업로드 크기 불일치로 거부할 때 예외가 요청 트랜잭션을 롤백해 거부 사유가 저장되지 않았습니다. 사유를 먼저 확정한 뒤 예외를 던지도록 고쳤습니다.
+
+### 검증 결과
+
+- `pytest -q`: 117개 통과, 1개 건너뜀(동시 예약 경합 테스트는 PostgreSQL 전용이며 이 환경에서는 Docker 데몬이 없어 실행하지 못했습니다. CI에서 PostgreSQL 서비스로 실행합니다).
+- `ruff check .`, `ruff format --check .`: 통과.
+- `alembic upgrade head` → `downgrade base` → `upgrade head`: SQLite에서 통과. PostgreSQL 적용은 CI에서 확인합니다.
+- 프런트엔드 `tsc -b --noEmit`, `vite build`: 통과.
+- 수행하지 못한 검증: 실제 S3·MinIO 연동, 실제 FFmpeg 실행, Docker Compose 기동, 브라우저 화면 확인. 이 환경에는 Docker 데몬과 ffprobe가 없습니다. 저장소와 ffprobe는 테스트에서 대역으로 바꿨습니다.
+
+### 남은 문제와 다음 작업
+
+- 실제 S3·FFmpeg·Compose 기동 검증이 남았습니다. 개발 환경에서 한 번 돌려봐야 합니다.
+- `job.start` outbox 주제에 연결된 태스크가 없습니다. 3단계에서 파이프라인 단계를 붙일 때 연결합니다.
+- 관리자 계정 생성은 수동 스크립트입니다. 화면이 필요하면 별도 작업입니다.
+- `render_jobs` 엔터티와 숏폼 편집 API·화면은 3A단계입니다.
+- "확정이 필요한 값"(비용 상한, 보관 기간, 삭제 정책, 더빙 허용 오차)은 그대로 열려 있습니다. budgets 테이블은 만들었지만 실제 한도 값은 사용자 확정 후 넣습니다.
