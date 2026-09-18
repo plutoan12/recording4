@@ -176,7 +176,7 @@ def test_enqueue_is_deduplicated(session: Session) -> None:
 
 def test_dispatcher_skips_topics_without_task(session: Session) -> None:
     """아직 태스크가 연결되지 않은 주제는 보내지 않고 남겨 둡니다."""
-    enqueue(session, topic="job.start", payload={"job_id": "1"}, dedupe_key="k4")
+    enqueue(session, topic="unknown.topic", payload={"job_id": "1"}, dedupe_key="k4")
     session.commit()
     assert dispatch_pending(session, lambda _n, _p: None) == 0
     assert session.query(OutboxMessage).one().published_at is None

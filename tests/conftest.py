@@ -46,9 +46,11 @@ def is_postgres() -> bool:
 
 @pytest.fixture(scope="session")
 def _schema(_environment: None) -> Iterator[None]:
+    from adminapi.config import get_settings
     from adminapi.db import get_engine, reset_engine
     from adminapi.models import Base
 
+    get_settings.cache_clear()
     reset_engine()
     engine = get_engine()
     Base.metadata.drop_all(engine)

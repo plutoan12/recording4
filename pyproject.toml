@@ -21,9 +21,13 @@ dependencies = [
     "boto3==1.35.81",
     "pyjwt==2.10.1",
     "python-multipart==0.0.20",
+    "pysubs2==1.8.0",
+    "httpx==0.28.1",
 ]
 
 [project.optional-dependencies]
+analysis = ["faster-whisper==1.2.1", "scenedetect[opencv-headless]==0.6.7.1"]
+providers = ["google-cloud-translate==3.20.2", "google-api-python-client==2.160.0", "google-auth-oauthlib==1.2.1"]
 dev = [
     "pytest==8.3.4",
     "httpx==0.28.1",

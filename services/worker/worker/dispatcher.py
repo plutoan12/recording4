@@ -18,7 +18,10 @@ logger = logging.getLogger(__name__)
 
 TOPIC_TASKS: dict[str, str] = {
     "source_asset.verify": "worker.tasks.verify_source_asset",
-    # job.start는 파이프라인 단계가 구현되면 연결합니다. 지금은 기록만 남깁니다.
+    "media.run": "worker.media_tasks.run_media",
+    "job.start": "worker.workflow_tasks.run_job",
+    "job.step": "worker.workflow_tasks.run_job",
+    "publication.run": "worker.publication_tasks.run_publication",
 }
 
 

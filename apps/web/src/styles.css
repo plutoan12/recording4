@@ -49,3 +49,15 @@ button {
   padding: 8px 12px;
   cursor: pointer;
 }
+
+.clip-editor { margin: 2rem 0; padding: 1.5rem; border: 1px solid #bbb; border-radius: 8px; }
+.clip-editor video { display: block; width: 100%; max-height: 480px; background: #111; margin: 1rem 0; }
+.clip-editor label { display: block; margin: .75rem 0; }
+.clip-editor textarea { display: block; width: 100%; box-sizing: border-box; font-family: monospace; }
+.editor-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: .75rem; align-items: end; }
+.editor-actions { display: flex; flex-wrap: wrap; gap: .5rem; margin: 1rem 0; }
+.clip-editor li { padding: .5rem 0; overflow-wrap: anywhere; }
+.clip-editor button { margin: .2rem; }
+.caption-row { display: grid; grid-template-columns: 100px 100px 1fr auto; gap: .5rem; align-items: center; }
+.caption-row input { max-width: 90px; }
+@media (max-width: 650px) { .caption-row { grid-template-columns: 1fr 1fr; } }

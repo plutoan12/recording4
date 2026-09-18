@@ -6,14 +6,14 @@ ENV PYTHONUNBUFFERED=1 \
 
 # 워커만 FFmpeg가 필요합니다. API 이미지에는 넣지 않습니다.
 RUN apt-get update \
-    && apt-get install --no-install-recommends -y ffmpeg \
+    && apt-get install --no-install-recommends -y ffmpeg fonts-noto-cjk \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
 COPY pyproject.toml ./
 COPY packages ./packages
-RUN pip install --no-cache-dir .
+RUN pip install --no-cache-dir ".[analysis,providers]"
 
 COPY services ./services
 

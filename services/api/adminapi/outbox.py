@@ -6,13 +6,17 @@ outbox 행을 만들고, 별도 디스패처가 큐로 보냅니다.
 
 from __future__ import annotations
 
+from datetime import timedelta
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from adminapi.models import OutboxMessage
+from adminapi.models import OutboxMessage, utcnow
 
 
-def enqueue(session: Session, *, topic: str, payload: dict, dedupe_key: str) -> OutboxMessage:
+def enqueue(
+    session: Session, *, topic: str, payload: dict, dedupe_key: str, delay_seconds: int = 0
+) -> OutboxMessage:
     """outbox에 메시지를 넣습니다. 같은 dedupe_key는 한 번만 들어갑니다.
 
     commit은 호출자가 합니다. 실행 요청과 같은 트랜잭션에 묶어야 하기 때문입니다.
@@ -20,7 +24,12 @@ def enqueue(session: Session, *, topic: str, payload: dict, dedupe_key: str) -> 
     existing = session.scalar(select(OutboxMessage).where(OutboxMessage.dedupe_key == dedupe_key))
     if existing is not None:
         return existing
-    message = OutboxMessage(topic=topic, payload=payload, dedupe_key=dedupe_key)
+    message = OutboxMessage(
+        topic=topic,
+        payload=payload,
+        dedupe_key=dedupe_key,
+        available_at=utcnow() + timedelta(seconds=delay_seconds),
+    )
     session.add(message)
     session.flush()
     return message
@@ -29,7 +38,7 @@ def enqueue(session: Session, *, topic: str, payload: dict, dedupe_key: str) -> 
 def unpublished(session: Session, *, limit: int = 100) -> list[OutboxMessage]:
     stmt = (
         select(OutboxMessage)
-        .where(OutboxMessage.published_at.is_(None))
+        .where(OutboxMessage.published_at.is_(None), OutboxMessage.available_at <= utcnow())
         .order_by(OutboxMessage.created_at)
         .limit(limit)
     )

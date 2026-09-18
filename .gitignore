@@ -23,3 +23,10 @@ media/
 *.wav
 *.mp3
 apps/web/tsconfig.tsbuildinfo
+
+# Local service credentials and overrides
+secrets/
+*-token.json
+client-secret*.json
+google-adc.json
+infra/compose.override*.yml

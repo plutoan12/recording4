@@ -51,6 +51,9 @@ services:
       mc anonymous set none local/recording4-dev"
 
   api:
+    env_file:
+      - path: ../.env
+        required: false
     build:
       context: ..
       dockerfile: infra/Dockerfile.api
@@ -58,6 +61,7 @@ services:
       R4_DATABASE_URL: postgresql+psycopg://recording4:devpass@postgres:5432/recording4
       R4_REDIS_URL: redis://redis:6379/0
       R4_JWT_SECRET: ${R4_JWT_SECRET:-dev-secret-change-me}
+      R4_S3_PUBLIC_ENDPOINT_URL: http://localhost:9000
       R4_S3_ENDPOINT_URL: http://minio:9000
     depends_on:
       postgres: {condition: service_healthy}
@@ -68,6 +72,9 @@ services:
       uvicorn adminapi.main:app --host 0.0.0.0 --port 8000"
 
   worker:
+    env_file:
+      - path: ../.env
+        required: false
     build:
       context: ..
       dockerfile: infra/Dockerfile.worker

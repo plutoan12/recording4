@@ -56,6 +56,9 @@ class TransitionError(RuntimeError):
 
 # (현재 상태, 이벤트) -> 다음 상태.
 JOB_TRANSITIONS: dict[tuple[JobState, str], JobState] = {
+    (JobState.BLOCKED, "resume"): JobState.QUEUED,
+    (JobState.FAILED, "resume"): JobState.QUEUED,
+    (JobState.PROCESSING, "resume"): JobState.QUEUED,
     (JobState.QUEUED, "start"): JobState.PROCESSING,
     (JobState.PROCESSING, "complete"): JobState.REVIEW_REQUIRED,
     (JobState.PROCESSING, "fail"): JobState.FAILED,

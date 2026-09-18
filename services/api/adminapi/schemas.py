@@ -9,6 +9,7 @@ from decimal import Decimal
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 from pipeline.states import JobState
+from pipeline.workflow import WorkflowOptions
 
 
 class LoginRequest(BaseModel):
@@ -67,7 +68,8 @@ class PreviewUrlResponse(BaseModel):
 
 class JobCreateRequest(BaseModel):
     source_asset_id: uuid.UUID
-    target_language: str = Field(min_length=2, max_length=16)
+    target_language: str = Field(min_length=2, max_length=16, pattern=r"^[a-zA-Z-]+$")
+    workflow: WorkflowOptions = Field(default_factory=WorkflowOptions)
 
 
 class JobResponse(BaseModel):

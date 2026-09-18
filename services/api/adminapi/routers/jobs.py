@@ -8,10 +8,11 @@ from fastapi import APIRouter, HTTPException, Query, status
 from sqlalchemy import select
 
 from adminapi.deps import CurrentUser, SessionDep
-from adminapi.models import Job, SourceAsset
+from adminapi.models import Budget, Job, SourceAsset, utcnow
 from adminapi.outbox import enqueue
 from adminapi.schemas import JobCreateRequest, JobResponse, JobTransitionRequest
 from pipeline.states import JobState, TransitionError, assert_transition
+from pipeline.time import as_utc
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
 
@@ -29,14 +30,28 @@ def create_job(payload: JobCreateRequest, user: CurrentUser, session: SessionDep
             detail=f"검사를 통과한 원본만 작업을 만들 수 있습니다. 현재 상태: {asset.upload_state}",
         )
 
+    if (
+        payload.workflow.clip
+        and asset.duration_seconds is not None
+        and payload.workflow.clip.end > float(asset.duration_seconds)
+    ):
+        raise HTTPException(422, "선택 구간이 원본 길이를 넘습니다.")
+    if payload.workflow.reuse_from_job_id:
+        parent = session.get(Job, payload.workflow.reuse_from_job_id)
+        if parent is None or parent.created_by_id != user.id or parent.source_asset_id != asset.id:
+            raise HTTPException(422, "같은 사용자의 동일 원본 작업만 음성을 재사용할 수 있습니다.")
     job = Job(
         source_asset_id=asset.id,
         target_language=payload.target_language,
+        workflow_config=payload.workflow.model_dump(mode="json"),
         state=JobState.QUEUED,
         created_by_id=user.id,
     )
     session.add(job)
     session.flush()
+    session.add(
+        Budget(scope="job", scope_ref=str(job.id), limit_amount=payload.workflow.budget_usd)
+    )
     enqueue(
         session,
         topic="job.start",
@@ -70,6 +85,12 @@ def transition(
 ) -> Job:
     """전이표에 있는 전이만 허용합니다."""
     job = _get_job(session, job_id)
+    if payload.event not in ("cancel", "reject"):
+        raise HTTPException(
+            409, "허용되지 않은 전이입니다. 단계 실행·결과물 승인 API를 사용하세요."
+        )
+    if job.lease_until and as_utc(job.lease_until) > utcnow():
+        raise HTTPException(409, "실행 중인 단계가 끝난 뒤 상태를 변경하세요.")
     try:
         job.state = assert_transition(job.state, payload.event)
     except TransitionError as exc:
@@ -80,7 +101,7 @@ def transition(
 
 
 def _get_job(session, job_id: uuid.UUID) -> Job:  # noqa: ANN001
-    job = session.get(Job, job_id)
+    job = session.scalar(select(Job).where(Job.id == job_id).with_for_update())
     if job is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="작업을 찾을 수 없습니다."
