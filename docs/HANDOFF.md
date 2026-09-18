@@ -87,7 +87,7 @@ R8은 이번 세션에서 developers.google.com 접근이 네트워크 정책으
 | 2026-09-18 | Claude | 설계 검토. 브랜치 `claude/claude-md-design-review-v8qdz4`. 담당 파일 docs/ARCHITECTURE.md, docs/TECH_DECISIONS.md, docs/HANDOFF.md | 문서 오류·불일치 3건 수정, 남은 문제 R1~R10 등록 |
 | 2026-09-18 | Claude | R1~R10 반영. 같은 브랜치. 담당 파일 docs/ARCHITECTURE.md, docs/IMPLEMENTATION_PLAN.md, docs/PROJECT_BRIEF.md, docs/TECH_DECISIONS.md, docs/HANDOFF.md | 설계 공백 10건을 문서에 반영 |
 | 2026-09-18 | Claude | 사용자 검토 지적 반영. PR https://github.com/plutoan12/recording4/pull/1 (main 병합) | 더빙 구간 겹침 조건, 영상 교체 시 공개 공백, 예산 예약·정산 3건 수정. 다음은 "확정이 필요한 값" 질의와 1단계 측정 |
-| 2026-09-18 | Claude | 2단계 기본 기반 구현. 브랜치 `claude/claude-md-design-review-v8qdz4`. 담당 파일은 아래 후속 기록 참조 | API·워커·관리화면·마이그레이션·CI 추가. 테스트 117개 통과. 다음은 실제 S3·FFmpeg 연동 확인과 3단계 |
+| 2026-09-18 | Claude | 2단계 기본 기반 구현. PR https://github.com/plutoan12/recording4/pull/2 (main 병합, 21d905f). 담당 파일은 아래 후속 기록 참조 | API·워커·관리화면·마이그레이션·CI 추가. CI(PostgreSQL)에서 테스트 118개 통과. 다음은 실제 S3·FFmpeg 연동 확인과 3단계 |
 
 향후 기록에는 브랜치·커밋 또는 PR 링크, 변경 파일, 실제 검증 결과, 미해결 문제를 포함합니다. 완료되지 않은 항목은 완료로 표시하지 않습니다.
 
@@ -124,11 +124,24 @@ R8은 이번 세션에서 developers.google.com 접근이 네트워크 정책으
 
 ### 검증 결과
 
-- `pytest -q`: 117개 통과, 1개 건너뜀(동시 예약 경합 테스트는 PostgreSQL 전용이며 이 환경에서는 Docker 데몬이 없어 실행하지 못했습니다. CI에서 PostgreSQL 서비스로 실행합니다).
+PR https://github.com/plutoan12/recording4/pull/2 (main 병합, merge commit 21d905f). 커밋 3f7971f(구현), e0da671(CI 수정).
+
+작업 환경(SQLite)에서 수행:
+
+- `pytest -q`: 117개 통과, 1개 건너뜀. 동시 예약 경합 테스트는 행 잠금이 필요해 PostgreSQL 전용이며 이 환경에는 Docker 데몬이 없어 건너뛰었습니다.
 - `ruff check .`, `ruff format --check .`: 통과.
-- `alembic upgrade head` → `downgrade base` → `upgrade head`: SQLite에서 통과. PostgreSQL 적용은 CI에서 확인합니다.
+- `alembic upgrade head` → `downgrade base` → `upgrade head`: SQLite에서 통과.
 - 프런트엔드 `tsc -b --noEmit`, `vite build`: 통과.
-- 수행하지 못한 검증: 실제 S3·MinIO 연동, 실제 FFmpeg 실행, Docker Compose 기동, 브라우저 화면 확인. 이 환경에는 Docker 데몬과 ffprobe가 없습니다. 저장소와 ffprobe는 테스트에서 대역으로 바꿨습니다.
+
+CI(GitHub Actions, PostgreSQL 16 서비스)에서 수행:
+
+- `pytest -q`: **118개 통과, 건너뛴 항목 없음.** 동시 예약 경합 테스트가 실제 행 잠금 위에서 실행되어, 한도 10에 2씩 8개를 동시에 요청하면 5개만 예약되고 3개가 거부되는 것을 확인했습니다.
+- 마이그레이션 왕복: PostgreSQL에서 통과(`Context impl PostgresqlImpl`).
+- 린트·포맷·프런트엔드 타입 검사·빌드: 통과.
+
+첫 CI 실행은 실패했습니다. 테스트가 `from tests.conftest import ...`로 conftest를 모듈처럼 불러와, 현재 디렉터리를 `sys.path`에 넣어주는 `python -m pytest`에서는 통과하고 CI의 `pytest`에서는 수집이 깨졌습니다. 픽스처로 바꿔 해결했습니다(e0da671). 앞으로 로컬 검증은 CI와 같은 `pytest` 명령으로 수행합니다.
+
+수행하지 못한 검증: 실제 S3·MinIO 연동, 실제 FFmpeg 실행, Docker Compose 기동, 브라우저 화면 확인. 이 환경에는 Docker 데몬과 ffprobe가 없습니다. 저장소와 ffprobe는 테스트에서 대역으로 바꿨습니다.
 
 ### 남은 문제와 다음 작업
 
