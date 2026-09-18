@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """자막 기본값이 숏폼 세로 화면에서 실제로 맞는지 렌더해서 잽니다.
 
-libass로 한 프레임을 그린 뒤 글자가 차지한 픽셀 상자를 FFmpeg cropdetect로
-측정합니다. 폰트 메트릭 계산이 아니라 실제 렌더 결과입니다. FFmpeg와 한국어
-글꼴이 필요하므로 워커 이미지 안에서 돌립니다.
+libass로 한 프레임을 그린 뒤 밝은 화소의 경계를 직접 찾습니다. 폰트 메트릭
+계산이 아니라 실제 렌더 결과입니다. FFmpeg와 한국어 글꼴, numpy가 필요하므로
+워커 이미지 안에서 돌립니다.
 
     docker run --rm -v "$PWD/scripts:/work" --entrypoint python \
         recording4-worker:ci /work/measure_subtitles.py
@@ -18,24 +18,31 @@ libass로 한 프레임을 그린 뒤 글자가 차지한 픽셀 상자를 FFmpe
 from __future__ import annotations
 
 import argparse
-import re
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
 
+import numpy as np
+
 from pipeline.editing import Cue, EditSpec
 from pipeline.subtitles import DEFAULT_RULES, SubtitleRules, text_width
 from worker.rendering import ffmpeg_binary, write_subtitles
 
-_CROP = re.compile(r"crop=(\d+):(\d+):(-?\d+):(-?\d+)")
+# 배경(제한 범위 검정, Y=16)과 검은 외곽선을 빼고 글자만 남기는 문턱입니다.
+INK = 32
 
 # 한국어 실사용 문장. 같은 글자 반복보다 자간·받침 폭이 현실적입니다.
 SAMPLE = "다람쥐 헌 쳇바퀴에 타고파 오늘도 즐겁게 달린다 정말로"
 
 
 def measure(text: str, spec: EditSpec, rules: SubtitleRules) -> tuple[int, int] | None:
-    """글자가 그려진 픽셀 상자 (가로, 세로)를 돌려줍니다. 안 보이면 None."""
+    """글자가 그려진 픽셀 상자 (가로, 세로)를 돌려줍니다. 안 보이면 None.
+
+    FFmpeg cropdetect는 레터박스용이라 행·열 평균으로 판정합니다. 세로 1920px
+    중 자막 100px만 밝으면 열 평균이 문턱을 못 넘어 폭을 못 잽니다. 그래서
+    회색조 원본 프레임을 받아 밝은 화소의 경계를 직접 찾습니다.
+    """
     with tempfile.TemporaryDirectory(prefix="r4-measure-") as directory:
         temp = Path(directory)
         write_subtitles(temp / "captions.ass", spec, rules)
@@ -43,31 +50,36 @@ def measure(text: str, spec: EditSpec, rules: SubtitleRules) -> tuple[int, int] 
             ffmpeg_binary(),
             "-hide_banner",
             "-loglevel",
-            "info",
+            "error",
             "-f",
             "lavfi",
             "-i",
             f"color=c=black:s={spec.width}x{spec.height}:d=1",
-            # skip=0이 없으면 cropdetect가 앞 두 프레임을 버려서 짧은 입력에서는
-            # 아무것도 출력하지 않습니다. limit은 0으로 두면 안 됩니다. color=black은
-            # 제한 범위 검정(Y=16)이라 0보다 커서 화면 전체가 글자로 잡힙니다.
             "-vf",
-            "subtitles=captions.ass,cropdetect=limit=24:round=2:skip=0:reset=1",
+            "subtitles=captions.ass,format=gray",
             "-frames:v",
-            "3",
+            "1",
             "-f",
-            "null",
+            "rawvideo",
+            "-pix_fmt",
+            "gray",
             "-",
         ]
-        done = subprocess.run(command, cwd=temp, capture_output=True, text=True, timeout=120)
-    found = _CROP.findall(done.stderr)
-    if not found:
-        # 왜 못 쟀는지 알 수 있게 FFmpeg가 한 말을 남깁니다.
-        tail = "\n".join(line for line in done.stderr.splitlines()[-8:] if line.strip())
-        print(f"  (FFmpeg 종료 코드 {done.returncode})\n  {tail}")
+        done = subprocess.run(command, cwd=temp, capture_output=True, timeout=120)
+    expected = spec.width * spec.height
+    if done.returncode or len(done.stdout) < expected:
+        tail = done.stderr.decode("utf-8", "replace").strip().splitlines()[-4:]
+        print(f"  (FFmpeg 종료 코드 {done.returncode}, {len(done.stdout)}바이트)")
+        for line in tail:
+            print(f"  {line}")
         return None
-    width, height, _, _ = found[-1]
-    return int(width), int(height)
+    frame = np.frombuffer(done.stdout[:expected], dtype=np.uint8).reshape(spec.height, spec.width)
+    mask = frame > INK
+    rows = np.nonzero(mask.any(axis=1))[0]
+    columns = np.nonzero(mask.any(axis=0))[0]
+    if not rows.size or not columns.size:
+        return None
+    return int(columns[-1] - columns[0] + 1), int(rows[-1] - rows[0] + 1)
 
 
 def spec_for(text: str, font_size: int, width: int, height: int) -> EditSpec:
