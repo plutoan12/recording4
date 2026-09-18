@@ -178,25 +178,22 @@ def test_missing_dependency_message_reaches_the_operator(
     assert "[subtitles]" in session.get(MediaTask, task.id).error
 
 
-def test_align_keeps_line_breaks_as_cue_boundaries() -> None:
-    """줄바꿈이 있는 대본은 그 줄을 자막 경계로 유지하도록 옵션을 켭니다."""
-    from worker.analysis import align_options
+def test_word_timings_are_collected_from_the_alignment_result() -> None:
+    """정렬 결과의 단어 시각만 뽑습니다. 빈 단어와 시각 없는 단어는 버립니다."""
+    from types import SimpleNamespace
 
-    def with_option(audio, text, *, language=None, original_split=False):  # noqa: ANN001, ANN202
-        return None
+    from worker.analysis import word_timings
 
-    def without_option(audio, text, *, language=None):  # noqa: ANN001, ANN202
-        return None
-
-    assert align_options(with_option, "첫 줄\n두 번째 줄") == {"original_split": True}
-    # 한 줄짜리 대본은 정렬기가 알아서 나눕니다.
-    assert align_options(with_option, "한 줄짜리 대본") == {}
-    # 옵션이 없는 버전에서도 정렬 자체는 그대로 진행합니다.
-    assert align_options(without_option, "첫 줄\n두 번째 줄") == {}
-
-
-def test_align_options_survive_unreadable_signatures() -> None:
-    """서명을 못 읽는 호출체여도 정렬을 막지 않습니다."""
-    from worker.analysis import align_options
-
-    assert align_options(print, "첫 줄\n두 번째 줄") == {}
+    result = SimpleNamespace(
+        segments=[
+            SimpleNamespace(
+                words=[
+                    SimpleNamespace(word=" 안녕", start=0.0, end=0.5),
+                    SimpleNamespace(word="  ", start=0.5, end=0.6),
+                    SimpleNamespace(word="하세요", start=None, end=1.0),
+                ]
+            ),
+            SimpleNamespace(words=None),
+        ]
+    )
+    assert [(w.text.strip(), w.start, w.end) for w in word_timings(result)] == [("안녕", 0.0, 0.5)]

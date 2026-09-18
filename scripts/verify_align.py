@@ -7,8 +7,8 @@ make_speech_sample.py가 만든 음성은 문장 시작 시각을 우리가 알�
 
     python scripts/verify_align.py --directory /audio --model tiny
 
-대본은 한 줄에 한 문장씩 넣습니다. 줄바꿈이 있으면 정렬기가 그 줄을 자막
-경계로 유지하므로 문장별 시각을 곧바로 비교할 수 있습니다.
+대본은 한 줄에 한 문장씩 넣습니다. 정렬은 한 덩어리로 돌리고 줄 나누기는
+단어 시각으로 우리가 하므로, 문장별 시각을 곧바로 비교할 수 있습니다.
 
 판정 기준:
 
@@ -49,7 +49,7 @@ def diagnose(audio: Path, script: str, starts: list[float], *, model: str, langu
         return
     engine = stable_whisper.load_faster_whisper(model, device="cpu", compute_type="int8")
     variants = [
-        ("줄 유지 (현재 기본)", script, {"original_split": True}),
+        ("정렬기 줄 유지 옵션", script, {"original_split": True}),
         ("줄 유지 + 무음 보정 끔", script, {"original_split": True, "suppress_silence": False}),
         ("줄 유지 + VAD", script, {"original_split": True, "vad": True}),
         ("한 줄 대본", script.replace("\n", " "), {}),
@@ -129,7 +129,7 @@ def main() -> int:
         missing = [f"{s:.2f}초" for s in starts if s not in matched]
         problems.append(
             "문장 경계를 자막 경계로 남기지 못했습니다: " + ", ".join(missing) + ". "
-            "줄바꿈이 있는 대본인데도 합쳐졌다면 정렬기의 줄 유지 옵션을 확인하세요."
+            "줄바꿈이 있는 대본인데도 합쳐졌다면 단어 시각 묶기가 포기한 것입니다."
         )
 
     if not args.no_diagnose:
