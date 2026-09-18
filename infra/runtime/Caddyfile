@@ -1,0 +1,18 @@
+{$R4_SITE_ADDRESS:http://localhost} {
+    header {
+        X-Content-Type-Options nosniff
+        Referrer-Policy no-referrer
+        X-Frame-Options DENY
+    }
+    handle_path /api/* {
+        reverse_proxy api:8000
+    }
+    handle /recording4/* {
+        reverse_proxy minio:9000
+    }
+    handle {
+        root * /srv
+        try_files {path} /index.html
+        file_server
+    }
+}

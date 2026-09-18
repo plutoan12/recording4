@@ -36,7 +36,9 @@ def verify_source_asset(self, source_asset_id: str) -> dict[str, str]:  # noqa: 
         if asset.upload_state == "verified":
             return {"status": "already_verified"}
 
-        url = get_storage().presigned_get_url(asset.storage_key, 900)
+        storage = get_storage()
+        signer = getattr(storage, "internal_get_url", storage.presigned_get_url)
+        url = signer(asset.storage_key, 900)
         try:
             info = probe(url)
         except ProbeError as exc:

@@ -68,6 +68,11 @@ class S3Storage:
             )
         )
 
+    def internal_get_url(self, key: str, ttl_seconds: int) -> str:
+        return self._client.generate_presigned_url(
+            "get_object", Params={"Bucket": self._bucket, "Key": key}, ExpiresIn=ttl_seconds
+        )
+
     def download_file(self, key: str, destination: Path) -> None:
         self._client.download_file(self._bucket, key, str(destination))
 

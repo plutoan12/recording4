@@ -53,7 +53,7 @@ def probe(path_or_url: str) -> MediaInfo:
     except subprocess.TimeoutExpired as exc:
         raise ProbeError("ffprobe 실행이 시간 제한을 넘었습니다.") from exc
     if completed.returncode != 0:
-        raise ProbeError(f"ffprobe 실패: {completed.stderr.strip()[:500]}")
+        raise ProbeError("ffprobe 실패: 원본 접근 권한 또는 파일 형식을 확인하세요.")
     return parse_probe_output(completed.stdout)
 
 
