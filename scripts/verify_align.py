@@ -5,7 +5,7 @@ make_speech_sample.py가 만든 음성은 문장 시작 시각을 우리가 알�
 같은 대본을 타이밍 없이 넣고 정렬한 뒤, 나온 시각을 아는 값과 비교합니다.
 모델을 실제로 내려받아 돌리므로 CI에서 필요할 때만 실행합니다.
 
-    python scripts/verify_align.py --directory /audio --model tiny
+    python scripts/verify_align.py --directory /audio --model small
 
 대본은 한 줄에 한 문장씩 넣습니다. 정렬은 한 덩어리로 돌리고 줄 나누기는
 단어 시각으로 우리가 하므로, 문장별 시각을 곧바로 비교할 수 있습니다.
@@ -92,7 +92,8 @@ def diagnose(audio: Path, script: str, starts: list[float], *, model: str, langu
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--directory", type=Path, required=True)
-    parser.add_argument("--model", default="tiny")
+    # 운영 기본값(R4_WHISPER_MODEL)과 같은 모델로 재야 의미가 있습니다.
+    parser.add_argument("--model", default="small")
     parser.add_argument("--language", default="ko")
     parser.add_argument("--tolerance", type=float, default=1.0)
     parser.add_argument("--no-diagnose", action="store_true", help="설정별 비교를 건너뜁니다.")

@@ -147,8 +147,12 @@ jobs:
         run: |
           sudo apt-get update && sudo apt-get install -y espeak-ng ffmpeg
           python3 scripts/make_speech_sample.py --out /tmp/align-sample
+          # 운영 기본값과 같은 모델로 잽니다. tiny로 재면 우리가 쓰지도 않는
+          # 모델의 단어 시각 오차를 재게 됩니다. 설정별 비교는 원인을 다 밝혀
+          # 껐습니다. 필요하면 --no-diagnose를 빼고 다시 켭니다.
           docker run --rm -v /tmp/align-sample:/audio -v "$PWD/scripts:/work:ro" \
-            --entrypoint python recording4-worker:ci /work/verify_align.py --directory /audio
+            --entrypoint python recording4-worker:ci /work/verify_align.py \
+            --directory /audio --model small --no-diagnose
 
       # 자막 기본값이 실제 세로 화면에서 여백 안에 한 줄로 들어가는지 렌더해서 잽니다.
       # 폰트 메트릭 계산이 아니라 libass 렌더 결과를 FFmpeg cropdetect로 측정합니다.
