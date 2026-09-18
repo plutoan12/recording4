@@ -1,0 +1,51 @@
+:root {
+  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+  color-scheme: light dark;
+}
+
+body {
+  margin: 0;
+  padding: 24px;
+  background: Canvas;
+  color: CanvasText;
+}
+
+main {
+  max-width: 960px;
+  margin: 0 auto;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 12px;
+}
+
+th,
+td {
+  text-align: left;
+  padding: 8px;
+  border-bottom: 1px solid color-mix(in srgb, CanvasText 20%, transparent);
+  font-size: 14px;
+}
+
+.state {
+  font-variant-numeric: tabular-nums;
+  font-family: ui-monospace, monospace;
+}
+
+.error {
+  color: #b3261e;
+  margin: 8px 0;
+}
+
+form.login {
+  display: grid;
+  gap: 8px;
+  max-width: 320px;
+}
+
+button {
+  padding: 8px 12px;
+  cursor: pointer;
+}

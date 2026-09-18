@@ -1,0 +1,56 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "recording4"
+version = "0.1.0"
+description = "영상 번역·더빙·숏폼 편집 파이프라인의 관리 API와 워커"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi==0.115.6",
+    "uvicorn[standard]==0.34.0",
+    "pydantic==2.10.4",
+    "email-validator==2.2.0",
+    "pydantic-settings==2.7.0",
+    "sqlalchemy==2.0.36",
+    "alembic==1.14.0",
+    "psycopg[binary]==3.2.3",
+    "celery==5.4.0",
+    "redis==5.2.1",
+    "boto3==1.35.81",
+    "pyjwt==2.10.1",
+    "python-multipart==0.0.20",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest==8.3.4",
+    "httpx==0.28.1",
+    "ruff==0.8.4",
+]
+
+[tool.setuptools]
+# 공유 도메인 패키지만 설치합니다. API·워커는 PYTHONPATH로 불러옵니다.
+package-dir = {"" = "packages/pipeline"}
+packages = ["pipeline"]
+
+[tool.pytest.ini_options]
+pythonpath = ["packages/pipeline", "services/api", "services/worker"]
+testpaths = ["tests"]
+markers = [
+    "postgres: PostgreSQL 전용 테스트. DATABASE_URL이 PostgreSQL일 때만 실행합니다.",
+]
+filterwarnings = ["error::DeprecationWarning:adminapi.*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["packages/pipeline", "services/api", "services/worker", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.ruff.lint.flake8-bugbear]
+# FastAPI는 의존성을 기본 인자로 선언합니다.
+extend-immutable-calls = ["fastapi.Depends", "fastapi.Query", "fastapi.Header"]

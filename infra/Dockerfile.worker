@@ -1,0 +1,25 @@
+FROM python:3.11-slim
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONPATH=/app/packages/pipeline:/app/services/api:/app/services/worker
+
+# 워커만 FFmpeg가 필요합니다. API 이미지에는 넣지 않습니다.
+RUN apt-get update \
+    && apt-get install --no-install-recommends -y ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY pyproject.toml ./
+COPY packages ./packages
+RUN pip install --no-cache-dir .
+
+COPY services ./services
+
+RUN useradd --create-home --uid 10001 appuser
+USER appuser
+
+# 합성과 업로드는 큐를 나눕니다. 동시 실행 수는 서버 사양 측정 후 조정합니다.
+CMD ["celery", "-A", "worker.celery_app.celery_app", "worker", "--loglevel=info", \
+     "--queues=default,render,upload", "--concurrency=2"]

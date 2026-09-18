@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+
+# Node
+node_modules/
+apps/web/dist/
+
+# 환경·비밀
+.env
+.env.local
+*.pem
+
+# 생성물·실험 파일 (소스와 분리)
+/var/
+/tmp/
+media/
+*.mp4
+*.wav
+*.mp3
+apps/web/tsconfig.tsbuildinfo
