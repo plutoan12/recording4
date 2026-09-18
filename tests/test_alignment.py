@@ -60,22 +60,50 @@ def test_empty_input_gives_up() -> None:
     assert cues_for_lines(["가"], []) is None
 
 
-def test_start_snaps_to_the_nearest_speech_onset() -> None:
-    """무음에서 자막이 먼저 뜨지 않게 발화 시작으로 맞춥니다."""
+def test_late_start_snaps_back_to_its_own_speech() -> None:
+    """발화 중간에서 시작한 자막을 그 발화의 시작으로 당깁니다.
+
+    사람 목소리 측정에서 자막이 1.57초 늦게 시작한 경우입니다.
+    """
     from pipeline.alignment import snap_starts
     from pipeline.editing import Cue
 
-    cues = [Cue(start=10.5, end=16.5, text="마지막 문장입니다")]
-    assert [c.start for c in snap_starts(cues, [1.0, 6.45, 12.23])] == [12.23]
+    cues = [Cue(start=14.58, end=20.54, text="두 번째 문장")]
+    spans = [(1.08, 10.5), (13.01, 20.6)]
+    assert [c.start for c in snap_starts(cues, spans)] == [13.01]
 
 
-def test_far_onsets_are_left_alone() -> None:
-    """멀리 있는 발화 시작에는 손대지 않습니다. 잘못 당기면 더 나쁩니다."""
+def test_early_start_snaps_forward_to_the_next_speech() -> None:
+    """무음에서 시작한 자막을 다음 발화 시작으로 밉니다.
+
+    합성 음성 측정에서 자막이 1.73초 이르게 시작한 경우입니다.
+    """
+    from pipeline.alignment import snap_starts
+    from pipeline.editing import Cue
+
+    cues = [Cue(start=10.5, end=16.5, text="마지막 문장")]
+    spans = [(1.0, 5.45), (6.45, 11.23), (12.23, 17.06)]
+    assert [c.start for c in snap_starts(cues, spans)] == [12.23]
+
+
+def test_snap_does_not_jump_to_a_far_speech() -> None:
+    """가까운 발화 시작을 찾지 않습니다. 엉뚱한 발화로 끌려가면 더 나쁩니다."""
+    from pipeline.alignment import snap_starts
+    from pipeline.editing import Cue
+
+    cues = [Cue(start=6.4, end=11.0, text="문장")]
+    # 4.88에서 시작하는 발화가 더 가깝지만 이 자막이 걸친 발화가 아닙니다.
+    spans = [(0.5, 5.3), (6.05, 11.2)]
+    assert [c.start for c in snap_starts(cues, spans)] == [6.05]
+
+
+def test_far_speech_is_left_alone() -> None:
+    """window를 넘게 움직여야 하면 그대로 둡니다."""
     from pipeline.alignment import snap_starts
     from pipeline.editing import Cue
 
     cues = [Cue(start=10.5, end=20.0, text="문장")]
-    assert [c.start for c in snap_starts(cues, [1.0, 18.0])] == [10.5]
+    assert [c.start for c in snap_starts(cues, [(1.0, 5.0), (18.0, 19.5)])] == [10.5]
 
 
 def test_snap_never_overlaps_the_previous_cue() -> None:
@@ -83,8 +111,8 @@ def test_snap_never_overlaps_the_previous_cue() -> None:
     from pipeline.editing import Cue
 
     cues = [Cue(start=1.0, end=5.0, text="첫째"), Cue(start=5.2, end=9.0, text="둘째")]
-    # 4.0은 앞 자막이 아직 끝나지 않은 시점이라 옮기지 않습니다.
-    assert [c.start for c in snap_starts(cues, [1.0, 4.0])] == [1.0, 5.2]
+    # 둘째 자막이 걸친 발화는 4.0에 시작하지만 첫째 자막이 아직 끝나지 않았습니다.
+    assert [c.start for c in snap_starts(cues, [(1.0, 5.0), (4.0, 9.5)])] == [1.0, 5.2]
 
 
 def test_snap_never_makes_a_cue_disappear() -> None:
@@ -93,10 +121,10 @@ def test_snap_never_makes_a_cue_disappear() -> None:
 
     cues = [Cue(start=3.0, end=4.0, text="짧은 자막")]
     # 4.5는 자막 끝을 넘어서므로 옮기지 않습니다.
-    assert [c.start for c in snap_starts(cues, [4.5])] == [3.0]
+    assert [c.start for c in snap_starts(cues, [(4.5, 6.0)])] == [3.0]
 
 
-def test_no_onsets_changes_nothing() -> None:
+def test_no_spans_changes_nothing() -> None:
     from pipeline.alignment import snap_starts
     from pipeline.editing import Cue
 
@@ -104,27 +132,32 @@ def test_no_onsets_changes_nothing() -> None:
     assert snap_starts(cues, []) == cues
 
 
-def test_onsets_from_timestamps_accepts_samples_and_seconds() -> None:
+def test_spans_from_timestamps_accepts_samples_and_seconds() -> None:
     """VAD 버전에 따라 표본 번호를 주기도 하고 초를 주기도 합니다."""
-    from pipeline.alignment import onsets_from_timestamps
+    from pipeline.alignment import spans_from_timestamps
 
     # 표본 번호(16kHz): 16000표본 = 1초
-    assert onsets_from_timestamps([{"start": 16000, "end": 32000}]) == [1.0]
+    assert spans_from_timestamps([{"start": 16000, "end": 32000}]) == [(1.0, 2.0)]
     # 초 단위로 주는 경우
-    assert onsets_from_timestamps([{"start": 1.0, "end": 2.0}]) == [1.0]
+    assert spans_from_timestamps([{"start": 1.0, "end": 2.0}]) == [(1.0, 2.0)]
 
 
-def test_onsets_from_timestamps_reads_objects_and_skips_junk() -> None:
+def test_spans_from_timestamps_reads_objects_and_skips_junk() -> None:
     from types import SimpleNamespace
 
-    from pipeline.alignment import onsets_from_timestamps
+    from pipeline.alignment import spans_from_timestamps
 
     stamps = [SimpleNamespace(start=32000, end=48000), {"end": 5}, {"start": 16000}]
-    assert onsets_from_timestamps(stamps) == [1.0, 2.0]
+    # 시작이나 끝이 없는 항목은 버립니다.
+    assert spans_from_timestamps(stamps) == [(2.0, 3.0)]
 
 
-def test_onsets_from_timestamps_sorts_and_deduplicates() -> None:
-    from pipeline.alignment import onsets_from_timestamps
+def test_spans_from_timestamps_sorts_and_drops_empty() -> None:
+    from pipeline.alignment import spans_from_timestamps
 
-    stamps = [{"start": 32000}, {"start": 16000}, {"start": 32000}]
-    assert onsets_from_timestamps(stamps) == [1.0, 2.0]
+    stamps = [
+        {"start": 32000, "end": 48000},
+        {"start": 16000, "end": 32000},
+        {"start": 8, "end": 8},
+    ]
+    assert spans_from_timestamps(stamps) == [(1.0, 2.0), (2.0, 3.0)]

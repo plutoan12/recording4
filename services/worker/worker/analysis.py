@@ -9,8 +9,8 @@ from pathlib import Path
 from pipeline.alignment import (
     WordTiming,
     cues_for_lines,
-    onsets_from_timestamps,
     snap_starts,
+    spans_from_timestamps,
 )
 from pipeline.editing import Cue
 from pipeline.speakers import SpeakerTurn
@@ -78,8 +78,9 @@ def align_text(
         for s in result.segments
         if s.text.strip() and s.end > s.start
     ]
-    # 단어 시각이 무음 안쪽으로 당겨지는 경우가 있어 발화 시작에 맞춥니다.
-    cues = snap_starts(cues, speech_onsets(source))
+    # 단어 시각이 무음 안쪽으로 당겨지거나 발화 중간으로 밀리는 경우가 있어
+    # 자막 시작을 그 자막이 걸친 발화의 시작에 맞춥니다.
+    cues = snap_starts(cues, speech_spans(source))
     if not cues:
         raise RuntimeError("대본을 오디오에 맞추지 못했습니다. 언어와 음성을 확인하세요.")
     return cues
@@ -89,8 +90,8 @@ _SILENCE_END = re.compile(r"silence_end:\s*(-?[\d.]+)")
 _SILENCE_START = re.compile(r"silence_start:\s*(-?[\d.]+)")
 
 
-def vad_onsets(source: Path) -> list[float]:
-    """Silero VAD로 말이 시작되는 시각을 찾습니다. 못 쓰면 빈 목록입니다.
+def vad_spans(source: Path) -> list[tuple[float, float]]:
+    """Silero VAD로 발화 구간을 찾습니다. 못 쓰면 빈 목록입니다.
 
     faster-whisper에 들어 있는 VAD라 새 의존성이 없습니다. 실제 녹음은
     배경 잡음이 있어서 무음 감지(FFmpeg silencedetect)로는 발화 구간을
@@ -99,19 +100,26 @@ def vad_onsets(source: Path) -> list[float]:
     """
     try:
         from faster_whisper.audio import decode_audio
-        from faster_whisper.vad import get_speech_timestamps
+        from faster_whisper.vad import VadOptions, get_speech_timestamps
     except ImportError:
         return []
     try:
         audio = decode_audio(str(source), sampling_rate=16000)
-        stamps = get_speech_timestamps(audio)
+        # 기본값은 발화 앞뒤에 400ms를 덧붙입니다. 그대로 쓰면 자막이 그만큼
+        # 일찍 시작합니다(측정: 첫 자막 0.59초, 실제 1.00초). 여유를 끕니다.
+        try:
+            stamps = get_speech_timestamps(audio, VadOptions(speech_pad_ms=0))
+        except TypeError:  # 이 버전에 없는 설정
+            stamps = get_speech_timestamps(audio)
     except Exception:  # noqa: BLE001 - 다듬기 실패가 정렬을 막지 않습니다.
         return []
-    return onsets_from_timestamps(stamps)
+    return spans_from_timestamps(stamps)
 
 
-def silence_onsets(source: Path, *, noise: str = "-35dB", minimum: float = 0.25) -> list[float]:
-    """무음 사이를 발화로 보고 시작 시각을 찾습니다. VAD를 못 쓸 때의 대안입니다.
+def silence_spans(
+    source: Path, *, noise: str = "-35dB", minimum: float = 0.25
+) -> list[tuple[float, float]]:
+    """무음 사이를 발화 구간으로 봅니다. VAD를 못 쓸 때의 대안입니다.
 
     디지털 무음이 또렷한 음성에서만 믿을 만합니다. FFmpeg가 없거나 실패하면
     빈 목록입니다.
@@ -142,15 +150,16 @@ def silence_onsets(source: Path, *, noise: str = "-35dB", minimum: float = 0.25)
         return []
     starts = [float(v) for v in _SILENCE_START.findall(done.stderr)]
     ends = [float(v) for v in _SILENCE_END.findall(done.stderr)]
-    onsets = [] if starts and starts[0] <= 0.01 else [0.0]
-    onsets.extend(ends)
-    return sorted(set(onsets))
+    # 무음이 끝나는 지점부터 다음 무음이 시작되는 지점까지가 발화입니다.
+    begins = ([] if starts and starts[0] <= 0.01 else [0.0]) + ends
+    finishes = starts[1:] if starts and starts[0] <= 0.01 else starts
+    return [(b, f) for b, f in zip(begins, finishes, strict=False) if f > b]
 
 
-def speech_onsets(source: Path) -> list[float]:
-    """말이 시작되는 시각 목록. VAD를 먼저 쓰고 안 되면 무음 감지로 내려갑니다."""
-    found = vad_onsets(source)
-    return found if found else silence_onsets(source)
+def speech_spans(source: Path) -> list[tuple[float, float]]:
+    """발화 구간 목록. VAD를 먼저 쓰고 안 되면 무음 감지로 내려갑니다."""
+    found = vad_spans(source)
+    return found if found else silence_spans(source)
 
 
 def diarize(

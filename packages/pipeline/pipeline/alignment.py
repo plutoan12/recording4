@@ -32,43 +32,57 @@ def squeeze(text: str) -> str:
     return _SPACE.sub("", text)
 
 
-def onsets_from_timestamps(stamps: list, rate: int = 16000) -> list[float]:
-    """VAD가 준 발화 구간에서 시작 시각만 초 단위로 뽑습니다.
+def spans_from_timestamps(stamps: list, rate: int = 16000) -> list[tuple[float, float]]:
+    """VAD가 준 발화 구간을 초 단위 (시작, 끝) 목록으로 바꿉니다.
 
     공급자 버전에 따라 표본 번호를 주기도 하고 초를 주기도 합니다. 값이
     너무 크면 표본 번호로 보고 나눕니다. 형식이 다르면 건너뜁니다.
     """
-    found: list[float] = []
-    for stamp in stamps:
-        value = stamp.get("start") if isinstance(stamp, dict) else getattr(stamp, "start", None)
+
+    def read(stamp, key: str) -> float | None:  # noqa: ANN001
+        value = stamp.get(key) if isinstance(stamp, dict) else getattr(stamp, key, None)
         if value is None:
-            continue
+            return None
         number = float(value)
-        # 초 단위로 1000을 넘는 발화 시작은 16분이 넘는 지점입니다. 표본으로 봅니다.
-        found.append(number / rate if number > 1000 else number)
-    return sorted(set(found))
+        # 초 단위로 1000을 넘는 지점은 16분이 넘습니다. 표본 번호로 봅니다.
+        return number / rate if number > 1000 else number
+
+    found: list[tuple[float, float]] = []
+    for stamp in stamps:
+        begin, finish = read(stamp, "start"), read(stamp, "end")
+        if begin is None or finish is None or finish <= begin:
+            continue
+        found.append((begin, finish))
+    return sorted(found)
 
 
-def snap_starts(cues: list[Cue], onsets: list[float], *, window: float = 2.0) -> list[Cue]:
+def snap_starts(
+    cues: list[Cue], spans: list[tuple[float, float]], *, window: float = 2.0
+) -> list[Cue]:
     """자막 시작을 실제 발화가 시작되는 지점으로 맞춥니다.
 
-    정렬기의 단어 시각은 무음 구간 안쪽으로 당겨지기도 합니다(측정: 마지막
-    문장이 1.73초 이르게 시작). 그러면 아무도 말하지 않는데 자막이 먼저
-    뜹니다. 가까운 발화 시작이 `window` 안에 있으면 거기에 맞춥니다.
+    정렬기의 단어 시각은 무음 안쪽으로 당겨지기도 하고(측정: 합성 음성에서
+    1.73초 이르게 시작) 발화 중간으로 밀리기도 합니다(측정: 사람 목소리에서
+    1.57초 늦게 시작). 어느 쪽이든 자막이 말과 어긋납니다.
 
-    옮겨도 되는 경우만 옮깁니다. 앞 자막을 침범하거나 자막이 사라질 만큼
-    뒤로 가면 그대로 둡니다. 멀리 있는 발화 시작에는 손대지 않습니다.
+    앞 자막이 끝나기 전에 시작한 발화는 앞 자막의 몫이라 후보에서 뺍니다.
+    남은 발화의 시작 중 가장 가까운 것으로 맞춥니다.
+
+    옮겨도 되는 경우만 옮깁니다. `window`를 넘게 움직여야 하거나 자막이
+    사라질 만큼 뒤로 가면 그대로 둡니다. 이 두 조건이 엉뚱한 발화로
+    끌려가는 것을 막습니다.
     """
-    if not onsets:
+    if not spans:
         return cues
-    ordered = sorted(onsets)
     result: list[Cue] = []
     previous_end = 0.0
     for cue in cues:
-        onset = min(ordered, key=lambda value: abs(value - cue.start))
+        # 앞 자막이 말하던 발화는 건너뜁니다. 이 자막의 말이 아닙니다.
+        candidates = [begin for begin, _ in spans if begin >= previous_end]
+        target = min(candidates, key=lambda value: abs(value - cue.start), default=None)
         moved = (
-            onset
-            if abs(onset - cue.start) <= window and previous_end <= onset < cue.end
+            target
+            if target is not None and abs(target - cue.start) <= window and target < cue.end
             else cue.start
         )
         result.append(cue if moved == cue.start else cue.model_copy(update={"start": moved}))
