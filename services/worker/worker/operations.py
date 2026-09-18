@@ -97,14 +97,26 @@ def main():
     args = parser.parse_args()
     last = None
     next_backup = 0
+    backed_up_dump = None
     while True:
         report = check()
-        if not args.once and time.monotonic() >= next_backup:
+        dumps = sorted(Path("/backups").glob("*.dump"), key=lambda p: p.stat().st_mtime)
+        latest_dump = dumps[-1].name if dumps else None
+        report["attention"]["database_backup_stale"] = (
+            not dumps or time.time() - dumps[-1].stat().st_mtime > 93600
+        )
+        if (
+            not args.once
+            and latest_dump
+            and latest_dump != backed_up_dump
+            and time.monotonic() >= next_backup
+        ):
             from worker.backup import snapshot
 
             try:
                 report["media_backup"] = snapshot(Path("/backups/media"))
-                next_backup = time.monotonic() + 86400
+                backed_up_dump = latest_dump
+                next_backup = 0
             except Exception as exc:
                 report["attention"]["media_backup"] = type(exc).__name__
                 next_backup = time.monotonic() + 300

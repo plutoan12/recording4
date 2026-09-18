@@ -17,7 +17,9 @@ RUN pip install --no-cache-dir ".[analysis,providers]"
 
 COPY services ./services
 
-RUN useradd --create-home --uid 10001 appuser
+RUN useradd --create-home --uid 10001 appuser \
+    && mkdir -p /home/appuser/.cache \
+    && chown -R appuser:appuser /home/appuser/.cache
 USER appuser
 
 # 합성과 업로드는 큐를 나눕니다. 동시 실행 수는 서버 사양 측정 후 조정합니다.

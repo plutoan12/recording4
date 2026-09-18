@@ -159,3 +159,15 @@ R8은 이번 세션에서 developers.google.com 접근이 네트워크 정책으
 - 로컬 검증: Python 146개 통과/1개 PostgreSQL 전용 skip, 실제 FFmpeg 합성·디코딩, SQLite 마이그레이션 왕복, ruff, 프런트엔드 타입·빌드, 브라우저 로그인→제작 요청→실제 워커 처리→검수 필요 표시 확인.
 - 실제 STT 추론·유료 공급자·OAuth·업로드·S3·Compose 전체 기동은 미검증. 모든 외부 공급자 테스트는 대역 사용. 자동 얼굴 추적·음원 분리·LLM 하이라이트 추천은 미구현.
 - 다음 담당자는 [CONNECTED_WORKFLOW.md](CONNECTED_WORKFLOW.md)를 먼저 읽고 서버별 인증/가격 상한/예산을 설정한 뒤 비공개 샘플을 검증할 것. 업로드 결과 불명확 상태를 임의 초기화하지 말 것.
+
+
+## Codex 후속: Mac 운영 자동화 (2026-09-18)
+
+- 사용자는 PR 검토·병합과 전체 운영 자동화를 요청한 뒤, 이 Mac에서 먼저 가동하고 유료 처리는 설정 후 시작하도록 선택함.
+- `infra/compose.runtime.yml`, Caddy 관리화면, `scripts/ops.py`와 `smoke.py`, 관리자/버킷 초기화, 자동 점검·만료 작업 재큐잉, DB·미디어 백업·복원 검증, 로그인 시 자동 시작을 추가함. 로컬 주소는 http://localhost:18444. 영구 경로는 `/Users/an-youwon/Projects/recording4`.
+- 실제 PostgreSQL·Redis·MinIO·FFmpeg 워커와 관리화면을 기동. 실제 S3 업로드→ffprobe 검사→큐→세로 렌더→다운로드/디코딩 성공. 무료 합성 내레이션으로 faster-whisper 모델 추론→자막 합성→검수 대기 성공.
+- 발견/수정: Docker Hub MinIO 이미지 다운로드 실패→공식 Quay 경로, 호스트 포트 충돌→전용 18444 포트, 워커 내부 원본 검사 URL 분리, ffprobe 오류의 서명 URL 노출 방지, STT 모델 캐시 권한 수정. 캐시 실패 작업의 재개 성공도 확인함.
+- DB 및 영상 백업 생성, 별도 임시 DB의 실제 복원·조회 검증 후 임시 DB만 삭제. 로그인 LaunchAgent `com.recording4.stack` 등록. 비밀은 `.runtime`에만 저장하고 Git/이미지에서 제외함.
+- 로컬 Python 151 통과/1 PostgreSQL 전용 skip. 실제 유료 번역·더빙·립싱크와 YouTube OAuth·업로드는 실행하지 않음. 실제 비용 한도·음성·계정 연결은 다음 설정 단계.
+- Claude 데스크톱의 기존 recording4 세션에 ff725de 기준 PR #4 독립 리뷰를 요청함. 리뷰 및 병합 결과는 후속 기록 참조.
+- 운영 안내: [LOCAL_OPERATIONS.md](LOCAL_OPERATIONS.md). 외부 HTTPS 도메인, 외부 알림 수신처, 기기 외부 백업과 보관/삭제 기간은 미설정. 원본·백업 자동 삭제는 하지 않음.

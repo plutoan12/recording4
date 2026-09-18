@@ -14,6 +14,8 @@ from adminapi.storage import get_storage
 
 def snapshot(root: Path) -> dict:
     root.mkdir(parents=True, exist_ok=True, mode=0o700)
+    dumps = sorted(root.parent.glob("*.dump"), key=lambda p: p.stat().st_mtime)
+    database = dumps[-1].name if dumps else None
     storage = get_storage()
     entries = []
     for page in storage._client.get_paginator("list_objects_v2").paginate(Bucket=storage._bucket):
@@ -43,9 +45,16 @@ def snapshot(root: Path) -> dict:
                     "file": f"objects/{digest}",
                 }
             )
-    report = {"created_at": utcnow().isoformat(), "bucket": storage._bucket, "objects": entries}
+    report = {
+        "created_at": utcnow().isoformat(),
+        "bucket": storage._bucket,
+        "database_dump": database,
+        "objects": entries,
+    }
     stamp = utcnow().strftime("%Y%m%dT%H%M%SZ")
     path = root / f"media-{stamp}.json"
-    path.write_text(json.dumps(report))
-    path.chmod(0o600)
+    temporary = path.with_suffix(".partial")
+    temporary.write_text(json.dumps(report))
+    temporary.chmod(0o600)
+    temporary.replace(path)
     return {"manifest": path.name, "count": len(entries)}
