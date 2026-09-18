@@ -49,9 +49,10 @@ def measure(text: str, spec: EditSpec, rules: SubtitleRules) -> tuple[int, int] 
             "-i",
             f"color=c=black:s={spec.width}x{spec.height}:d=1",
             # skip=0이 없으면 cropdetect가 앞 두 프레임을 버려서 짧은 입력에서는
-            # 아무것도 출력하지 않습니다. limit=0은 검지 않은 화소를 모두 셉니다.
+            # 아무것도 출력하지 않습니다. limit은 0으로 두면 안 됩니다. color=black은
+            # 제한 범위 검정(Y=16)이라 0보다 커서 화면 전체가 글자로 잡힙니다.
             "-vf",
-            "subtitles=captions.ass,cropdetect=limit=0:round=2:skip=0:reset=1",
+            "subtitles=captions.ass,cropdetect=limit=24:round=2:skip=0:reset=1",
             "-frames:v",
             "3",
             "-f",
@@ -96,17 +97,21 @@ def main() -> int:
     # 줄 길이별 실제 렌더 폭. 규칙이 다시 줄바꿈하지 않도록 한도를 넉넉히 둡니다.
     print(f"{'한글 글자 수':>12} {'렌더 폭(px)':>12} {'화면 대비':>10} {'여백 안':>8}")
     single_line = SubtitleRules(max_chars_per_line=200, max_lines=9)
-    for count in (8, 12, 14, 16, 18, 20, 24):
+    fits = 0
+    for count in (8, 10, 12, 14, 16, 18, 20):
         text = "가" * count
         box = measure(text, spec_for(text, args.font_size, args.width, args.height), single_line)
         if box is None:
             print(f"{count:>12} {'측정 실패':>12}")
             continue
         pixels, _ = box
+        inside = pixels <= usable
+        fits = max(fits, count) if inside else fits
         print(
             f"{count:>12} {pixels:>12} {pixels / args.width:>9.0%} "
-            f"{'예' if pixels <= usable else '아니오':>8}"
+            f"{'예' if inside else '아니오':>8}"
         )
+    print(f"\n글자 크기 {args.font_size}에서 여백 안에 들어가는 한글 글자 수: {fits}자까지")
 
     # 기본 규칙 그대로 그린 결과. 한 줄인지 두 줄인지 높이로 봅니다.
     print()
