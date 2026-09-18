@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import uuid
-from datetime import UTC
 
 from fastapi import APIRouter, HTTPException, Query, status
 from sqlalchemy import select
@@ -13,6 +12,7 @@ from adminapi.models import Budget, Job, SourceAsset, utcnow
 from adminapi.outbox import enqueue
 from adminapi.schemas import JobCreateRequest, JobResponse, JobTransitionRequest
 from pipeline.states import JobState, TransitionError, assert_transition
+from pipeline.time import as_utc
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
 
@@ -36,6 +36,10 @@ def create_job(payload: JobCreateRequest, user: CurrentUser, session: SessionDep
         and payload.workflow.clip.end > float(asset.duration_seconds)
     ):
         raise HTTPException(422, "선택 구간이 원본 길이를 넘습니다.")
+    if payload.workflow.reuse_from_job_id:
+        parent = session.get(Job, payload.workflow.reuse_from_job_id)
+        if parent is None or parent.created_by_id != user.id or parent.source_asset_id != asset.id:
+            raise HTTPException(422, "같은 사용자의 동일 원본 작업만 음성을 재사용할 수 있습니다.")
     job = Job(
         source_asset_id=asset.id,
         target_language=payload.target_language,
@@ -85,7 +89,7 @@ def transition(
         raise HTTPException(
             409, "허용되지 않은 전이입니다. 단계 실행·결과물 승인 API를 사용하세요."
         )
-    if job.lease_until and job.lease_until.replace(tzinfo=UTC) > utcnow():
+    if job.lease_until and as_utc(job.lease_until) > utcnow():
         raise HTTPException(409, "실행 중인 단계가 끝난 뒤 상태를 변경하세요.")
     try:
         job.state = assert_transition(job.state, payload.event)

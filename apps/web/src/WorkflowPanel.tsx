@@ -73,11 +73,11 @@ export function WorkflowPanel({assets,jobs,draft,onCreated}:{assets:SourceAsset[
       <p>{detail.state} · {detail.stage} {detail.reason}</p>
       <ol>{detail.stages.map(s=><li key={s.id}>{s.name} · {s.state} · 시도 {s.attempt}{s.estimated_cost&&` · 비용 상한 $${s.estimated_cost}`}
         {s.uncertain && <details><summary>공급자 내역 확인 후 처리</summary><p>요청 결과를 확인할 수 없어 자동 재호출을 막았습니다. 공급자의 실행·청구 내역을 확인한 경우에만 선택하세요.</p>
-          {(['confirmed_not_executed','charged_without_result'] as const).map(outcome=><button key={outcome} disabled={busy} onClick={()=>{
+          {(['confirmed_no_charge','charged_without_result'] as const).map(outcome=><button key={outcome} disabled={busy} onClick={()=>{
             const note=window.prompt('공급자에서 확인한 내역을 적어주세요 (5자 이상).')
             if(!note)return
             void act(async()=>{await request(`/jobs/${detail.id}/stages/${s.id}/resolve`,{method:'POST',body:JSON.stringify({outcome,note})});setMessage('정산했습니다. 작업 재개로 다시 실행할 수 있습니다.')})
-          }}>{outcome==='confirmed_not_executed'?'미실행 확인·예약 해제':'청구 확인·상한 정산'}</button>)}
+          }}>{outcome==='confirmed_no_charge'?'미청구 확인·예약 해제':'청구 확인·상한 정산'}</button>)}
         </details>}
       </li>)}</ol>
       {(detail.state==='blocked'||detail.state==='failed'||detail.state==='processing') && <>
@@ -90,9 +90,9 @@ export function WorkflowPanel({assets,jobs,draft,onCreated}:{assets:SourceAsset[
         <button disabled={busy||translated.length!==detail.cues.length} onClick={()=>void act(async()=>{
           const job=jobs.find(j=>j.id===detail.id);if(!job)throw new Error('작업을 다시 조회하세요.')
           const result=await request<Job>('/jobs',{method:'POST',body:JSON.stringify({source_asset_id:job.source_asset_id,target_language:job.target_language,
-            workflow:{...detail.options,translated_cues:translated,transcript:detail.cues.map(c=>{const start=(detail.options.clip as {start:number}|null)?.start??0;return {...c,start:c.start+start,end:c.end+start}})}})})
+            workflow:{...detail.options,reuse_from_job_id:detail.id,translated_cues:translated,transcript:detail.cues.map(c=>{const start=(detail.options.clip as {start:number}|null)?.start??0;return {...c,start:c.start+start,end:c.end+start}})}})})
           choose(result.id);setMessage('수정한 번역으로 새 작업을 만들었습니다. 새 결과물은 다시 승인해야 합니다.')
-        })}>수정 번역으로 새 버전 제작</button>
+        })}>수정 문장만 다시 더빙해 새 버전 제작</button>
       </details>}
       {detail.artifact_id && <>
         <button disabled={busy} onClick={()=>void act(async()=>{const p=await request<{url:string}>(`/artifacts/${detail.artifact_id}/preview`);setUrl(p.url);setPlayed(false)})}>최종 영상 검수</button>

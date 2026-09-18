@@ -25,7 +25,8 @@ from adminapi.models import (
 )
 from adminapi.outbox import enqueue
 from adminapi.services.budget import held_total, release, settle
-from pipeline.states import JobState, PublicationState, StageRunState
+from pipeline.states import JobState, PublicationState, StageRunState, assert_transition
+from pipeline.time import as_utc
 
 router = APIRouter(tags=["workflow"])
 
@@ -38,7 +39,7 @@ def get_job(session, job_id):
 
 
 def ensure_idle(job):
-    if job.lease_until and job.lease_until.replace(tzinfo=UTC) > utcnow():
+    if job.lease_until and as_utc(job.lease_until) > utcnow():
         raise HTTPException(409, "단계가 실행 중입니다. 완료 후 다시 시도하세요.")
 
 
@@ -87,7 +88,8 @@ def detail(job_id: uuid.UUID, user: CurrentUser, session: SessionDep):
                 "name": s.stage,
                 "state": s.state,
                 "attempt": s.attempt,
-                "uncertain": bool(s.outputs.get("invoked")) and not s.provider_job_id,
+                "uncertain": bool(s.outputs.get("invoked"))
+                and (not s.provider_job_id or bool(s.outputs.get("terminal_failure"))),
                 "estimated_cost": s.estimated_cost,
                 "error": s.error,
             }
@@ -108,9 +110,12 @@ def resume(job_id: uuid.UUID, user: CurrentUser, session: SessionDep):
             StageRun.state.in_([StageRunState.RUNNING, StageRunState.FAILED]),
         )
     )
-    if any(s.outputs.get("invoked") and not s.provider_job_id for s in uncertain):
+    if any(
+        s.outputs.get("invoked") and (not s.provider_job_id or s.outputs.get("terminal_failure"))
+        for s in uncertain
+    ):
         raise HTTPException(409, "공급자 호출 결과를 먼저 확인·정산하세요.")
-    job.state = JobState.QUEUED
+    job.state = assert_transition(job.state, "resume")
     job.state_reason = None
     job.lease_token = job.lease_until = None
     enqueue(
@@ -123,7 +128,7 @@ def resume(job_id: uuid.UUID, user: CurrentUser, session: SessionDep):
 
 
 class Resolution(BaseModel):
-    outcome: Literal["confirmed_not_executed", "charged_without_result"]
+    outcome: Literal["confirmed_not_executed", "confirmed_no_charge", "charged_without_result"]
     note: str = Field(min_length=5, max_length=1000)
 
 
@@ -142,18 +147,20 @@ def resolve(
         stage is None
         or stage.job_id != job_id
         or not stage.outputs.get("invoked")
-        or stage.provider_job_id
+        or (stage.provider_job_id and not stage.outputs.get("terminal_failure"))
     ):
         raise HTTPException(409, "확인 대상 유료 호출이 아닙니다.")
     for hold in session.scalars(
         select(BudgetReservation).where(BudgetReservation.stage_run_id == stage.id)
     ):
-        if payload.outcome == "confirmed_not_executed":
+        if payload.outcome in ("confirmed_not_executed", "confirmed_no_charge"):
             release(session, hold.id)
         else:
             settle(session, hold.id, None)
     stage.outputs = {
         "resolution": payload.outcome,
+        "previous_provider_job_id": stage.provider_job_id,
+        "previous_outputs": stage.outputs,
         "note": payload.note,
         "resolved_by": str(user.id),
     }
@@ -271,7 +278,7 @@ def create_publication(payload: PublicationRequest, user: CurrentUser, session: 
             "description": payload.description,
             "made_for_kids": payload.made_for_kids,
             "checksum": artifact.checksum,
-        } or existing.scheduled_at_utc.replace(tzinfo=UTC) != payload.publish_at.astimezone(UTC):
+        } or as_utc(existing.scheduled_at_utc) != payload.publish_at.astimezone(UTC):
             raise HTTPException(
                 409, "이미 다른 예약 설정이 저장되어 있습니다. 중복 업로드하지 않습니다."
             )
@@ -317,7 +324,7 @@ def resume_publication(publication_id: uuid.UUID, user: CurrentUser, session: Se
         raise HTTPException(404, "게시 요청이 없습니다.")
     if row.state in (PublicationState.PUBLISHED, PublicationState.CANCELLED):
         raise HTTPException(409, "종료된 요청입니다.")
-    if row.lease_until and row.lease_until.replace(tzinfo=UTC) > utcnow():
+    if row.lease_until and as_utc(row.lease_until) > utcnow():
         raise HTTPException(409, "처리 중입니다.")
     if (
         row.checkpoint.get("started")

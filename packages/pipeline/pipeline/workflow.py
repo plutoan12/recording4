@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 from typing import Literal
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -16,6 +17,7 @@ class WorkflowOptions(BaseModel):
     source_language: str | None = Field(default=None, pattern=r"^[a-z]{2,3}$")
     voice_id: str | None = Field(default=None, max_length=128)
     lipsync: bool = False
+    reuse_from_job_id: UUID | None = None
     clip: EditSpec | None = None
     transcript: list[Cue] | None = Field(default=None, max_length=5000)
     translated_cues: list[Cue] | None = Field(default=None, max_length=5000)

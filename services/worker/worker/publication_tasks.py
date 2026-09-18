@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import tempfile
 import uuid
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from sqlalchemy import or_, select, update
@@ -16,6 +16,7 @@ from adminapi.models import Approval, Artifact, Publication, utcnow
 from adminapi.outbox import enqueue
 from adminapi.storage import get_storage
 from pipeline.states import PublicationState
+from pipeline.time import as_utc
 from worker.celery_app import celery_app
 from worker.youtube import UploadNeedsReview, schedule_video, upload_approved
 
@@ -86,7 +87,7 @@ def run_publication(publication_id: str):
                 raise UploadNeedsReview("OAuth 계정의 채널이 지정된 채널과 다릅니다.")
             video_id = row.youtube_video_id
             checkpoint = dict(row.checkpoint)
-            scheduled = row.scheduled_at_utc.replace(tzinfo=UTC)
+            scheduled = as_utc(row.scheduled_at_utc)
             if not video_id:
                 if scheduled <= utcnow():
                     raise UploadNeedsReview("예약 시각이 지났습니다. 새 예약 요청을 준비하세요.")

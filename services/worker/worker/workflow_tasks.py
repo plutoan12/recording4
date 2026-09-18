@@ -31,6 +31,7 @@ from adminapi.services.budget import reserve, settle
 from adminapi.storage import get_storage
 from pipeline.budget import BudgetShortfall
 from pipeline.editing import Cue, clip_cues
+from pipeline.hashing import StageInputs
 from pipeline.states import JobState, StageRunState
 from pipeline.workflow import WorkflowOptions
 from worker.analysis import transcribe
@@ -40,6 +41,10 @@ from worker.providers import ElevenLabsSpeech, GoogleTranslator, SyncLipsync
 
 
 class Blocked(RuntimeError):
+    pass
+
+
+class RemoteTerminalFailure(Blocked):
     pass
 
 
@@ -69,6 +74,62 @@ def next_step(data: dict, options: WorkflowOptions) -> str | None:
     if options.lipsync and "lipsync_key" not in data:
         return "lipsync"
     return None if "artifact_id" in data else "render"
+
+
+def tts_inputs(data, options, settings):
+    cue = data["translated"][len(data.get("voices", []))]
+    return StageInputs(
+        stage="tts",
+        provider="elevenlabs",
+        model_id=settings.tts_model,
+        model_version=settings.tts_model_version,
+        voice_id=options.voice_id,
+        language=data["target"],
+        parameters={
+            "text": cue["text"],
+            "voice_version": settings.tts_voice_version,
+            "format": "mp3_44100_128",
+        },
+        contract_version=2,
+    )
+
+
+def cached_voice(session, job, inputs, options, settings):
+    automatic = inputs.reusable and bool(settings.tts_voice_version)
+    if not automatic and not options.reuse_from_job_id:
+        return None
+    query = (
+        select(StageRun)
+        .join(Job, Job.id == StageRun.job_id)
+        .where(
+            StageRun.state == StageRunState.SUCCEEDED,
+            StageRun.input_hash == inputs.digest(),
+            StageRun.provider == "elevenlabs",
+            Job.created_by_id == job.created_by_id,
+            Job.id != job.id,
+        )
+    )
+    if not automatic:
+        query = query.where(
+            Job.id == options.reuse_from_job_id, Job.source_asset_id == job.source_asset_id
+        )
+    else:
+        query = query.where(StageRun.reusable.is_(True))
+    for candidate in session.scalars(query.order_by(StageRun.finished_at.desc()).limit(20)):
+        key = candidate.outputs.get("voice_key")
+        if key and candidate.outputs.get("voice_checksum") and get_storage().head(key):
+            return candidate
+    return None
+
+
+def voice_output(data, key, checksum):
+    return {
+        "voice_key": key,
+        "voice_checksum": checksum,
+        "voices": data.get("voices", []) + [key],
+        "voice_checksums": data.get("voice_checksums", [None] * len(data.get("voices", [])))
+        + [checksum],
+    }
 
 
 def paid_estimate(name, data, options, settings):
@@ -216,14 +277,17 @@ def execute_step(name, options, data, asset, directory, stage_id, remote_id, sav
         with httpx.Client() as client:
             ElevenLabsSpeech(
                 settings.elevenlabs_api_key, client=client, allow_paid=True
-            ).synthesize(cue["text"], options.voice_id, voice)
+            ).synthesize(cue["text"], options.voice_id, voice, model=settings.tts_model)
         key = upload(storage, f"{prefix}/voice.mp3", voice, "audio/mpeg")
-        return {"voices": data.get("voices", []) + [key]}
+        return voice_output(data, key, hashlib.sha256(voice.read_bytes()).hexdigest())
     if name == "mix":
         paths = []
         for i, key in enumerate(data["voices"]):
             path = directory / f"voice-{i}.mp3"
             storage.download_file(key, path)
+            expected = data.get("voice_checksums", [None] * len(data["voices"]))[i]
+            if expected and hashlib.sha256(path.read_bytes()).hexdigest() != expected:
+                raise Blocked("저장된 더빙 음성이 변경되었습니다. 파일을 확인하세요.")
             paths.append(path)
         output = directory / "speech.wav"
         aligned = mix_speech(
@@ -251,7 +315,9 @@ def execute_step(name, options, data, asset, directory, stage_id, remote_id, sav
                 save_remote(remote_id)
             result = adapter.status(remote_id)
             if result["status"] in ("FAILED", "REJECTED"):
-                raise Blocked("립싱크 공급자가 실패를 반환했습니다. 공급자 작업을 확인하세요.")
+                raise RemoteTerminalFailure(
+                    "립싱크가 종료 실패했습니다. 공급자 청구를 확인·정산한 후 재개하세요."
+                )
             if result["status"] != "COMPLETED":
                 return {"waiting": True}
             url = result.get("outputUrl")
@@ -355,17 +421,24 @@ def run_job(job_id: str):
                 )
             if stage and stage.state == StageRunState.FAILED and stage.outputs.get("invoked"):
                 raise Blocked("유료 요청 결과를 확인하고 단계 정산을 완료하세요.")
-            remote = stage.provider_job_id if stage else None
-            estimate = None if remote else paid_estimate(name, data, options, get_settings())
+            remote = (
+                stage.provider_job_id if stage and stage.state != StageRunState.FAILED else None
+            )
+            settings = get_settings()
+            inputs = tts_inputs(data, options, settings) if name.startswith("dub:") else None
             if stage is None or stage.state == StageRunState.FAILED:
                 attempt = stage.attempt + 1 if stage else 1
                 stage = StageRun(
                     job_id=job.id,
                     source_asset_id=asset.id,
                     stage=name,
-                    input_hash=hashlib.sha256(
+                    input_hash=inputs.digest()
+                    if inputs
+                    else hashlib.sha256(
                         json.dumps([job.workflow_config, name], sort_keys=True).encode()
                     ).hexdigest(),
+                    reusable=bool(inputs and inputs.reusable and settings.tts_voice_version),
+                    provider="elevenlabs" if inputs else None,
                     attempt=attempt,
                     state=StageRunState.PENDING,
                 )
@@ -378,6 +451,22 @@ def run_job(job_id: str):
                 job.lease_token = job.lease_until = None
                 session.commit()
                 return {"status": "reused"}
+            cached = cached_voice(session, job, inputs, options, settings) if inputs else None
+            if cached:
+                result = voice_output(
+                    data, cached.outputs["voice_key"], cached.outputs["voice_checksum"]
+                )
+                result["reused_from_stage_id"] = str(cached.id)
+                stage.outputs = result
+                stage.state = StageRunState.SUCCEEDED
+                stage.finished_at = utcnow()
+                stage.estimated_cost = stage.actual_cost = Decimal("0")
+                job.workflow_data = {**data, **result}
+                continuation(session, job.id)
+                job.lease_token = job.lease_until = None
+                session.commit()
+                return {"status": "reused", "stage": name}
+            estimate = None if remote else paid_estimate(name, data, options, settings)
             if estimate is not None and not stage.outputs.get("invoked"):
                 hold_budgets(session, job, stage, estimate)
                 stage.estimated_cost = estimate
@@ -430,9 +519,11 @@ def run_job(job_id: str):
             job = session.get(Job, job_uuid)
             if job.lease_token == token:
                 stage = session.get(StageRun, stage_id) if stage_id else None
-                if stage and not stage.provider_job_id:
+                if stage and (not stage.provider_job_id or isinstance(exc, RemoteTerminalFailure)):
                     stage.state = StageRunState.FAILED
                     stage.error = type(exc).__name__
+                    if isinstance(exc, RemoteTerminalFailure):
+                        stage.outputs = {**stage.outputs, "terminal_failure": True}
                 known = isinstance(exc, Blocked | BudgetShortfall | TimingError)
                 job.state = (
                     JobState.BLOCKED
