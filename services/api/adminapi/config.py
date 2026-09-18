@@ -32,10 +32,11 @@ class Settings(BaseSettings):
     whisper_model: str = "small"
     whisper_device: str = "cpu"
 
-    # 자막 표시 규칙. 기본값은 한국어 기준 제안이며 실제 화면 측정 후 조정합니다.
-    subtitle_max_chars_per_line: int = 20
+    # 자막 표시 규칙. 길이 단위는 글자 폭입니다(한글 1자, 라틴·공백·문장부호 0.5자).
+    # 기본값은 Netflix 한국어 자막 지침(성인물)이며 실제 화면 측정 후 조정합니다.
+    subtitle_max_chars_per_line: int = 16
     subtitle_max_lines: int = 2
-    subtitle_max_cps: float = 20.0
+    subtitle_max_cps: float = 14.0
     subtitle_min_duration: float = 1.0
     subtitle_max_duration: float = 7.0
 

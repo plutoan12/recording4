@@ -317,3 +317,35 @@ SRT/VTT 내보내기는 이미 쓰는 pysubs2로 가능하므로 새 의존성�
 - 자막 기본값(줄 길이 20자·2줄·20 CPS)은 측정 근거가 없는 제안값입니다.
 - 워커 이미지에 `[subtitles]`와 CPU 전용 PyTorch를 추가했습니다. 작업 환경에는 Docker 데몬이 없고 `download.pytorch.org`가 차단되어 빌드를 돌릴 수 없었으므로, CI에 **워커 이미지 빌드 잡**을 추가해 거기서 검증합니다. 잡은 이미지를 빌드하고 컨테이너 안에서 `torch.__version__`에 `+cpu`가 들어 있는지와 워커 모듈 임포트를 확인합니다. PR과 main에서만 돌아갑니다.
 - Dockerfile의 torch 고정값은 whisperx 요구 범위와 연동됩니다. whisperx를 올릴 때 함께 고치지 않으면 빌드가 실패합니다.
+
+
+## 자막 표시 규칙에 표준 근거 적용 (2026-09-18)
+
+- 사용자 요청: 자막 관련 코드를 더 조사하고, 필요한 것은 설치하고 참고할 것은 반영. 브랜치 `claude/claude-md-design-review-v8qdz4`(PR #7).
+- 담당 파일: `packages/pipeline/pipeline/subtitles.py`, `services/api/adminapi/config.py`, `tests/test_subtitles.py`, `docs/{ARCHITECTURE,OPEN_SOURCE_INTEGRATIONS,TECH_DECISIONS,HANDOFF}.md`, `.github/workflows/ci.yml`.
+- 의존 작업: 없음. 새 런타임 의존성을 추가하지 않았습니다.
+
+### 반영한 것
+
+- 길이 단위를 글자 폭으로 변경(`text_width()`). 한글 1자, 라틴·숫자·공백·문장부호 0.5자. 줄바꿈·분할·CPS 검사가 모두 이 값을 씁니다.
+- 기본값을 Netflix 한국어 자막 지침(성인물)에 맞춤: 줄당 16자, 2줄, 초당 14자, 최대 7초. 최소 표시 시간은 1초로 유지(지침 5/6초보다 보수적).
+- 근거와 출처, 반영하지 않은 규칙을 `docs/OPEN_SOURCE_INTEGRATIONS.md`에 기록.
+
+### 설치 판단
+
+- **새로 설치한 런타임 의존성 없음**. ffsubsync는 쓸 자리가 없고, silero-vad는 faster-whisper 내장 VAD를 `transcribe()`에서 이미 쓰고 있습니다. subaligner·NeMo는 설치량이 CPU 전용 결정과 어긋납니다. 근거는 오픈소스 통합 문서에 남겼습니다.
+- 개발 환경에만 kss 6.0.6을 설치해 문장 분리 경로를 처음으로 실제 실행 확인했습니다(그전에는 구두점 대체 경로만 돌았습니다).
+
+### 검증 결과
+
+- `pytest -q`: 204 통과 / 5 skip. kss 설치 전후 모두 동일.
+- `ruff check`, `ruff format --check` 통과.
+- CI(`5c139cc`) 세 잡 모두 성공. 워커 이미지 **4.66GB**, API 이미지 256MB, 컨테이너 안 `torch 2.8.0+cpu` 확인.
+
+### 남은 문제
+
+- 기본값은 OTT 번역 자막 기준입니다. 숏폼 세로 화면에서의 적정성은 여전히 측정하지 않았습니다.
+- 구·절 단위 줄 나눔 미구현. 두 줄로 끊길 때 어절 경계까지만 맞춥니다.
+- WhisperX는 여전히 미사용입니다(화자 분리 → `voice_assignments`).
+- 실제 stable-ts 정렬 품질과 모델 다운로드는 미검증입니다.
+- Netflix 지침 원문 페이지는 이그레스 정책으로 직접 열지 못했습니다. 검색 결과 스니펫으로 확인한 값입니다.

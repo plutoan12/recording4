@@ -31,6 +31,31 @@
 
 검토한 뒤 채택하지 않은 후보도 남깁니다. [aeneas](https://github.com/readbeyond/aeneas)는 **AGPL v3**이라 네트워크 서비스 제공 시 서버 소스 공개 의무가 생깁니다. [ctc-forced-aligner](https://github.com/MahmoudAshraf97/ctc-forced-aligner)는 코드가 BSD이나 **기본 모델이 CC-BY-NC 4.0(비상업)** 입니다. 두 경우 모두 이 저장소의 사용 형태와 맞지 않아 제외했습니다.
 
+### 자막 표시 규칙 기준
+
+기본값에 근거가 없다는 문제를 남겨 두었습니다. 업계 표준으로 대신했습니다. 기준은 Netflix의 [Korean Timed Text Style Guide](https://partnerhelp.netflixstudios.com/hc/en-us/articles/216001127-Korean-Timed-Text-Style-Guide)와 [General Requirements](https://partnerhelp.netflixstudios.com/hc/en-us/articles/215758617-Timed-Text-Style-Guide-General-Requirements)입니다.
+
+| 항목 | 지침 | 이 저장소 기본값 |
+|---|---|---|
+| 줄당 글자 수 | 16자. 라틴 문자·공백·문장부호는 0.5자로 계산 | 16자, 같은 계산 방식 |
+| 줄 수 | 대사 2줄 | 2줄 |
+| 읽기 속도 | 성인물 초당 14자, 아동물 11자 | 14자 |
+| 최소 표시 시간 | 5/6초 | 1초 (더 보수적) |
+| 최대 표시 시간 | 7초 | 7초 |
+
+- 폭 계산은 `pipeline/subtitles.py:text_width()`입니다. `unicodedata.east_asian_width`가 `W`/`F`인 글자를 1자로, 나머지를 0.5자로 셉니다. 줄바꿈·분할·CPS 검사가 모두 이 값을 씁니다.
+- 지침은 OTT 번역 자막 기준이고 숏폼은 세로 화면·큰 글꼴이라 조건이 다릅니다. 그대로 최적값이라고 보지 않으며 다섯 값 모두 `R4_SUBTITLE_*` 설정으로 조정할 수 있습니다.
+- **반영하지 않은 규칙**: 지침의 줄 나눔(line treatment)은 구·절 단위로 끊으라고 합니다. 현재 구현은 문장 → 어절 → 글자 순서로만 끊고 한국어 절 경계는 판정하지 않습니다. 휴리스틱을 급히 넣기보다 한계로 남깁니다.
+- 원문 페이지는 작업 환경의 이그레스 정책이 막고 있어 검색 결과 스니펫으로 확인했습니다. 값을 바꾸기 전에 원문을 직접 확인하십시오.
+
+### 검토했으나 추가하지 않은 자막 도구
+
+- [ffsubsync](https://github.com/smacke/ffsubsync) (MIT): 이미 있는 자막 파일의 싱크를 오디오로 보정합니다. 지금은 자막을 우리가 만들어 쓸 자리가 없습니다. 외부 SRT 반입 경로가 생기면 그때가 적기입니다.
+- silero-vad (MIT): 별도로 설치하지 않았습니다. faster-whisper가 Silero VAD를 내장하고 있고 `analysis.py:transcribe()`가 `vad_filter=True`로 이미 사용합니다.
+- [subaligner](https://github.com/baxtree/subaligner), NeMo Forced Aligner: 정렬 품질은 좋으나 TensorFlow/NeMo를 통째로 끌어옵니다. 이미 CPU 전용 휠로 설치량을 줄인 결정과 어긋납니다.
+- `srt`, `webvtt-py`: pysubs2가 SRT·WebVTT·ASS를 모두 처리하므로 중복입니다.
+- [Subtitle Edit](https://github.com/SubtitleEdit/subtitleedit) (GPL, C#): 의존성으로 쓸 수 없습니다. CPS 계산과 줄 분배 규칙은 참고 자료로만 봅니다.
+
 조회한 주요 라이선스 사본은 [third_party/licenses](../third_party/licenses)에 보관합니다. 설치 패키지의 라이선스·NOTICE도 그대로 유지합니다. FFmpeg는 빌드 옵션에 따라 조건이 달라지므로 실제 배포 바이너리와 소스 제공 조건을 확인해야 합니다. Python 라이브러리의 라이선스가 모델 가중치·API 서비스 약관까지 대체하지는 않습니다.
 
 ## 실제로 연결한 기능
@@ -67,7 +92,10 @@ Dockerfile의 torch 버전은 whisperx가 요구하는 범위(`torch~=2.8.0`, `t
 - **설치량 8.4GB**(기본 인덱스). 이 중 nvidia CUDA 휠이 대부분입니다.
 - whisperx가 torch를 2.8.0으로 고정합니다. stable-ts 단독 설치 시의 2.14.0보다 낮으므로 한쪽을 올릴 때 확인이 필요합니다.
 - whisperx가 optuna를 통해 alembic·sqlalchemy를 요구하지만 하한 조건(`>=`)이라 프로젝트 고정값과 충돌하지 않습니다.
-- **미검증**: CPU 전용 설치 경로와 워커 이미지 빌드. 작업 환경이 `download.pytorch.org`를 차단하고 Docker 데몬도 없어 실행하지 못했습니다. 배포 전에 `docker compose -f infra/docker-compose.yml build worker`를 한 번 돌려 확인해야 합니다.
+- CPU 전용 설치 경로와 워커 이미지 빌드는 **CI에서 검증했습니다**(2026-09-18, GitHub Actions `워커 이미지 빌드` 잡). 작업 환경에는 Docker 데몬이 없고 `download.pytorch.org`가 차단되어 직접 돌릴 수 없어 CI가 대신합니다.
+  - 워커 이미지 **4.66GB**, API 이미지 256MB. 빌드 시간 약 3분.
+  - 컨테이너 안에서 `torch 2.8.0+cpu` 확인. CUDA 휠로 되돌아가면 잡이 실패합니다.
+  - 워커 모듈과 stable-ts·whisperx·kss·pysubs2·faster-whisper 임포트 확인. 모델은 내려받지 않습니다.
 - 대본 가져오기·새 버전 저장, 문장 경계 기반 구간 후보. 현재 후보 알고리즘은 오프라인 규칙 기반이며 LLM이나 조회수 예측 기능이 아닙니다.
 - 관리화면: 영상 재생, 구간·세로 구도·자막·제목 편집, 렌더 상태, 결과 재생·다운로드, 버전별 승인.
 - 명령행: `python -m worker.cli`로 DB·S3 없이 로컬 파일 처리.
