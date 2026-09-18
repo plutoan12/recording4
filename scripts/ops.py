@@ -56,6 +56,30 @@ def initialize():
     print(f"Private settings created: {ENV_FILE}")
 
 
+def docker_environment():
+    environment = dict(os.environ)
+    socket = Path.home() / ".docker/run/docker.sock"
+    if sys.platform == "darwin" and socket.exists():
+        # Public images require no registry credentials. Avoid GUI keychain helpers
+        # hanging when launched from a background login agent.
+        config = RUNTIME / "docker-client"
+        config.mkdir(mode=0o700, exist_ok=True)
+        settings = config / "config.json"
+        if not settings.exists():
+            settings.write_text(
+                json.dumps(
+                    {
+                        "auths": {},
+                        "cliPluginsExtraDirs": [str(Path.home() / ".docker/cli-plugins")],
+                    }
+                )
+            )
+            settings.chmod(0o600)
+        environment["DOCKER_CONFIG"] = str(config)
+        environment["DOCKER_HOST"] = f"unix://{socket}"
+    return environment
+
+
 def compose(*args, **kwargs):
     return subprocess.run(
         [
@@ -67,7 +91,7 @@ def compose(*args, **kwargs):
             str(ROOT / "infra/compose.runtime.yml"),
             *args,
         ],
-        env={**os.environ, "R4_ENV_FILE": str(ENV_FILE)},
+        env={**docker_environment(), "R4_ENV_FILE": str(ENV_FILE)},
         check=True,
         **kwargs,
     )
@@ -164,12 +188,20 @@ def main():
     elif args.command == "login-start":
         subprocess.run(["/usr/bin/open", "-a", "Docker"], check=True)
         for _ in range(90):
-            if (
-                subprocess.run(
-                    ["docker", "info"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
-                ).returncode
-                == 0
-            ):
+            try:
+                ready = (
+                    subprocess.run(
+                        ["docker", "version", "--format", "{{.Server.Version}}"],
+                        env=docker_environment(),
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                        timeout=5,
+                    ).returncode
+                    == 0
+                )
+            except subprocess.TimeoutExpired:
+                ready = False
+            if ready:
                 compose("up", "-d", "--wait", "--wait-timeout", "300")
                 break
             time.sleep(2)
