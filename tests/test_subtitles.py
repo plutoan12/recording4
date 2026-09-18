@@ -115,16 +115,16 @@ def test_short_cue_is_only_wrapped() -> None:
 
 
 def test_check_reports_reading_speed() -> None:
-    # 두 줄(폭 32)에는 들어가지만 1초에 30자는 기본 한도 14자/초를 넘습니다.
+    # 두 줄(폭 32)에는 들어가지만 1초에 30자는 기본 한도 12자/초를 넘습니다.
     fast = [Cue(start=0, end=1, text="가" * 30)]
     assert [v.kind for v in check(fast, DEFAULT_RULES)] == ["cps"]
 
 
 def test_default_rules_follow_the_korean_guide() -> None:
-    """기본값의 근거는 Netflix 한국어 자막 지침입니다. 최소 시간만 더 보수적입니다."""
+    """근거는 Netflix 한국어 지침 I부입니다. SDH 상향값(14자/초)은 쓰지 않습니다."""
     assert DEFAULT_RULES.max_chars_per_line == 16
     assert DEFAULT_RULES.max_lines == 2
-    assert DEFAULT_RULES.max_cps == 14.0
+    assert DEFAULT_RULES.max_cps == 12.0
     assert DEFAULT_RULES.max_duration == 7.0
     assert DEFAULT_RULES.min_duration >= 5 / 6
 

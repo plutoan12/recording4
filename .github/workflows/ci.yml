@@ -129,6 +129,13 @@ jobs:
       - name: API 이미지 빌드
         run: docker build -f infra/Dockerfile.api -t recording4-api:ci .
 
+      # 자막 기본값이 실제 세로 화면에서 여백 안에 한 줄로 들어가는지 렌더해서 잽니다.
+      # 폰트 메트릭 계산이 아니라 libass 렌더 결과를 FFmpeg cropdetect로 측정합니다.
+      - name: 자막 화면 측정
+        run: |
+          docker run --rm -v "$PWD/scripts:/work:ro" --entrypoint python \
+            recording4-worker:ci /work/measure_subtitles.py
+
       # 빌드 로그가 길어서 중간 출력은 찾기 어렵습니다. 잡 끝에서 한 번 더 모읍니다.
       - name: 이미지 요약
         run: |
