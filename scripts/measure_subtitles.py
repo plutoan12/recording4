@@ -42,14 +42,18 @@ def measure(text: str, spec: EditSpec, rules: SubtitleRules) -> tuple[int, int] 
         command = [
             ffmpeg_binary(),
             "-hide_banner",
+            "-loglevel",
+            "info",
             "-f",
             "lavfi",
             "-i",
-            f"color=c=black:s={spec.width}x{spec.height}:d=0.1",
+            f"color=c=black:s={spec.width}x{spec.height}:d=1",
+            # skip=0이 없으면 cropdetect가 앞 두 프레임을 버려서 짧은 입력에서는
+            # 아무것도 출력하지 않습니다. limit=0은 검지 않은 화소를 모두 셉니다.
             "-vf",
-            "subtitles=captions.ass,cropdetect=limit=0:round=2:reset=1",
+            "subtitles=captions.ass,cropdetect=limit=0:round=2:skip=0:reset=1",
             "-frames:v",
-            "1",
+            "3",
             "-f",
             "null",
             "-",
@@ -57,6 +61,9 @@ def measure(text: str, spec: EditSpec, rules: SubtitleRules) -> tuple[int, int] 
         done = subprocess.run(command, cwd=temp, capture_output=True, text=True, timeout=120)
     found = _CROP.findall(done.stderr)
     if not found:
+        # 왜 못 쟀는지 알 수 있게 FFmpeg가 한 말을 남깁니다.
+        tail = "\n".join(line for line in done.stderr.splitlines()[-8:] if line.strip())
+        print(f"  (FFmpeg 종료 코드 {done.returncode})\n  {tail}")
         return None
     width, height, _, _ = found[-1]
     return int(width), int(height)
