@@ -5,6 +5,7 @@ import type { WorkflowDraft } from './WorkflowPanel'
 
 type Cue = { start: number; end: number; text: string }
 type Suggestion = { start: number; end: number; title: string; reason: string }
+type Violation = { index: number; kind: string; detail: string }
 type Task = { id: string; source_asset_id: string; kind: string; state: string; error: string | null;
   result: { artifact_id?: string; scenes?: {start: number; end: number}[] } }
 
@@ -18,6 +19,8 @@ export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWo
   const [title, setTitle] = useState('')
   const [captions, setCaptions] = useState<Cue[]>([])
   const [suggestions, setSuggestions] = useState<Suggestion[]>([])
+  const [violations, setViolations] = useState<Violation[]>([])
+  const [plainScript, setPlainScript] = useState('')
   const [tasks, setTasks] = useState<Task[]>([])
   const [outputUrl, setOutputUrl] = useState('')
   const [previewed, setPreviewed] = useState('')
@@ -95,6 +98,20 @@ export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWo
           setCaptions(await request<Cue[]>(`/source-assets/${assetId}/transcript`))
         })}>대본 다시 읽기</button>
       </div>
+      <details>
+        <summary>시간 없는 대본 붙여넣기</summary>
+        <p>이미 있는 대본을 원본 음성에 맞춰 시각을 찾습니다. 글자는 그대로 두고 시간만 붙입니다. 유료 호출이 아닙니다.</p>
+        <textarea rows={6} maxLength={50000} value={plainScript} placeholder="대본을 붙여넣으세요"
+          onChange={e => setPlainScript(e.target.value)} />
+        <button disabled={busy || !plainScript.trim()} onClick={() => void act(async () => {
+          await request(`/source-assets/${assetId}/align`, {method:'POST', body: JSON.stringify({text: plainScript})})
+          setMessage('대본 정렬을 요청했습니다. 완료 후 대본 다시 읽기를 누르세요.'); await refresh()
+        })}>대본 정렬 요청</button>
+      </details>
+      {violations.length > 0 && <div className="error">
+        <p>자막 가독성 문제 {violations.length}건. 렌더에서 줄바꿈과 분할은 자동으로 적용되지만 아래는 사람이 고쳐야 합니다.</p>
+        <ul>{violations.map((v,i) => <li key={i}>{v.index + 1}번 자막 · {v.kind} · {v.detail}</li>)}</ul>
+      </div>}
       <h3>자막 편집</h3>
       <p>시간은 원본 영상 기준입니다. 선택 구간 밖의 자막은 최종 영상에서 자동으로 제외됩니다.</p>
       {captions.map((cue, index) => <div className="caption-row" key={index}>
@@ -106,8 +123,15 @@ export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWo
       <button onClick={() => setCaptions(current => [...current,{start,end,text:''}])}>자막 추가</button>
       <div className="editor-actions">
         <button disabled={busy} onClick={() => void act(async () => {
-          await request(`/source-assets/${assetId}/transcript`, {method:'PUT', body: JSON.stringify({cues:captions})}); setMessage('대본을 새 버전으로 저장했습니다.')
+          const saved = await request<{violations: Violation[]}>(`/source-assets/${assetId}/transcript`, {method:'PUT', body: JSON.stringify({cues:captions})})
+          setViolations(saved.violations)
+          setMessage(saved.violations.length ? '저장했습니다. 아래 가독성 문제를 확인하세요.' : '대본을 새 버전으로 저장했습니다.')
         })}>대본 저장</button>
+        <button disabled={busy} onClick={() => void act(async () => {
+          const report = await request<{violations: Violation[]}>(`/source-assets/${assetId}/subtitle-check`)
+          setViolations(report.violations)
+          setMessage(report.violations.length ? `${report.violations.length}건을 확인하세요.` : '가독성 문제가 없습니다.')
+        })}>자막 가독성 검사</button>
         <button disabled={busy} onClick={() => void act(async () => {
           setSuggestions(await request<Suggestion[]>(`/source-assets/${assetId}/suggestions`))
           setMessage('저장된 대본의 문장 경계로 후보를 만들었습니다. AI 인기도 예측은 아닙니다.')

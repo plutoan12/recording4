@@ -1,0 +1,151 @@
+"""자막 규칙. 순수 계산이라 외부 의존성 없이 검증합니다."""
+
+from __future__ import annotations
+
+import pytest
+
+from pipeline.editing import Cue
+from pipeline.subtitles import (
+    DEFAULT_RULES,
+    SubtitleRules,
+    apply_rules,
+    check,
+    normalize,
+    split_text,
+    wrap_text,
+)
+
+NARROW = SubtitleRules(max_chars_per_line=10, max_lines=2, min_duration=1.0)
+
+
+def test_rules_reject_impossible_values() -> None:
+    with pytest.raises(ValueError):
+        SubtitleRules(max_chars_per_line=0)
+    with pytest.raises(ValueError):
+        SubtitleRules(max_cps=0)
+
+
+def test_wrap_breaks_at_word_boundaries() -> None:
+    assert wrap_text("가나다 라마바 사아자", NARROW) == ["가나다 라마바", "사아자"]
+
+
+def test_wrap_hard_splits_token_longer_than_line() -> None:
+    """공백이 없는 언어에서도 글자를 잃지 않습니다."""
+    lines = wrap_text("가" * 25, NARROW)
+    assert lines == ["가" * 10, "가" * 10, "가" * 5]
+    assert "".join(lines) == "가" * 25
+
+
+def test_wrap_does_not_enforce_line_count() -> None:
+    """줄 수 제한은 check가 보고합니다. 여기서 글자를 버리지 않습니다."""
+    assert len(wrap_text("가나다 " * 20, NARROW)) > NARROW.max_lines
+
+
+def test_normalize_collapses_whitespace() -> None:
+    assert normalize("  가나\n\n다  라  ") == "가나 다 라"
+
+
+def test_split_prefers_sentence_boundaries() -> None:
+    parts = split_text("첫 문장입니다. 두 번째 문장입니다.", 2)
+    assert parts == ["첫 문장입니다.", "두 번째 문장입니다."]
+
+
+def test_split_falls_back_to_words_then_characters() -> None:
+    assert split_text("가나 다라 마바 사아", 2) == ["가나 다라", "마바 사아"]
+    assert split_text("가" * 9, 3) == ["가가가", "가가가", "가가가"]
+
+
+def test_split_never_returns_empty_parts() -> None:
+    for parts in range(1, 6):
+        assert all(split_text("가나 다라 마바", parts))
+
+
+def test_long_cue_is_split_with_proportional_timing() -> None:
+    cue = Cue(start=0, end=8, text="가나다 라마바 사아자 차카타 파하가 나다라 마바사 아자차")
+    shaped = apply_rules([cue], NARROW)
+    assert len(shaped) > 1
+    assert shaped[0].start == 0
+    assert shaped[-1].end == 8
+    # 글자를 잃지 않습니다.
+    assert "".join(c.text for c in shaped).replace("\n", "").replace(" ", "") == cue.text.replace(
+        " ", ""
+    )
+
+
+def test_split_cues_do_not_overlap_and_stay_ordered() -> None:
+    cue = Cue(start=2, end=10, text="가나다 라마바 사아자 차카타 파하가 나다라 마바사 아자차")
+    shaped = apply_rules([cue], NARROW)
+    for earlier, later in zip(shaped, shaped[1:], strict=False):
+        assert earlier.end == later.start
+        assert earlier.end > earlier.start
+
+
+def test_cue_is_not_split_when_there_is_no_time() -> None:
+    """읽을 수 없이 짧은 자막을 만드는 대신 그대로 두고 보고합니다."""
+    cue = Cue(start=0, end=1.2, text="가나다 라마바 사아자 차카타 파하가 나다라 마바사 아자차")
+    shaped = apply_rules([cue], NARROW)
+    assert len(shaped) == 1
+    assert shaped[0].start == 0 and shaped[0].end == 1.2
+    assert any(v.kind == "cps" for v in check(shaped, NARROW))
+
+
+def test_short_cue_is_only_wrapped() -> None:
+    shaped = apply_rules([Cue(start=0, end=3, text="가나다 라마바")], NARROW)
+    assert len(shaped) == 1
+    assert shaped[0].text == "가나다 라마바"
+
+
+def test_check_reports_reading_speed() -> None:
+    fast = [Cue(start=0, end=1, text="가" * 40)]
+    assert [v.kind for v in check(fast, DEFAULT_RULES)] == ["cps"]
+
+
+def test_check_reports_line_overflow() -> None:
+    """두 줄에 담기지 않는 자막을 보고합니다."""
+    assert [v.kind for v in check([Cue(start=0, end=5, text="가" * 41)], DEFAULT_RULES)] == [
+        "lines"
+    ]
+
+
+def test_check_reports_duration_bounds() -> None:
+    assert any(v.kind == "duration" for v in check([Cue(start=0, end=0.3, text="가")], NARROW))
+    assert any(v.kind == "duration" for v in check([Cue(start=0, end=30, text="가")], NARROW))
+
+
+def test_check_reports_overlap() -> None:
+    cues = [Cue(start=0, end=3, text="가"), Cue(start=2, end=5, text="나")]
+    assert any(v.kind == "overlap" for v in check(cues, NARROW))
+
+
+def test_shaped_cues_pass_their_own_line_rule_when_time_allows() -> None:
+    cue = Cue(
+        start=0, end=20, text="가나다 라마바 사아자 차카타 파하가 나다라 마바사 아자차 카타파"
+    )
+    assert not [v for v in check(apply_rules([cue], NARROW), NARROW) if v.kind == "lines"]
+
+
+def test_write_subtitles_applies_rules_to_the_ass_file(tmp_path) -> None:  # noqa: ANN001
+    """렌더 경로가 실제로 규칙을 적용하는지 ASS 파일로 확인합니다. FFmpeg는 필요 없습니다."""
+    from types import SimpleNamespace
+
+    from worker.rendering import write_subtitles
+
+    spec = SimpleNamespace(
+        width=1080,
+        height=1920,
+        start=0,
+        end=12,
+        title="",
+        font_size=64,
+        cues=[Cue(start=0, end=12, text="가나다 라마바 사아자 차카타 파하가 나다라 마바사 아자차")],
+    )
+    path = tmp_path / "captions.ass"
+    write_subtitles(path, spec, NARROW)
+    body = path.read_text(encoding="utf-8")
+    events = [line for line in body.splitlines() if line.startswith("Dialogue:")]
+
+    # 자막 하나가 여러 개로 나뉘고, 줄바꿈이 ASS 개행(\N)으로 들어갑니다.
+    assert len(events) > 1
+    assert any(r"\N" in line for line in events)
+    # libass 자동 줄바꿈에 맡기지 않으므로 원문이 통째로 들어가지 않습니다.
+    assert "가나다 라마바 사아자 차카타 파하가 나다라 마바사 아자차" not in body

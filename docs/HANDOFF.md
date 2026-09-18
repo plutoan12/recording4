@@ -250,3 +250,70 @@ CI(GitHub Actions, PostgreSQL 16 서비스)에서 수행:
 - 실제 Blender 공개 샘플 https://www.youtube.com/watch?v=aqz-KE-bpKQ 로 API 등록→outbox→다운로드→병합→MinIO→ffprobe 검증 성공: 1280×720, 634.625초, 161,192,090바이트, verified. 서명 다운로드 HTTP 206 및 MP4 ftyp 확인. 비공개 영상은 rejected, 내부 URL 입력은 HTTP 422 확인. 상세 결과는 Git 제외 .runtime/link-import-smoke-report.json.
 - 전체 Python 검사 173 통과/5 skip 후 프로세스 그룹 종료 테스트를 추가하고 관련 28개 재통과. ruff 린트·포맷, TypeScript/Vite 빌드 통과. 실제 Mac 컨테이너 모두 Healthy. 사이트 변경·로그인/지역 제한·지원 형식 부재는 여전히 실패할 수 있음.
 - 사용자의 SNL 링크에 대한 한국어 자막·더빙 없음 요청은 별도 미완료. 해당 영상은 이번 기술 검증에서 내려받거나 번역하지 않음. 기존 6초 테스트 업로드는 비공개 유지, 실제 영상 예약도 아직 설정하지 않음. 요청 공개 시각은 2026-09-19 02:00 Asia/Seoul이며 시각이 지나면 새 시각 확인 필요.
+
+
+## 자막 라이브러리 `[subtitles]` extra 등록 (2026-09-18)
+
+- 사용자 요청: 자막 관련 오픈소스를 더 찾아 설치. 조사 후 stable-ts·WhisperX·kss를 선택하고 의존성과 라이선스만 등록함. 브랜치 `claude/claude-md-design-review-v8qdz4`(PR #3 병합 후 최신 main에서 재시작).
+- 담당 파일: `pyproject.toml`, `docs/OPEN_SOURCE_INTEGRATIONS.md`, `third_party/licenses/{stable-ts,whisperX,kss}.txt`, `docs/HANDOFF.md`.
+- **코드는 연결하지 않았습니다.** `analysis.py`·`rendering.py`·워커 Dockerfile 모두 그대로입니다. 사용하는 코드가 없는 상태에서 워커 이미지를 수 GB 키우지 않기 위해서입니다.
+
+### 도입 이유와 대상 빈틈
+
+| 빈틈 | 현재 상태 | 대응 후보 |
+|---|---|---|
+| 단어 단위 타이밍 폐기 | `analysis.py`가 `word_timestamps=True`로 받아 문장 단위만 저장 | stable-ts, WhisperX |
+| 타이밍 없는 대본 등록 불가 | `PUT /source-assets/{id}/transcript`가 클라이언트에 start/end 요구 | stable-ts `align()` |
+| 자막 길이·가독성 검사 없음 | CPS·줄 길이 규칙 없음. libass 자동 줄바꿈에 위임 | stable-ts `split_by_*`, kss |
+| 화자 정보 없음 | `voice_assignments` 스키마는 있으나 채울 수단 없음 | WhisperX 화자 분리(pyannote 게이트 모델·HF 토큰 필요) |
+
+SRT/VTT 내보내기는 이미 쓰는 pysubs2로 가능하므로 새 의존성을 넣지 않았습니다.
+
+### 검증 결과
+
+- `pip install '.[analysis,subtitles]'` 성공, `pip check` 이상 없음. 리눅스 x86-64 / Python 3.11.
+- 프로젝트 고정값 유지 확인: SQLAlchemy 2.0.36, alembic 1.14.0, faster-whisper 1.2.1, httpx 0.28.1, pysubs2 1.8.0.
+- 앱 모듈과 신규 라이브러리 동시 임포트 확인. kss 한국어 문장 분리 실행 확인.
+- 설치량 8.4GB(기본 인덱스, 대부분 nvidia CUDA 휠). whisperx가 torch를 2.8.0으로 고정.
+- **미검증**: CPU 전용 설치(`download.pytorch.org` 차단으로 실행 불가), 실제 정렬·화자 분리 품질, Mac/Docker 설치, 모델 가중치 다운로드.
+
+### 남은 문제와 다음 작업
+
+- CPU 전용 설치 명령을 실제 Mac 환경에서 한 번 확인해야 합니다. 문서의 명령은 미검증입니다.
+- WhisperX 화자 분리는 pyannote 게이트 모델 약관 동의와 HuggingFace 토큰이 필요합니다. 토큰 보관 위치를 정해야 합니다.
+- kss 정확도를 올리려면 `python-mecab-ko`가 추가로 필요합니다.
+- 코드 연결 시 워커 Dockerfile과 CI 설치 시간·이미지 크기를 함께 검토해야 합니다.
+
+## 자막 정렬·표시 규칙 연결 (2026-09-18)
+
+- 사용자 요청: `[subtitles]`로 설치한 라이브러리를 실제 코드에 연결. 브랜치 `claude/claude-md-design-review-v8qdz4`(PR #6에 이어서 커밋).
+- 담당 파일: `packages/pipeline/pipeline/subtitles.py`(신규), `services/worker/worker/{analysis,media_tasks,rendering,composition,workflow_tasks,subtitle_rules}.py`, `services/api/adminapi/{config.py,models.py,routers/editing.py}`, `migrations/versions/0004_align_media_task.py`, `apps/web/src/ClipEditor.tsx`, 테스트 2개.
+- **Codex 작업과 겹칠 수 있는 파일**: `media_tasks.py`, `rendering.py`, `composition.py`, `workflow_tasks.py`, `routers/editing.py`. PR #5 진행 중이면 병합 순서를 조정해야 합니다.
+
+### 구현한 것
+
+- `pipeline/subtitles.py`: 순수 표시 규칙. 줄바꿈, 문장·어절 경계 분할, 시간 비례 배분, 가독성 검사. 외부 의존성 없이 동작하고 kss가 있으면 문장 분리에 씁니다.
+- `align_text()`와 `align` MediaTask 종류: 타이밍 없는 대본을 원본 음성에 정렬해 새 대본 버전 생성. 마이그레이션 `0004_align`으로 `kind` 제약 확장.
+- `POST /source-assets/{id}/align`, `GET /source-assets/{id}/subtitle-check`, `PUT /transcript` 응답에 `violations` 추가.
+- 렌더·합성 경로가 규칙을 적용합니다. libass 자동 줄바꿈에 맡기지 않습니다.
+- 관리화면: 대본 붙여넣기·정렬 요청, 가독성 검사 결과 표시.
+
+### 설계 판단
+
+- 초당 글자수는 자막을 나눠도 줄지 않으므로 분할 기준이 아니라 **보고 항목**입니다.
+- 나눌 시간이 모자라면 나누지 않고 그대로 둔 뒤 보고합니다. 읽을 수 없이 짧은 자막을 만들지 않습니다.
+- 어떤 경로에서도 글자를 자동으로 버리거나 줄이지 않습니다.
+
+### 검증 결과
+
+- `pytest -q`: 198 통과 / 5 skip. 새 테스트 25개(`test_subtitles.py` 18, `test_align_api.py` 7).
+- `write_subtitles`가 만든 실제 ASS 파일에서 분할과 `\N` 줄바꿈 확인.
+- 마이그레이션 `0004_align` SQLite 왕복 통과. `ruff check`·`format --check` 통과. TypeScript 타입 검사·Vite 빌드 통과.
+- **미검증**: 실제 stable-ts 정렬 품질과 모델 다운로드, PostgreSQL에서의 `0004` 적용(CI 대상), 실제 FFmpeg 렌더에서의 자막 가독성, 한국어 기본값의 화면 적정성.
+
+### 남은 작업
+
+- WhisperX는 여전히 미사용입니다. 화자 분리로 `voice_assignments`를 채우는 작업이 남아 있습니다.
+- 자막 기본값(줄 길이 20자·2줄·20 CPS)은 측정 근거가 없는 제안값입니다.
+- 워커 이미지에 `[subtitles]`와 CPU 전용 PyTorch를 추가했습니다. **이미지 빌드는 검증하지 못했습니다**(작업 환경에 Docker 데몬이 없고 `download.pytorch.org`가 차단됨). 배포 전에 `docker compose -f infra/docker-compose.yml build worker`로 확인해야 합니다.
+- Dockerfile의 torch 고정값은 whisperx 요구 범위와 연동됩니다. whisperx를 올릴 때 함께 고치지 않으면 빌드가 실패합니다.

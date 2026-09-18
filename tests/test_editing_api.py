@@ -80,7 +80,7 @@ def test_render_worker_and_version_approval(
 
     monkeypatch.setattr(module, "get_storage", lambda: Storage())
     monkeypatch.setattr(
-        module, "render_clip", lambda source, output, spec: output.write_bytes(b"rendered")
+        module, "render_clip", lambda source, output, spec, **_: output.write_bytes(b"rendered")
     )
     data = {"source_asset_id": str(asset.id), "start": 0, "end": 10}
     created = client.post("/clips", headers=auth_headers, json=data).json()

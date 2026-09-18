@@ -38,6 +38,7 @@ from worker.analysis import transcribe
 from worker.celery_app import celery_app
 from worker.composition import TimingError, compose_dub, mix_speech, render_final
 from worker.providers import ElevenLabsSpeech, GoogleTranslator, SyncLipsync
+from worker.subtitle_rules import rules_from_settings
 
 
 class Blocked(RuntimeError):
@@ -350,6 +351,7 @@ def execute_step(name, options, data, asset, directory, stage_id, remote_id, sav
             clip=options.clip,
             width=asset.width or 1920,
             height=asset.height or 1080,
+            rules=rules_from_settings(settings),
         )
         with output.open("rb") as stream:
             checksum = hashlib.file_digest(stream, "sha256").hexdigest()

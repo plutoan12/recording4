@@ -11,6 +11,7 @@ from pathlib import Path
 import pysubs2
 
 from pipeline.editing import EditSpec, clip_cues
+from pipeline.subtitles import DEFAULT_RULES, SubtitleRules, apply_rules
 
 
 class RenderError(RuntimeError):
@@ -29,7 +30,7 @@ def plain_ass(text: str) -> str:
     return text.replace("\\", "＼").replace("{", "｛").replace("}", "｝").replace("\n", r"\N")
 
 
-def write_subtitles(path: Path, spec: EditSpec) -> None:
+def write_subtitles(path: Path, spec: EditSpec, rules: SubtitleRules = DEFAULT_RULES) -> None:
     subs = pysubs2.SSAFile()
     subs.info.update(PlayResX=str(spec.width), PlayResY=str(spec.height), WrapStyle="0")
     style = pysubs2.SSAStyle(
@@ -42,7 +43,8 @@ def write_subtitles(path: Path, spec: EditSpec) -> None:
         marginv=int(spec.height * 0.13),
     )
     subs.styles["Default"] = style
-    for cue in clip_cues(spec.cues, spec.start, spec.end):
+    # 줄바꿈과 분할을 여기서 확정합니다. libass 자동 줄바꿈에 맡기지 않습니다.
+    for cue in apply_rules(clip_cues(spec.cues, spec.start, spec.end), rules):
         subs.append(
             pysubs2.SSAEvent(
                 start=round(cue.start * 1000), end=round(cue.end * 1000), text=plain_ass(cue.text)
@@ -79,14 +81,16 @@ def video_filter(spec: EditSpec) -> str:
     return f"{frame},setsar=1,subtitles=captions.ass,format=yuv420p"
 
 
-def render_clip(source: Path, output: Path, spec: EditSpec) -> None:
+def render_clip(
+    source: Path, output: Path, spec: EditSpec, *, rules: SubtitleRules = DEFAULT_RULES
+) -> None:
     source, output = source.resolve(), output.resolve()
     if not source.is_file() or source == output:
         raise RenderError("유효한 원본과 별도 출력 경로가 필요합니다.")
     output.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="r4-render-") as directory:
         temp = Path(directory)
-        write_subtitles(temp / "captions.ass", spec)
+        write_subtitles(temp / "captions.ass", spec, rules)
         command = [
             ffmpeg_binary(),
             "-hide_banner",

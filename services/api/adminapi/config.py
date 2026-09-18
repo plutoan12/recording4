@@ -32,6 +32,13 @@ class Settings(BaseSettings):
     whisper_model: str = "small"
     whisper_device: str = "cpu"
 
+    # 자막 표시 규칙. 기본값은 한국어 기준 제안이며 실제 화면 측정 후 조정합니다.
+    subtitle_max_chars_per_line: int = 20
+    subtitle_max_lines: int = 2
+    subtitle_max_cps: float = 20.0
+    subtitle_min_duration: float = 1.0
+    subtitle_max_duration: float = 7.0
+
     # Explicit deployment switches: tests and default installs never call paid APIs.
     paid_processing_enabled: bool = False
     max_job_budget_usd: Decimal | None = Field(default=None, ge=0)

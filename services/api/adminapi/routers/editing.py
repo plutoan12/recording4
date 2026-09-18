@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 
+from adminapi.config import get_settings
 from adminapi.deps import CurrentUser, SessionDep
 from adminapi.models import (
     Approval,
@@ -25,6 +26,7 @@ from adminapi.outbox import enqueue
 from adminapi.storage import ObjectStorage, get_storage
 from pipeline.editing import Cue, EditSpec, suggest_clips
 from pipeline.states import JobState
+from pipeline.subtitles import SubtitleRules, check
 from pipeline.time import as_utc
 
 router = APIRouter(tags=["editing"])
@@ -82,6 +84,25 @@ def schedule(session, task):
     return task_response(task)
 
 
+def subtitle_rules() -> SubtitleRules:
+    s = get_settings()
+    return SubtitleRules(
+        max_chars_per_line=s.subtitle_max_chars_per_line,
+        max_lines=s.subtitle_max_lines,
+        max_cps=s.subtitle_max_cps,
+        min_duration=s.subtitle_min_duration,
+        max_duration=s.subtitle_max_duration,
+    )
+
+
+def violations(cues: list[Cue]) -> list[dict]:
+    """자막 가독성 문제를 목록으로 돌려줍니다. 글자를 자동으로 고치지 않습니다."""
+    return [
+        {"index": v.index, "kind": v.kind, "detail": v.detail}
+        for v in check(cues, subtitle_rules())
+    ]
+
+
 class TranscriptRequest(BaseModel):
     cues: list[Cue] = Field(min_length=1, max_length=20000)
 
@@ -116,11 +137,22 @@ def put_transcript(
             for c in payload.cues
         ]
     )
-    return {"version": version, "count": len(payload.cues)}
+    return {
+        "version": version,
+        "count": len(payload.cues),
+        "violations": violations(payload.cues),
+    }
 
 
 class AnalysisRequest(BaseModel):
     kind: Literal["transcribe", "scenes"]
+    language: str | None = Field(default=None, pattern=r"^[a-z]{2,3}$")
+
+
+class AlignRequest(BaseModel):
+    """타이밍 없는 대본. 글자는 그대로 두고 시각만 찾습니다."""
+
+    text: str = Field(min_length=1, max_length=50000)
     language: str | None = Field(default=None, pattern=r"^[a-z]{2,3}$")
 
 
@@ -142,6 +174,40 @@ def analyze(asset_id: uuid.UUID, payload: AnalysisRequest, user: CurrentUser, se
             source_asset_id=asset_id, kind=payload.kind, settings={"language": payload.language}
         ),
     )
+
+
+@router.post("/source-assets/{asset_id}/align", status_code=202)
+def align(asset_id: uuid.UUID, payload: AlignRequest, user: CurrentUser, session: SessionDep):
+    """대본을 원본 오디오에 정렬해 새 대본 버전을 만듭니다. 유료 호출이 아닙니다."""
+    asset_for_edit(session, asset_id)
+    existing = session.scalar(
+        select(MediaTask).where(
+            MediaTask.source_asset_id == asset_id,
+            MediaTask.kind == "align",
+            MediaTask.state.in_(["pending", "running"]),
+        )
+    )
+    if existing:
+        return task_response(existing)
+    return schedule(
+        session,
+        MediaTask(
+            source_asset_id=asset_id,
+            kind="align",
+            settings={"text": payload.text, "language": payload.language},
+        ),
+    )
+
+
+@router.get("/source-assets/{asset_id}/subtitle-check")
+def subtitle_check(asset_id: uuid.UUID, user: CurrentUser, session: SessionDep):
+    """저장된 최신 대본의 가독성 문제를 보고합니다."""
+    asset_for_edit(session, asset_id)
+    cues = [
+        Cue(start=float(s.start_seconds), end=float(s.end_seconds), text=s.text)
+        for s in transcript(session, asset_id)
+    ]
+    return {"count": len(cues), "violations": violations(cues)}
 
 
 @router.get("/source-assets/{asset_id}/suggestions")
