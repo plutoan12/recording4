@@ -250,3 +250,36 @@ CI(GitHub Actions, PostgreSQL 16 서비스)에서 수행:
 - 실제 Blender 공개 샘플 https://www.youtube.com/watch?v=aqz-KE-bpKQ 로 API 등록→outbox→다운로드→병합→MinIO→ffprobe 검증 성공: 1280×720, 634.625초, 161,192,090바이트, verified. 서명 다운로드 HTTP 206 및 MP4 ftyp 확인. 비공개 영상은 rejected, 내부 URL 입력은 HTTP 422 확인. 상세 결과는 Git 제외 .runtime/link-import-smoke-report.json.
 - 전체 Python 검사 173 통과/5 skip 후 프로세스 그룹 종료 테스트를 추가하고 관련 28개 재통과. ruff 린트·포맷, TypeScript/Vite 빌드 통과. 실제 Mac 컨테이너 모두 Healthy. 사이트 변경·로그인/지역 제한·지원 형식 부재는 여전히 실패할 수 있음.
 - 사용자의 SNL 링크에 대한 한국어 자막·더빙 없음 요청은 별도 미완료. 해당 영상은 이번 기술 검증에서 내려받거나 번역하지 않음. 기존 6초 테스트 업로드는 비공개 유지, 실제 영상 예약도 아직 설정하지 않음. 요청 공개 시각은 2026-09-19 02:00 Asia/Seoul이며 시각이 지나면 새 시각 확인 필요.
+
+
+## 자막 라이브러리 `[subtitles]` extra 등록 (2026-09-18)
+
+- 사용자 요청: 자막 관련 오픈소스를 더 찾아 설치. 조사 후 stable-ts·WhisperX·kss를 선택하고 의존성과 라이선스만 등록함. 브랜치 `claude/claude-md-design-review-v8qdz4`(PR #3 병합 후 최신 main에서 재시작).
+- 담당 파일: `pyproject.toml`, `docs/OPEN_SOURCE_INTEGRATIONS.md`, `third_party/licenses/{stable-ts,whisperX,kss}.txt`, `docs/HANDOFF.md`.
+- **코드는 연결하지 않았습니다.** `analysis.py`·`rendering.py`·워커 Dockerfile 모두 그대로입니다. 사용하는 코드가 없는 상태에서 워커 이미지를 수 GB 키우지 않기 위해서입니다.
+
+### 도입 이유와 대상 빈틈
+
+| 빈틈 | 현재 상태 | 대응 후보 |
+|---|---|---|
+| 단어 단위 타이밍 폐기 | `analysis.py`가 `word_timestamps=True`로 받아 문장 단위만 저장 | stable-ts, WhisperX |
+| 타이밍 없는 대본 등록 불가 | `PUT /source-assets/{id}/transcript`가 클라이언트에 start/end 요구 | stable-ts `align()` |
+| 자막 길이·가독성 검사 없음 | CPS·줄 길이 규칙 없음. libass 자동 줄바꿈에 위임 | stable-ts `split_by_*`, kss |
+| 화자 정보 없음 | `voice_assignments` 스키마는 있으나 채울 수단 없음 | WhisperX 화자 분리(pyannote 게이트 모델·HF 토큰 필요) |
+
+SRT/VTT 내보내기는 이미 쓰는 pysubs2로 가능하므로 새 의존성을 넣지 않았습니다.
+
+### 검증 결과
+
+- `pip install '.[analysis,subtitles]'` 성공, `pip check` 이상 없음. 리눅스 x86-64 / Python 3.11.
+- 프로젝트 고정값 유지 확인: SQLAlchemy 2.0.36, alembic 1.14.0, faster-whisper 1.2.1, httpx 0.28.1, pysubs2 1.8.0.
+- 앱 모듈과 신규 라이브러리 동시 임포트 확인. kss 한국어 문장 분리 실행 확인.
+- 설치량 8.4GB(기본 인덱스, 대부분 nvidia CUDA 휠). whisperx가 torch를 2.8.0으로 고정.
+- **미검증**: CPU 전용 설치(`download.pytorch.org` 차단으로 실행 불가), 실제 정렬·화자 분리 품질, Mac/Docker 설치, 모델 가중치 다운로드.
+
+### 남은 문제와 다음 작업
+
+- CPU 전용 설치 명령을 실제 Mac 환경에서 한 번 확인해야 합니다. 문서의 명령은 미검증입니다.
+- WhisperX 화자 분리는 pyannote 게이트 모델 약관 동의와 HuggingFace 토큰이 필요합니다. 토큰 보관 위치를 정해야 합니다.
+- kss 정확도를 올리려면 `python-mecab-ko`가 추가로 필요합니다.
+- 코드 연결 시 워커 Dockerfile과 CI 설치 시간·이미지 크기를 함께 검토해야 합니다.

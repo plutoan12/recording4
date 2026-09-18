@@ -16,6 +16,18 @@
 | Google API Python Client 2.160.0 | YouTube 이어 올리기·공개 예약 어댑터 | [GitHub](https://github.com/googleapis/google-api-python-client), Apache-2.0 |
 | google-auth-oauthlib 1.2.1 | 호출자가 YouTube OAuth 인증 클라이언트를 준비할 때 사용 | [GitHub](https://github.com/googleapis/google-auth-library-python-oauthlib), Apache-2.0 |
 
+### 자막 정밀화 (`[subtitles]`, 설치만 완료·미연결)
+
+| 프로젝트 | 도입 목적 | 라이선스 / 출처 |
+|---|---|---|
+| stable-ts 2.19.1 | 기존 대본을 오디오에 정렬(`align`), 자막 분할·병합(`split_by_length` 등), 단어 강조 ASS/SRT/VTT 출력 | [GitHub](https://github.com/jianfch/stable-ts), MIT |
+| WhisperX 3.8.6 | wav2vec2 강제 정렬 기반 단어 타이밍, 화자 분리 | [GitHub](https://github.com/m-bain/whisperx), BSD-2-Clause |
+| kss 6.0.6 | 한국어 문장 분리. 자막 줄바꿈을 어절·문장 경계에 맞춤 | [GitHub](https://github.com/hyunwoongko/kss), BSD-3-Clause |
+
+**아직 코드에 연결하지 않았습니다.** 의존성과 라이선스만 등록했으며 `analysis.py`·`rendering.py`는 그대로입니다.
+
+검토한 뒤 채택하지 않은 후보도 남깁니다. [aeneas](https://github.com/readbeyond/aeneas)는 **AGPL v3**이라 네트워크 서비스 제공 시 서버 소스 공개 의무가 생깁니다. [ctc-forced-aligner](https://github.com/MahmoudAshraf97/ctc-forced-aligner)는 코드가 BSD이나 **기본 모델이 CC-BY-NC 4.0(비상업)** 입니다. 두 경우 모두 이 저장소의 사용 형태와 맞지 않아 제외했습니다.
+
 조회한 주요 라이선스 사본은 [third_party/licenses](../third_party/licenses)에 보관합니다. 설치 패키지의 라이선스·NOTICE도 그대로 유지합니다. FFmpeg는 빌드 옵션에 따라 조건이 달라지므로 실제 배포 바이너리와 소스 제공 조건을 확인해야 합니다. Python 라이브러리의 라이선스가 모델 가중치·API 서비스 약관까지 대체하지는 않습니다.
 
 ## 실제로 연결한 기능
@@ -23,6 +35,34 @@
 - `/clips`: 구간·화면·자막·제목을 검증하고 불변 편집본 및 렌더 요청 생성.
 - `media.run` → Celery 워커: S3 다운로드 → 로컬 처리 → 결과 업로드 → DB 결과물 등록.
 - `/source-assets/{id}/analyze`: 로컬 STT 또는 장면 감지. 분석 의존성 설치가 필요하며 STT 첫 실행은 모델을 다운로드할 수 있습니다.
+
+## `[subtitles]` 설치 방법
+
+`stable-ts`와 `whisperx`가 PyTorch를 끌어옵니다. 기본 인덱스는 리눅스에서 CUDA 휠을 함께 설치하므로 설치량이 큽니다.
+
+```bash
+# CPU만 사용하는 경우: torch를 CPU 빌드로 먼저 설치한 뒤 extra를 설치합니다.
+pip install torch --index-url https://download.pytorch.org/whl/cpu
+pip install -e '.[analysis,subtitles]'
+
+# GPU를 사용하는 경우: 기본 인덱스 그대로 설치합니다.
+pip install -e '.[analysis,subtitles]'
+```
+
+현재 설정 기본값은 `R4_WHISPER_DEVICE=cpu`이고 Docker Desktop for Mac은 NVIDIA GPU를 전달하지 못하므로, 그 환경에서는 CPU 빌드가 맞습니다.
+
+`infra/Dockerfile.worker`에는 아직 넣지 않았습니다. 사용하는 코드가 없는 상태에서 이미지가 수 GB 커지기 때문입니다. 실제로 연결할 때 함께 추가합니다.
+
+### 설치 검증 (2026-09-18, 리눅스 x86-64 / Python 3.11)
+
+- `pip install '.[analysis,subtitles]'` 성공, `pip check` 이상 없음.
+- 프로젝트 고정값이 모두 유지됨: SQLAlchemy 2.0.36, alembic 1.14.0, faster-whisper 1.2.1, httpx 0.28.1, pysubs2 1.8.0.
+- 앱 모듈(`adminapi.main`, `worker.workflow_tasks`, `worker.rendering`)과 신규 라이브러리를 같은 인터프리터에서 동시 임포트 확인.
+- kss 한국어 문장 분리 실행 확인. mecab(`python-mecab-ko`)이 없으면 휴리스틱으로 동작하며 정확도가 떨어집니다.
+- **설치량 8.4GB**(기본 인덱스). 이 중 nvidia CUDA 휠이 대부분입니다.
+- whisperx가 torch를 2.8.0으로 고정합니다. stable-ts 단독 설치 시의 2.14.0보다 낮으므로 한쪽을 올릴 때 확인이 필요합니다.
+- whisperx가 optuna를 통해 alembic·sqlalchemy를 요구하지만 하한 조건(`>=`)이라 프로젝트 고정값과 충돌하지 않습니다.
+- **미검증**: CPU 전용 설치 경로. 작업 환경의 네트워크 정책이 `download.pytorch.org`를 차단해 실행하지 못했습니다. 위 명령은 실제 환경에서 한 번 확인해야 합니다.
 - 대본 가져오기·새 버전 저장, 문장 경계 기반 구간 후보. 현재 후보 알고리즘은 오프라인 규칙 기반이며 LLM이나 조회수 예측 기능이 아닙니다.
 - 관리화면: 영상 재생, 구간·세로 구도·자막·제목 편집, 렌더 상태, 결과 재생·다운로드, 버전별 승인.
 - 명령행: `python -m worker.cli`로 DB·S3 없이 로컬 파일 처리.
