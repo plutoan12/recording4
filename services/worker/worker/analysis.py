@@ -11,6 +11,7 @@ from pipeline.alignment import (
     cues_for_lines,
     snap_starts,
     spans_from_timestamps,
+    supported_options,
 )
 from pipeline.editing import Cue
 from pipeline.speakers import SpeakerTurn
@@ -90,6 +91,20 @@ _SILENCE_END = re.compile(r"silence_end:\s*(-?[\d.]+)")
 _SILENCE_START = re.compile(r"silence_start:\s*(-?[\d.]+)")
 
 
+# VAD 기본값은 자막 시작을 맞추는 데 두 가지가 어긋납니다.
+#
+# - speech_pad_ms=400: 발화 앞뒤에 여유를 붙여서 자막이 그만큼 일찍
+#   시작합니다(측정: 첫 자막 0.59초, 실제 1.00초).
+# - min_silence_duration_ms=2000: 2초보다 짧은 무음은 발화를 끊지 않습니다.
+#   문장 사이를 1초 쉬는 말은 통째로 한 구간이 되고(측정: 18초 음성 전체가
+#   발화 구간 1개), 그러면 맞출 시작점이 없어 자막이 그대로 밀립니다.
+#
+# 무음 기준을 짧게 두면 문장 안에서도 잘게 끊깁니다. 그 조각을 다시 합치는
+# 일은 merge_spans가 합니다. 잘게 받아서 우리가 합치는 편이, 공급자 기본값에
+# 맡기고 왜 안 끊겼는지 뒤늦게 재는 것보다 낫습니다.
+_VAD_SETTINGS = {"speech_pad_ms": 0, "min_silence_duration_ms": 200}
+
+
 def vad_spans(source: Path) -> list[tuple[float, float]]:
     """Silero VAD로 발화 구간을 찾습니다. 못 쓰면 빈 목록입니다.
 
@@ -105,12 +120,8 @@ def vad_spans(source: Path) -> list[tuple[float, float]]:
         return []
     try:
         audio = decode_audio(str(source), sampling_rate=16000)
-        # 기본값은 발화 앞뒤에 400ms를 덧붙입니다. 그대로 쓰면 자막이 그만큼
-        # 일찍 시작합니다(측정: 첫 자막 0.59초, 실제 1.00초). 여유를 끕니다.
-        try:
-            stamps = get_speech_timestamps(audio, VadOptions(speech_pad_ms=0))
-        except TypeError:  # 이 버전에 없는 설정
-            stamps = get_speech_timestamps(audio)
+        options = supported_options(VadOptions, _VAD_SETTINGS)
+        stamps = get_speech_timestamps(audio, VadOptions(**options))
     except Exception:  # noqa: BLE001 - 다듬기 실패가 정렬을 막지 않습니다.
         return []
     return spans_from_timestamps(stamps)

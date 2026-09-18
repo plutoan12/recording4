@@ -193,3 +193,35 @@ def test_snap_ignores_a_split_inside_the_previous_sentence() -> None:
     # VAD가 두 번째 문장을 10.4에서 끊어 조각을 하나 더 만들었습니다.
     spans = [(1.0, 5.45), (6.45, 10.38), (10.45, 11.23), (12.23, 17.06)]
     assert [c.start for c in snap_starts(cues, spans)] == [6.45, 12.23]
+
+
+def test_supported_options_keeps_only_known_dataclass_fields():
+    """공급자 버전에 없는 설정은 빼고 넘깁니다."""
+    from dataclasses import dataclass
+
+    from pipeline.alignment import supported_options
+
+    @dataclass
+    class Options:
+        threshold: float = 0.5
+        speech_pad_ms: int = 400
+
+    wanted = {"speech_pad_ms": 0, "min_silence_duration_ms": 200}
+    assert supported_options(Options, wanted) == {"speech_pad_ms": 0}
+
+
+def test_supported_options_reads_a_plain_function_signature():
+    from pipeline.alignment import supported_options
+
+    def make(threshold: float = 0.5, min_silence_duration_ms: int = 2000):  # noqa: ARG001
+        return None
+
+    wanted = {"speech_pad_ms": 0, "min_silence_duration_ms": 200}
+    assert supported_options(make, wanted) == {"min_silence_duration_ms": 200}
+
+
+def test_supported_options_gives_up_when_the_signature_is_unreadable():
+    """설정을 못 읽으면 아무것도 넘기지 않습니다. 잘못 넘기느니 기본값입니다."""
+    from pipeline.alignment import supported_options
+
+    assert supported_options(print, {"speech_pad_ms": 0}) == {}

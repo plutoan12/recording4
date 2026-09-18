@@ -27,7 +27,7 @@ import sys
 from pathlib import Path
 
 from pipeline.alignment import cues_for_lines, merge_spans
-from worker.analysis import align_text, speech_spans, word_timings
+from worker.analysis import align_text, silence_spans, vad_spans, word_timings
 
 _SPACE = re.compile(r"\s+")
 
@@ -35,6 +35,26 @@ _SPACE = re.compile(r"\s+")
 def squeeze(text: str) -> str:
     """공백을 뺀 글자열. 정렬은 공백 처리를 바꿀 수 있어도 글자는 못 바꿉니다."""
     return _SPACE.sub("", text)
+
+
+def show(label: str, spans: list[tuple[float, float]]) -> None:
+    shown = ", ".join(f"{b:.2f}~{e:.2f}" for b, e in spans[:8])
+    print(f"  {label} {len(spans)}개: {shown}{' ...' if len(spans) > 8 else ''}")
+
+
+def report_spans(audio: Path) -> None:
+    """자막 시작을 맞추는 근거를 그대로 보여 줍니다.
+
+    어느 공급자가 무엇을 줬는지, 합치기 전과 후가 어떻게 다른지 다 찍습니다.
+    한 줄만 찍었을 때 합치기가 다 뭉갠 것인지 VAD가 안 끊은 것인지 구분할 수
+    없어서 한 번 더 재야 했습니다(측정: 18초 전체가 구간 1개).
+    """
+    spans = vad_spans(audio)
+    show("VAD 원본", spans)
+    if not spans:
+        spans = silence_spans(audio)
+        show("무음 감지(대안)", spans)
+    show("합친 뒤", merge_spans(spans))
 
 
 def diagnose(audio: Path, script: str, starts: list[float], *, model: str, language: str) -> None:
@@ -106,10 +126,7 @@ def main() -> int:
     audio = args.directory / "sample.wav"
 
     print(f"모델 {args.model}, 음성 {audio}, 문장 {len(sentences)}개")
-    # 자막 시작을 맞추는 근거입니다. 어긋나면 여기부터 봐야 합니다.
-    spans = merge_spans(speech_spans(audio))
-    shown = ", ".join(f"{b:.2f}~{e:.2f}" for b, e in spans[:6])
-    print(f"발화 구간 {len(spans)}개: {shown}")
+    report_spans(audio)
     cues = align_text(audio, script, model=args.model, language=args.language, device="cpu")
     print(f"정렬 결과 자막 {len(cues)}개\n")
     for cue in cues:

@@ -10,6 +10,8 @@
 
 from __future__ import annotations
 
+import dataclasses
+import inspect
 import re
 from dataclasses import dataclass
 
@@ -142,3 +144,22 @@ def cues_for_lines(lines: list[str], words: list[WordTiming]) -> list[Cue] | Non
     if index != len(words):
         return None
     return cues
+
+
+def supported_options(factory, wanted: dict) -> dict:  # noqa: ANN001
+    """`factory`가 실제로 받는 설정만 골라 냅니다.
+
+    공급자 버전마다 받는 설정이 다릅니다. 모르는 이름을 그대로 넘기면
+    TypeError가 나고, 그것을 뭉뚱그려 잡으면 설정이 하나도 안 걸린 채로
+    기본값이 쓰입니다(측정: 무음 기준 기본값 2초 때문에 문장 사이 1초
+    무음이 무시돼 18초 전체가 발화 구간 하나로 나옴). 그래서 이름별로
+    걸러 넣습니다.
+    """
+    if dataclasses.is_dataclass(factory):
+        names = {field.name for field in dataclasses.fields(factory)}
+    else:
+        try:
+            names = set(inspect.signature(factory).parameters)
+        except (TypeError, ValueError):
+            return {}
+    return {name: value for name, value in wanted.items() if name in names}
