@@ -56,8 +56,25 @@ def spans_from_timestamps(stamps: list, rate: int = 16000) -> list[tuple[float, 
     return sorted(found)
 
 
+def merge_spans(spans: list[tuple[float, float]], gap: float = 0.3) -> list[tuple[float, float]]:
+    """짧게 끊긴 발화를 하나로 합칩니다.
+
+    VAD는 한 문장 안에서도 숨이나 자음 사이를 끊어 여러 조각으로 줍니다.
+    그 조각의 시작을 문장 시작으로 착각하면 자막을 엉뚱한 곳에 맞춥니다
+    (측정: 자막 3이 앞 문장 중간에서 시작한 채 그대로 남음). `gap`보다 짧게
+    떨어진 조각은 같은 발화로 봅니다.
+    """
+    merged: list[tuple[float, float]] = []
+    for begin, finish in sorted(spans):
+        if merged and begin - merged[-1][1] <= gap:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], finish))
+        else:
+            merged.append((begin, finish))
+    return merged
+
+
 def snap_starts(
-    cues: list[Cue], spans: list[tuple[float, float]], *, window: float = 2.0
+    cues: list[Cue], spans: list[tuple[float, float]], *, window: float = 2.0, gap: float = 0.3
 ) -> list[Cue]:
     """자막 시작을 실제 발화가 시작되는 지점으로 맞춥니다.
 
@@ -74,11 +91,14 @@ def snap_starts(
     """
     if not spans:
         return cues
+    # 문장 안에서 끊긴 조각을 먼저 합칩니다. 합치지 않으면 그 조각의 시작을
+    # 문장 시작으로 착각합니다.
+    ordered = merge_spans(spans, gap)
     result: list[Cue] = []
     previous_end = 0.0
     for cue in cues:
         # 앞 자막이 말하던 발화는 건너뜁니다. 이 자막의 말이 아닙니다.
-        candidates = [begin for begin, _ in spans if begin >= previous_end]
+        candidates = [begin for begin, _ in ordered if begin >= previous_end]
         target = min(candidates, key=lambda value: abs(value - cue.start), default=None)
         moved = (
             target

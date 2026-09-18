@@ -26,8 +26,8 @@ import re
 import sys
 from pathlib import Path
 
-from pipeline.alignment import cues_for_lines
-from worker.analysis import align_text, word_timings
+from pipeline.alignment import cues_for_lines, merge_spans
+from worker.analysis import align_text, speech_spans, word_timings
 
 _SPACE = re.compile(r"\s+")
 
@@ -106,6 +106,10 @@ def main() -> int:
     audio = args.directory / "sample.wav"
 
     print(f"모델 {args.model}, 음성 {audio}, 문장 {len(sentences)}개")
+    # 자막 시작을 맞추는 근거입니다. 어긋나면 여기부터 봐야 합니다.
+    spans = merge_spans(speech_spans(audio))
+    shown = ", ".join(f"{b:.2f}~{e:.2f}" for b, e in spans[:6])
+    print(f"발화 구간 {len(spans)}개: {shown}")
     cues = align_text(audio, script, model=args.model, language=args.language, device="cpu")
     print(f"정렬 결과 자막 {len(cues)}개\n")
     for cue in cues:

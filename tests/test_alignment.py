@@ -161,3 +161,35 @@ def test_spans_from_timestamps_sorts_and_drops_empty() -> None:
         {"start": 8, "end": 8},
     ]
     assert spans_from_timestamps(stamps) == [(1.0, 2.0), (2.0, 3.0)]
+
+
+def test_merge_spans_joins_pieces_of_one_sentence() -> None:
+    """VAD는 한 문장도 숨 사이에서 끊습니다. 0.3초 이내는 같은 발화로 봅니다."""
+    from pipeline.alignment import merge_spans
+
+    spans = [(1.0, 5.2), (5.3, 8.0), (10.5, 11.23), (12.23, 17.0)]
+    assert merge_spans(spans) == [(1.0, 8.0), (10.5, 11.23), (12.23, 17.0)]
+
+
+def test_merge_spans_keeps_sentence_gaps() -> None:
+    """문장 사이 1초 무음은 그대로 둡니다. 합치면 경계를 잃습니다."""
+    from pipeline.alignment import merge_spans
+
+    assert merge_spans([(1.0, 5.45), (6.45, 11.23)]) == [(1.0, 5.45), (6.45, 11.23)]
+
+
+def test_snap_ignores_a_split_inside_the_previous_sentence() -> None:
+    """앞 문장이 VAD에서 쪼개져도 자막을 다음 문장 시작으로 맞춥니다.
+
+    합성 음성 측정에서 자막 3이 10.50초에 머물러 1.73초 어긋난 경우입니다.
+    """
+    from pipeline.alignment import snap_starts
+    from pipeline.editing import Cue
+
+    cues = [
+        Cue(start=6.44, end=10.50, text="두 번째 문장"),
+        Cue(start=10.50, end=16.21, text="마지막 문장"),
+    ]
+    # VAD가 두 번째 문장을 10.4에서 끊어 조각을 하나 더 만들었습니다.
+    spans = [(1.0, 5.45), (6.45, 10.38), (10.45, 11.23), (12.23, 17.06)]
+    assert [c.start for c in snap_starts(cues, spans)] == [6.45, 12.23]
