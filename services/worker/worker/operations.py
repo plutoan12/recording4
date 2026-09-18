@@ -16,6 +16,7 @@ from adminapi.config import get_settings
 from adminapi.db import get_session_factory
 from adminapi.models import Job, OutboxMessage, Publication, utcnow
 from adminapi.outbox import enqueue
+from adminapi.services.budget import expire_stale
 from adminapi.storage import get_storage
 from pipeline.states import JobState, PublicationState
 from worker.celery_app import celery_app
@@ -69,6 +70,7 @@ def check():
         with get_session_factory()() as session:
             session.execute(text("select 1"))
             result["checks"]["database"] = True
+            result["attention"]["expired_budget_holds"] = len(expire_stale(session))
             result["recovery_requests"] = recover_expired(session)
             session.commit()
             for name, model, condition in [
