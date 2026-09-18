@@ -23,7 +23,8 @@
   - 배경음 합성 문장이 원음 전체 혼합과 대사 중복 방지를 동시에 주장하던 모순 정정.
   - `segments`를 `transcript_segments`(원본 소속)와 `translated_segments`(작업 소속)로 분리해 STT 재사용 전제를 데이터 모델에 반영.
   - 제작·게시 상태에 rejected/blocked/failed/cancelled/superseded 추가 및 전이표 명시.
-  - 더빙 길이 정합 규칙, 게시 후 수정 경로, 재실행 판정(입력 해시) 구성, 장시간 태스크 규칙, 비용 한도, glossaries·voice_assignments·budgets 엔터티, 미리보기 서명 URL 발급 주체, 보존·삭제 정책 추가.
+  - 더빙 길이 정합 규칙, 게시 후 수정 경로, 재실행 판정(입력 해시) 구성, 장시간 태스크 규칙, 비용 한도, glossaries·voice_assignments·budgets·budget_reservations 엔터티, 미리보기 서명 URL 발급 주체, 보존·삭제 정책 추가.
+  - 사용자 검토 지적 3건 반영: 더빙 구간 겹침 조건, 영상 교체 시 공개 공백, 동시 작업의 예산 초과.
   - IMPLEMENTATION_PLAN.md에 테스트 전략 섹션과 단계별 항목 추가. PROJECT_BRIEF.md 확인 사항에 사용자 확정이 필요한 값 추가.
 
 ## 검토 항목 처리 결과
@@ -32,11 +33,11 @@
 
 | 번호 | 문제 | 처리 | 반영 위치 |
 |---|---|---|---|
-| R1 | 더빙 길이 정합 정책 부재 | 허용 오차·조정 순서·속도 범위·초과 구간 처리 규칙 추가 | ARCHITECTURE.md 더빙 길이 정합 |
-| R2 | 게시 후 수정 경로 없음 | 메타데이터 수정과 영상 교체를 구분하고 교체 순서·`superseded`·대체 이력 추가 | ARCHITECTURE.md 게시 후 수정 |
+| R1 | 더빙 길이 정합 정책 부재 | 겹침 금지 조건(다음 구간 시작 시각 침범 금지)을 허용 오차보다 우선하도록 두고 조정 순서·속도 범위·합성 전 겹침 검사 추가 | ARCHITECTURE.md 더빙 길이 정합 |
+| R2 | 게시 후 수정 경로 없음 | 메타데이터 수정과 영상 교체를 구분. 이전 영상이 공개 중이면 새 영상의 실제 공개를 확인한 뒤 전환하도록 하고 `superseded`·대체 이력 추가 | ARCHITECTURE.md 게시 후 수정 |
 | R3 | 입력 해시 구성 미정 | 공급자·모델·음성·프롬프트·용어집·계약 버전 포함으로 명시 | ARCHITECTURE.md 재실행 판정 |
 | R4 | 장시간 Celery 태스크 규칙 없음 | 제출·조회·수거 분리, 감시 전용 태스크, acks_late 규칙 추가 | ARCHITECTURE.md 상태와 복구 |
-| R5 | 비용 상한 강제 지점 없음 | `budgets` 엔터티와 `blocked` 상태, 호출 전 추정·차단 규칙 추가 | ARCHITECTURE.md 비용 한도 |
+| R5 | 비용 상한 강제 지점 없음 | `budgets`·`budget_reservations`와 `blocked` 상태 추가. 호출 전 예약(잔액 확인과 예약을 한 트랜잭션에서 수행)과 완료 후 정산, 미정산 예약 만료 회수 | ARCHITECTURE.md 비용 한도 |
 | R6 | 용어집·화자 매핑 엔터티 누락 | `glossaries`, `voice_assignments` 추가하고 입력 해시와 연결 | ARCHITECTURE.md 데이터 모델 초안 |
 | R7 | 미리보기 서명 URL 발급 주체 불명확 | 구성도를 API 발급으로 수정하고 본문에 명시 | ARCHITECTURE.md 구성, 배포·운영 |
 | R8 | YouTube 쿼터가 처리량 가정에 없음 | 제약으로 등록하고 1단계 확인 항목 추가. **수치는 미확인** | TECH_DECISIONS.md, IMPLEMENTATION_PLAN.md 1단계 |
@@ -74,6 +75,7 @@ R8은 이번 세션에서 developers.google.com 접근이 네트워크 정책으
 - Markdown 표의 열 수와 헤더 구분자.
 - 새로 쓴 상태 이름이 전이표·본문·IMPLEMENTATION_PLAN에서 일치하는지.
 - 새 엔터티 이름이 데이터 모델 표와 본문에서 일치하는지.
+- 더빙 길이 규칙, 게시 교체 순서, 예산 예약 규칙이 IMPLEMENTATION_PLAN의 체크리스트·테스트 전략과 어긋나지 않는지.
 
 수행하지 않은 검증: API 연결, 영상 품질, 배포, 실제 업로드. Mermaid는 소스 구문만 검토했고 GitHub 화면 렌더링 확인은 별도입니다. R8의 YouTube 쿼터 수치는 공식 문서 접근이 차단되어 확인하지 못했습니다. 더빙 길이 허용 오차와 속도 범위는 측정 근거 없이 제안한 값입니다.
 
@@ -83,6 +85,7 @@ R8은 이번 세션에서 developers.google.com 접근이 네트워크 정책으
 |---|---|---|---|
 | 2026-09-18 | Codex | 초기 설계 및 협업 문서 | 설계 문서 작성. 다음은 사용자 지시에 따른 설계 검토 또는 요구사항 확인 |
 | 2026-09-18 | Claude | 설계 검토. 브랜치 `claude/claude-md-design-review-v8qdz4`. 담당 파일 docs/ARCHITECTURE.md, docs/TECH_DECISIONS.md, docs/HANDOFF.md | 문서 오류·불일치 3건 수정, 남은 문제 R1~R10 등록 |
-| 2026-09-18 | Claude | R1~R10 반영. 같은 브랜치. 담당 파일 docs/ARCHITECTURE.md, docs/IMPLEMENTATION_PLAN.md, docs/PROJECT_BRIEF.md, docs/TECH_DECISIONS.md, docs/HANDOFF.md | 설계 공백 10건을 문서에 반영. 다음은 "확정이 필요한 값" 질의와 1단계 측정 |
+| 2026-09-18 | Claude | R1~R10 반영. 같은 브랜치. 담당 파일 docs/ARCHITECTURE.md, docs/IMPLEMENTATION_PLAN.md, docs/PROJECT_BRIEF.md, docs/TECH_DECISIONS.md, docs/HANDOFF.md | 설계 공백 10건을 문서에 반영 |
+| 2026-09-18 | Claude | 사용자 검토 지적 반영. PR https://github.com/plutoan12/recording4/pull/1 (main 병합) | 더빙 구간 겹침 조건, 영상 교체 시 공개 공백, 예산 예약·정산 3건 수정. 다음은 "확정이 필요한 값" 질의와 1단계 측정 |
 
 향후 기록에는 브랜치·커밋 또는 PR 링크, 변경 파일, 실제 검증 결과, 미해결 문제를 포함합니다. 완료되지 않은 항목은 완료로 표시하지 않습니다.
