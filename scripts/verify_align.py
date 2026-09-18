@@ -26,7 +26,8 @@ import re
 import sys
 from pathlib import Path
 
-from worker.analysis import align_text
+from pipeline.alignment import cues_for_lines
+from worker.analysis import align_text, word_timings
 
 _SPACE = re.compile(r"\s+")
 
@@ -48,6 +49,18 @@ def diagnose(audio: Path, script: str, starts: list[float], *, model: str, langu
         print("\nstable-ts가 없어 설정 비교를 건너뜁니다.")
         return
     engine = stable_whisper.load_faster_whisper(model, device="cpu", compute_type="int8")
+
+    # 줄 묶기가 왜 포기했는지 보려면 단어 시각이 어떻게 나왔는지 봐야 합니다.
+    plain = engine.align(str(audio), script, language=language)
+    words = word_timings(plain)
+    lines = [line for line in script.splitlines() if line.strip()]
+    print(f"\n단어 시각 {len(words)}개, 대본 줄 {len(lines)}개")
+    joined = squeeze("".join(w.text for w in words))
+    print(f"  대본 글자 {len(squeeze(script))}자, 단어 글자 {len(joined)}자")
+    print("  앞 단어: " + " | ".join(repr(w.text) for w in words[:8]))
+    mapped = cues_for_lines(script.splitlines(), words)
+    print(f"  줄 묶기 결과: {'자막 ' + str(len(mapped)) + '개' if mapped else '포기(None)'}")
+
     variants = [
         ("정렬기 줄 유지 옵션", script, {"original_split": True}),
         ("줄 유지 + 무음 보정 끔", script, {"original_split": True, "suppress_silence": False}),
