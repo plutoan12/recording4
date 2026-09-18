@@ -12,11 +12,19 @@ RUN apt-get update \
     && apt-get install --no-install-recommends -y ffmpeg fonts-noto-cjk \
     && rm -rf /var/lib/apt/lists/*
 
+# 자막 정렬(stable-ts)과 화자 분리(WhisperX)는 PyTorch를 씁니다. 기본 인덱스는
+# 리눅스에서 CUDA 휠을 함께 받아 약 5GB가 늘어나므로 CPU 빌드를 먼저 고정합니다.
+# 버전은 whisperx가 요구하는 범위(torch~=2.8.0, torchaudio~=2.8.0,
+# torchvision~=0.23.0)와 맞춰야 합니다. whisperx를 올릴 때 이 줄도 함께 고칩니다.
+# GPU가 필요하면 이 단계를 지우고 기본 인덱스로 설치한 뒤 R4_WHISPER_DEVICE를 바꿉니다.
+RUN pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cpu \
+    "torch==2.8.0" "torchaudio==2.8.0" "torchvision==0.23.0"
+
 WORKDIR /app
 
 COPY pyproject.toml ./
 COPY packages ./packages
-RUN pip install --no-cache-dir ".[analysis,providers,imports]"
+RUN pip install --no-cache-dir ".[analysis,providers,imports,subtitles]"
 
 COPY services ./services
 

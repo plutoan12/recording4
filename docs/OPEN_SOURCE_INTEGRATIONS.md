@@ -54,7 +54,9 @@ pip install -e '.[analysis,subtitles]'
 
 현재 설정 기본값은 `R4_WHISPER_DEVICE=cpu`이고 Docker Desktop for Mac은 NVIDIA GPU를 전달하지 못하므로, 그 환경에서는 CPU 빌드가 맞습니다.
 
-`infra/Dockerfile.worker`에는 아직 넣지 않았습니다. 사용하는 코드가 없는 상태에서 이미지가 수 GB 커지기 때문입니다. 실제로 연결할 때 함께 추가합니다.
+`infra/Dockerfile.worker`는 CPU 전용 PyTorch를 먼저 고정한 뒤 `[analysis,providers,imports,subtitles]`를 설치합니다. 기본 인덱스로 받으면 CUDA 휠이 함께 들어와 약 5GB가 늘어납니다(측정: nvidia 4.39GB + triton 0.57GB). GPU 워커가 필요하면 CPU 단계를 지우고 기본 인덱스로 설치한 뒤 `R4_WHISPER_DEVICE`를 바꿉니다.
+
+Dockerfile의 torch 버전은 whisperx가 요구하는 범위(`torch~=2.8.0`, `torchaudio~=2.8.0`, `torchvision~=0.23.0`)와 맞춰야 합니다. whisperx를 올릴 때 함께 고쳐야 하며, 맞지 않으면 빌드가 의존성 충돌로 실패합니다.
 
 ### 설치 검증 (2026-09-18, 리눅스 x86-64 / Python 3.11)
 
@@ -65,7 +67,7 @@ pip install -e '.[analysis,subtitles]'
 - **설치량 8.4GB**(기본 인덱스). 이 중 nvidia CUDA 휠이 대부분입니다.
 - whisperx가 torch를 2.8.0으로 고정합니다. stable-ts 단독 설치 시의 2.14.0보다 낮으므로 한쪽을 올릴 때 확인이 필요합니다.
 - whisperx가 optuna를 통해 alembic·sqlalchemy를 요구하지만 하한 조건(`>=`)이라 프로젝트 고정값과 충돌하지 않습니다.
-- **미검증**: CPU 전용 설치 경로. 작업 환경의 네트워크 정책이 `download.pytorch.org`를 차단해 실행하지 못했습니다. 위 명령은 실제 환경에서 한 번 확인해야 합니다.
+- **미검증**: CPU 전용 설치 경로와 워커 이미지 빌드. 작업 환경이 `download.pytorch.org`를 차단하고 Docker 데몬도 없어 실행하지 못했습니다. 배포 전에 `docker compose -f infra/docker-compose.yml build worker`를 한 번 돌려 확인해야 합니다.
 - 대본 가져오기·새 버전 저장, 문장 경계 기반 구간 후보. 현재 후보 알고리즘은 오프라인 규칙 기반이며 LLM이나 조회수 예측 기능이 아닙니다.
 - 관리화면: 영상 재생, 구간·세로 구도·자막·제목 편집, 렌더 상태, 결과 재생·다운로드, 버전별 승인.
 - 명령행: `python -m worker.cli`로 DB·S3 없이 로컬 파일 처리.
