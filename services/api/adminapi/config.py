@@ -31,6 +31,8 @@ class Settings(BaseSettings):
     s3_public_endpoint_url: str | None = None
     whisper_model: str = "small"
     whisper_device: str = "cpu"
+    # 화자 분리(pyannote)는 Hugging Face 게이트 모델이라 토큰과 약관 동의가 필요합니다.
+    hf_token: str | None = None
 
     # 자막 표시 규칙. 길이 단위는 글자 폭입니다(한글 1자, 라틴·공백·문장부호 0.5자).
     # 기본값은 Netflix 한국어 자막 지침 I부(일반 번역 자막, 성인물)입니다.

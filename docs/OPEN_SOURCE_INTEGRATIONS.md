@@ -24,9 +24,12 @@
 | WhisperX 3.8.6 | wav2vec2 강제 정렬 기반 단어 타이밍, 화자 분리 | [GitHub](https://github.com/m-bain/whisperx), BSD-2-Clause |
 | kss 6.0.6 | 한국어 문장 분리. 자막 줄바꿈을 어절·문장 경계에 맞춤 | [GitHub](https://github.com/hyunwoongko/kss), BSD-3-Clause |
 
-연결한 범위는 다음과 같습니다. **WhisperX는 아직 코드에서 쓰지 않습니다**(화자 분리용으로 등록만 했습니다).
+연결한 범위는 다음과 같습니다.
 
 - stable-ts → `worker/analysis.py:align_text()`. `POST /source-assets/{id}/align`이 타이밍 없는 대본을 원본 음성에 맞춰 새 대본 버전을 만듭니다. 전사가 아니라 정렬이라 글자는 그대로 둡니다.
+- WhisperX → `worker/analysis.py:diarize()`. `POST /source-assets/{id}/diarize`가 누가 언제 말했는지 찾아 최신 대본에 화자를 붙인 새 버전을 만듭니다. 배정은 `pipeline/speakers.py:assign_speakers()`가 겹친 시간으로 정합니다. `GET /source-assets/{id}/speakers`로 화자 목록을, `PUT /jobs/{id}/voice-assignments`로 화자별 음성을 저장합니다.
+  - **Hugging Face 토큰이 필요합니다.** pyannote 화자 분리 모델은 게이트 모델이라 약관 동의 후 발급한 토큰을 `R4_HF_TOKEN`에 넣어야 합니다. 토큰이 없으면 모델을 내려받기 전에 막고 안내를 보여 줍니다. 모델 자체의 이용 조건은 whisperx의 BSD 라이선스와 별개입니다.
+  - 검증 범위: 화자 배정 규칙과 작업 연결은 대역으로 테스트했고, 워커 이미지 안에서 `DiarizationPipeline` 진입점이 실제로 있는지 CI가 확인합니다. **실제 pyannote 추론 품질은 토큰이 필요해 아직 검증하지 못했습니다.**
 - kss → `pipeline/subtitles.py:sentences()`. 자막을 나눌 때 문장 경계를 먼저 찾습니다. kss가 없으면 구두점 기준으로 내려갑니다.
 
 검토한 뒤 채택하지 않은 후보도 남깁니다. [aeneas](https://github.com/readbeyond/aeneas)는 **AGPL v3**이라 네트워크 서비스 제공 시 서버 소스 공개 의무가 생깁니다. [ctc-forced-aligner](https://github.com/MahmoudAshraf97/ctc-forced-aligner)는 코드가 BSD이나 **기본 모델이 CC-BY-NC 4.0(비상업)** 입니다. 두 경우 모두 이 저장소의 사용 형태와 맞지 않아 제외했습니다.
@@ -50,6 +53,11 @@
 - 지침은 OTT 번역 자막 기준이고 숏폼은 세로 화면·큰 글꼴이라 조건이 다릅니다. 그대로 최적값이라고 보지 않으며 다섯 값 모두 `R4_SUBTITLE_*` 설정으로 조정할 수 있습니다. 줄 길이의 화면 적정성은 아래 실측으로 확인했습니다.
 - **반영하지 않은 규칙**: 지침의 줄 나눔(line treatment)은 구·절 단위로 끊으라고 합니다. 현재 구현은 문장 → 어절 → 글자 순서로만 끊고 한국어 절 경계는 판정하지 않습니다. 휴리스틱을 급히 넣기보다 한계로 남깁니다.
 - 원문 페이지는 작업 환경의 이그레스 정책이 직접 접근을 막습니다. 검색 도구의 서버 측 조회로 본문(I.2/I.11/I.15, II.2/II.3)을 확인했습니다. 원문 자체를 브라우저로 연 것은 아닙니다.
+
+### 실측 (CI, 워커 이미지 안)
+
+- **자막 화면 측정** (`scripts/measure_subtitles.py`): 1080x1920 세로 화면에 libass로 한 프레임을 그리고 FFmpeg cropdetect로 글자 픽셀 상자를 잽니다. 기본 줄 길이 16자가 좌우 여백(각 50px, 쓸 수 있는 폭 980px) 안에 **한 줄로** 들어가야 통과합니다. 넘치면 libass가 제멋대로 다시 줄바꿈해 우리 줄 규칙이 화면에서 깨집니다. 실측값은 CI 로그의 `자막 화면 측정` 단계에 남습니다.
+- **정렬 품질 검증** (`scripts/make_speech_sample.py` + `scripts/verify_align.py`): espeak-ng로 문장 사이에 1초 무음을 넣은 한국어 음성을 만들어 문장 시작 시각을 미리 확정한 뒤, 같은 대본을 타이밍 없이 넣고 stable-ts로 정렬해 오차를 잽니다. 글자가 바뀌거나 자막이 겹치거나 문장 시작 오차가 3초를 넘으면 실패합니다. 모델을 실제로 내려받으므로 PR에 `verify-align` 라벨을 붙이거나 커밋 메시지에 `[verify-align]`을 넣을 때만 돌립니다. 합성 음성이라 사람 목소리보다 불리한 조건이며, 사람 목소리 품질을 대신하지는 않습니다.
 
 ### 검토했으나 추가하지 않은 자막 도구
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from pipeline.editing import Cue
+from pipeline.speakers import SpeakerTurn
 
 
 class MissingDependency(RuntimeError):
@@ -66,6 +67,46 @@ def align_text(
     if not cues:
         raise RuntimeError("대본을 오디오에 맞추지 못했습니다. 언어와 음성을 확인하세요.")
     return cues
+
+
+def diarize(
+    source: Path,
+    *,
+    token: str | None,
+    device: str = "cpu",
+    min_speakers: int | None = None,
+    max_speakers: int | None = None,
+) -> list[SpeakerTurn]:
+    """누가 언제 말했는지 구간으로 나눕니다. 무엇을 말했는지는 다루지 않습니다.
+
+    pyannote 모델이 Hugging Face 게이트 모델이라 토큰과 약관 동의가 필요합니다.
+    토큰이 없으면 호출 전에 막습니다. 모델은 첫 실행 때 내려받습니다.
+    """
+    if not token:
+        raise MissingDependency(
+            "화자 분리에는 Hugging Face 토큰이 필요합니다. pyannote 모델 약관에 동의한 뒤 "
+            "R4_HF_TOKEN을 설정하세요."
+        )
+    try:
+        # whisperx 버전에 따라 위치가 다릅니다. 둘 다 받아 줍니다.
+        try:
+            from whisperx.diarize import DiarizationPipeline
+        except ImportError:
+            from whisperx import DiarizationPipeline
+    except ImportError as exc:
+        raise MissingDependency(
+            "화자 분리 의존성이 없습니다. pip install '.[subtitles]'를 실행하세요."
+        ) from exc
+    pipeline = DiarizationPipeline(use_auth_token=token, device=device)
+    frame = pipeline(str(source), min_speakers=min_speakers, max_speakers=max_speakers)
+    turns = [
+        SpeakerTurn(start=float(row.start), end=float(row.end), speaker=str(row.speaker))
+        for row in frame.itertuples()
+        if float(row.end) > float(row.start)
+    ]
+    if not turns:
+        raise RuntimeError("화자를 찾지 못했습니다. 음성이 있는 원본인지 확인하세요.")
+    return sorted(turns, key=lambda t: t.start)
 
 
 def detect_scenes(source: Path, *, threshold: float = 27.0) -> list[dict]:

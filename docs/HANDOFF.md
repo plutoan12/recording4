@@ -349,3 +349,41 @@ SRT/VTT 내보내기는 이미 쓰는 pysubs2로 가능하므로 새 의존성�
 - WhisperX는 여전히 미사용입니다(화자 분리 → `voice_assignments`).
 - 실제 stable-ts 정렬 품질과 모델 다운로드는 미검증입니다.
 - Netflix 지침 원문 페이지는 이그레스 정책으로 직접 열지 못했습니다. 검색 결과 스니펫으로 확인한 값입니다.
+
+
+## 남은 문제 해소: 근거·측정·화자 분리 (2026-09-18)
+
+- 사용자 요청: 남겨 둔 세 가지(숏폼 화면 적정성 미측정, Netflix 원문 미확인, WhisperX 미사용·정렬 품질 미검증)를 해결. 브랜치 `claude/claude-md-design-review-v8qdz4`(PR #7).
+- 담당 파일: `packages/pipeline/pipeline/speakers.py`(신규), `services/worker/worker/{analysis,media_tasks}.py`, `services/api/adminapi/{config,models}.py`, `services/api/adminapi/routers/{editing,jobs}.py`, `migrations/versions/0005_diarize_media_task.py`(신규), `scripts/{measure_subtitles,make_speech_sample,verify_align}.py`(신규), `.github/workflows/ci.yml`, 테스트 2개.
+
+### 1. 원문 확인 → 기본값 정정
+
+검색 도구의 서버 측 조회로 Netflix 한국어 지침 본문을 확인했습니다(원문 페이지 직접 접근은 이그레스 정책이 막습니다). **제가 넣은 14자/초가 틀렸습니다.** I.15(일반 번역 자막)는 성인 12자/초, 아동 9자/초이고, 14/11은 II.3 SDH에서만 허용하는 상향값입니다. 기본값을 12자/초로 내렸습니다. 줄당 16자와 0.5자 계산, 2줄, 5/6초·7초는 확인한 값과 같습니다.
+
+### 2. 숏폼 화면 적정성 → CI 실측
+
+`scripts/measure_subtitles.py`가 워커 이미지 안에서 1080x1920 프레임에 자막을 그리고 FFmpeg cropdetect로 글자 픽셀 상자를 잽니다. 기본 줄 길이 16자가 좌우 여백(쓸 수 있는 폭 980px) 안에 한 줄로 들어가지 않으면 CI가 실패합니다. 추정이 아니라 libass 렌더 결과입니다.
+
+### 3. WhisperX 화자 분리 연결
+
+- `worker/analysis.py:diarize()` — WhisperX `DiarizationPipeline`. 토큰이 없으면 모델을 내려받기 전에 막습니다.
+- `pipeline/speakers.py` — 겹친 시간이 가장 긴 화자를 자막에 붙이는 순수 규칙. 겹치는 화자가 없으면 비워 둡니다.
+- `diarize` MediaTask 종류(마이그레이션 `0005_diarize`) — 대본 글자는 그대로 두고 화자만 붙인 새 버전을 만듭니다.
+- API — `POST /source-assets/{id}/diarize`, `GET /source-assets/{id}/speakers`, `GET·PUT /jobs/{id}/voice-assignments`.
+- 워커 이미지 안에서 `DiarizationPipeline` 진입점이 실제로 있는지 CI가 확인합니다.
+
+### 4. 정렬 품질 검증
+
+`scripts/make_speech_sample.py`가 espeak-ng로 문장 사이 1초 무음을 넣은 한국어 음성을 만들어 문장 시작 시각을 확정하고, `scripts/verify_align.py`가 같은 대본을 타이밍 없이 정렬해 오차를 잽니다. 글자 변형·자막 겹침·문장 시작 오차 3초 초과면 실패합니다. 모델을 실제로 내려받으므로 PR `verify-align` 라벨이나 커밋 메시지 `[verify-align]`이 있을 때만 돌립니다.
+
+### 검증 결과
+
+- `pytest -q`: 221 통과 / 5 skip. 새 테스트 17개(`test_speakers.py` 7, `test_diarize_api.py` 10).
+- `ruff check`, `ruff format --check` 통과. 마이그레이션 `0005` SQLite 왕복 통과.
+
+### 남은 한계
+
+- **실제 pyannote 화자 분리 추론은 아직 돌려 보지 못했습니다.** 게이트 모델 토큰이 필요합니다. 코드 경로와 진입점만 확인한 상태입니다.
+- 정렬 검증은 합성 음성 기준입니다. 사람 목소리 품질을 대신하지 않습니다.
+- 자막 줄 나눔은 여전히 어절 경계까지만 맞춥니다. 구·절 단위는 미구현입니다.
+- 화자 분리 결과를 쓰는 관리화면은 아직 없습니다. API까지만 열려 있습니다.

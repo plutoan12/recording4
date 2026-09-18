@@ -120,10 +120,18 @@ jobs:
         run: |
           docker run --rm --entrypoint python recording4-worker:ci -c "
           import torch, stable_whisper, whisperx, kss, pysubs2, faster_whisper
-          from worker.analysis import align_text
+          from worker.analysis import align_text, diarize
           from pipeline.subtitles import apply_rules
+          from pipeline.speakers import assign_speakers
           assert '+cpu' in torch.__version__, torch.__version__
+          # 화자 분리 진입점이 이 whisperx 버전에 실제로 있는지 확인합니다.
+          # 모델은 내려받지 않습니다. 토큰이 없으면 호출 전에 막힙니다.
+          try:
+              from whisperx.diarize import DiarizationPipeline
+          except ImportError:
+              from whisperx import DiarizationPipeline
           print('torch', torch.__version__, '/ 워커 모듈 임포트 ok')
+          print('화자 분리 진입점', DiarizationPipeline.__module__)
           "
 
       - name: API 이미지 빌드
@@ -135,6 +143,19 @@ jobs:
         run: |
           docker run --rm -v "$PWD/scripts:/work:ro" --entrypoint python \
             recording4-worker:ci /work/measure_subtitles.py
+
+      # 실제 모델을 내려받아 정렬 품질을 재는 검사입니다. 느리고 네트워크를 타므로
+      # PR에 verify-align 라벨을 붙이거나 커밋 메시지에 [verify-align]을 넣을 때만
+      # 돌립니다. 합성 음성이라 사람 목소리보다 불리한 조건입니다.
+      - name: 정렬 품질 검증
+        if: |
+          contains(github.event.pull_request.labels.*.name, 'verify-align') ||
+          contains(github.event.head_commit.message, '[verify-align]')
+        run: |
+          sudo apt-get update && sudo apt-get install -y espeak-ng ffmpeg
+          python3 scripts/make_speech_sample.py --out /tmp/align-sample
+          docker run --rm -v /tmp/align-sample:/audio -v "$PWD/scripts:/work:ro" \
+            --entrypoint python recording4-worker:ci /work/verify_align.py --directory /audio
 
       # 빌드 로그가 길어서 중간 출력은 찾기 어렵습니다. 잡 끝에서 한 번 더 모읍니다.
       - name: 이미지 요약

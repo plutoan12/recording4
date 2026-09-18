@@ -13,8 +13,9 @@ from adminapi.config import get_settings
 from adminapi.db import get_session_factory
 from adminapi.models import Artifact, MediaTask, SourceAsset, TranscriptSegment, utcnow
 from adminapi.storage import get_storage
-from pipeline.editing import EditSpec
-from worker.analysis import MissingDependency, align_text, detect_scenes, transcribe
+from pipeline.editing import Cue, EditSpec
+from pipeline.speakers import SpeakerTurn, assign_speakers, speaker_totals
+from worker.analysis import MissingDependency, align_text, detect_scenes, diarize, transcribe
 from worker.celery_app import celery_app
 from worker.rendering import render_clip
 from worker.subtitle_rules import rules_from_settings
@@ -46,7 +47,8 @@ def run_media(task_id: str) -> dict:
             result = {}
             checksum = None
             settings = get_settings()
-            cues = []
+            cues: list[Cue] = []
+            turns: list[SpeakerTurn] = []
             if kind == "render":
                 output = directory / "clip.mp4"
                 render_clip(
@@ -62,6 +64,16 @@ def run_media(task_id: str) -> dict:
                 result = {"storage_key": output_key}
             elif kind == "scenes":
                 result = {"scenes": detect_scenes(source)}
+            elif kind == "diarize":
+                # 누가 말했는지만 찾습니다. 대본 글자는 건드리지 않습니다.
+                turns = diarize(
+                    source,
+                    token=settings.hf_token,
+                    device=settings.whisper_device,
+                    min_speakers=spec.get("min_speakers"),
+                    max_speakers=spec.get("max_speakers"),
+                )
+                result = {"speakers": speaker_totals(turns)}
             elif kind == "align":
                 # 전사가 아니라 정렬입니다. 대본 글자는 그대로 두고 시각만 찾습니다.
                 cues = align_text(
@@ -98,6 +110,58 @@ def run_media(task_id: str) -> dict:
                     session.add(artifact)
                     session.flush()
                     result["artifact_id"] = str(artifact.id)
+                elif kind == "diarize":
+                    # 기존 대본을 그대로 두고 화자만 붙인 새 버전을 만듭니다.
+                    session.scalar(
+                        select(SourceAsset)
+                        .where(SourceAsset.id == task.source_asset_id)
+                        .with_for_update()
+                    )
+                    version = session.scalar(
+                        select(func.max(TranscriptSegment.transcript_version)).where(
+                            TranscriptSegment.source_asset_id == task.source_asset_id
+                        )
+                    )
+                    rows = (
+                        list(
+                            session.scalars(
+                                select(TranscriptSegment)
+                                .where(
+                                    TranscriptSegment.source_asset_id == task.source_asset_id,
+                                    TranscriptSegment.transcript_version == version,
+                                )
+                                .order_by(TranscriptSegment.start_seconds)
+                            )
+                        )
+                        if version
+                        else []
+                    )
+                    result = {"speakers": speaker_totals(turns), "count": len(rows)}
+                    if rows:
+                        labels = assign_speakers(
+                            [
+                                Cue(
+                                    start=float(r.start_seconds),
+                                    end=float(r.end_seconds),
+                                    text=r.text,
+                                )
+                                for r in rows
+                            ],
+                            turns,
+                        )
+                        for row, label in zip(rows, labels, strict=True):
+                            session.add(
+                                TranscriptSegment(
+                                    source_asset_id=task.source_asset_id,
+                                    transcript_version=version + 1,
+                                    start_seconds=row.start_seconds,
+                                    end_seconds=row.end_seconds,
+                                    text=row.text,
+                                    speaker=label,
+                                )
+                            )
+                        result["transcript_version"] = version + 1
+                        result["labeled"] = sum(1 for label in labels if label)
                 elif kind in ("transcribe", "align"):
                     # Serialize transcript imports and STT completion on the source row.
                     session.scalar(
