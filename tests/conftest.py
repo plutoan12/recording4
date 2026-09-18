@@ -34,6 +34,12 @@ def _environment(tmp_path_factory: pytest.TempPathFactory) -> Iterator[None]:
 
 
 @pytest.fixture(scope="session")
+def test_password() -> str:
+    """테스트 계정 비밀번호. conftest를 모듈로 import하지 않도록 픽스처로 제공합니다."""
+    return TEST_PASSWORD
+
+
+@pytest.fixture(scope="session")
 def is_postgres() -> bool:
     return os.environ["R4_DATABASE_URL"].startswith("postgresql")
 

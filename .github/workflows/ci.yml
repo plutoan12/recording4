@@ -23,7 +23,7 @@ jobs:
           POSTGRES_DB: recording4_test
         ports: ['5432:5432']
         options: >-
-          --health-cmd "pg_isready -U recording4"
+          --health-cmd "pg_isready -U recording4 -d recording4_test"
           --health-interval 5s
           --health-timeout 3s
           --health-retries 10

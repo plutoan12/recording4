@@ -33,15 +33,14 @@ def test_login_to_job_status(
     session: Session,
     storage,
     user,
+    test_password: str,
     monkeypatch,
 ) -> None:  # noqa: ANN001
-    from tests.conftest import TEST_PASSWORD
-
     from worker import tasks
 
     # 1. 로그인
     token = client.post(
-        "/auth/login", json={"email": user.email, "password": TEST_PASSWORD}
+        "/auth/login", json={"email": user.email, "password": test_password}
     ).json()["access_token"]
     headers = {"Authorization": f"Bearer {token}"}
 

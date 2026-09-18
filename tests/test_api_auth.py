@@ -4,13 +4,12 @@ from __future__ import annotations
 
 import pytest
 from fastapi.testclient import TestClient
-from tests.conftest import TEST_PASSWORD
 
 from adminapi.security import hash_password, verify_password
 
 
-def test_login_returns_token(client: TestClient, user) -> None:  # noqa: ANN001
-    response = client.post("/auth/login", json={"email": user.email, "password": TEST_PASSWORD})
+def test_login_returns_token(client: TestClient, user, test_password: str) -> None:  # noqa: ANN001
+    response = client.post("/auth/login", json={"email": user.email, "password": test_password})
     assert response.status_code == 200
     body = response.json()
     assert body["token_type"] == "bearer"
@@ -22,10 +21,10 @@ def test_login_with_wrong_password_is_rejected(client: TestClient, user) -> None
     assert response.status_code == 401
 
 
-def test_login_for_unknown_email_gives_same_error(client: TestClient) -> None:
+def test_login_for_unknown_email_gives_same_error(client: TestClient, test_password: str) -> None:
     """계정 존재 여부를 응답으로 흘리지 않습니다."""
     response = client.post(
-        "/auth/login", json={"email": "nobody@example.com", "password": TEST_PASSWORD}
+        "/auth/login", json={"email": "nobody@example.com", "password": test_password}
     )
     assert response.status_code == 401
     assert response.json()["detail"] == "이메일 또는 비밀번호가 올바르지 않습니다."
