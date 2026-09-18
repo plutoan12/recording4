@@ -36,12 +36,53 @@ def squeeze(text: str) -> str:
     return _SPACE.sub("", text)
 
 
+def diagnose(audio: Path, script: str, starts: list[float], *, model: str, language: str) -> None:
+    """설정을 바꿔 가며 첫 자막 시작이 어떻게 달라지는지 비교합니다.
+
+    판정에는 쓰지 않습니다. 어느 설정이 시각을 앞당기는지 보기 위한 것입니다.
+    모델은 한 번만 불러와 재사용합니다.
+    """
+    try:
+        import stable_whisper
+    except ImportError:
+        print("\nstable-ts가 없어 설정 비교를 건너뜁니다.")
+        return
+    engine = stable_whisper.load_faster_whisper(model, device="cpu", compute_type="int8")
+    variants = [
+        ("줄 유지 (현재 기본)", script, {"original_split": True}),
+        ("줄 유지 + 무음 보정 끔", script, {"original_split": True, "suppress_silence": False}),
+        ("줄 유지 + VAD", script, {"original_split": True, "vad": True}),
+        ("한 줄 대본", script.replace("\n", " "), {}),
+    ]
+    print(f"\n{'설정':<24} {'자막 수':>7} {'첫 시작':>9} {'첫 오차':>9} {'최대 오차':>10}")
+    for label, text, options in variants:
+        try:
+            result = engine.align(str(audio), text, language=language, **options)
+        except TypeError as exc:  # 이 버전에 없는 옵션
+            print(f"{label:<24} 지원하지 않는 옵션: {exc}")
+            continue
+        except Exception as exc:  # noqa: BLE001 - 비교는 실패해도 판정을 막지 않습니다.
+            print(f"{label:<24} 실행 실패: {type(exc).__name__}")
+            continue
+        found = [s for s in result.segments if s.text.strip() and s.end > s.start]
+        if not found:
+            print(f"{label:<24} 결과 없음")
+            continue
+        first = found[0].start
+        worst = max(min(abs(t - s.start) for t in starts) for s in found)
+        print(
+            f"{label:<24} {len(found):>7} {first:>8.2f}초 "
+            f"{abs(first - starts[0]):>8.2f}초 {worst:>9.2f}초"
+        )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--directory", type=Path, required=True)
     parser.add_argument("--model", default="tiny")
     parser.add_argument("--language", default="ko")
     parser.add_argument("--tolerance", type=float, default=1.0)
+    parser.add_argument("--no-diagnose", action="store_true", help="설정별 비교를 건너뜁니다.")
     args = parser.parse_args()
 
     expected = json.loads((args.directory / "expected.json").read_text(encoding="utf-8"))
@@ -90,6 +131,9 @@ def main() -> int:
             "문장 경계를 자막 경계로 남기지 못했습니다: " + ", ".join(missing) + ". "
             "줄바꿈이 있는 대본인데도 합쳐졌다면 정렬기의 줄 유지 옵션을 확인하세요."
         )
+
+    if not args.no_diagnose:
+        diagnose(audio, script, starts, model=args.model, language=args.language)
 
     if problems:
         print("\n문제:")

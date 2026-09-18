@@ -5,6 +5,10 @@ espeak-ng로 문장을 하나씩 합성하고 사이에 정해진 길이의 무�
 그래서 각 문장이 언제 시작하는지 우리가 이미 알고 있고, 정렬 결과를 그 값과
 비교할 수 있습니다. 합성 음성이라 사람 목소리보다 불리한 조건입니다.
 
+합성 파일 자체가 앞뒤에 무음을 달고 나올 수 있으므로, 조각의 시작 시각을
+그대로 쓰지 않고 FFmpeg silencedetect로 실제 소리가 나는 지점을 찾아
+기록합니다. 이 값을 안 재면 정렬이 맞아도 틀린 것처럼 보입니다.
+
     python3 scripts/make_speech_sample.py --out /tmp/align
 
 만들어지는 파일: sample.wav(16kHz 모노), expected.json(문장과 실제 시각).
@@ -14,8 +18,12 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import subprocess
 from pathlib import Path
+
+_SILENCE_START = re.compile(r"silence_start:\s*(-?[\d.]+)")
+_SILENCE_END = re.compile(r"silence_end:\s*(-?[\d.]+)")
 
 SENTENCES = [
     "안녕하세요 오늘은 자막 정렬을 검증합니다",
@@ -46,6 +54,42 @@ def duration(path: Path) -> float:
         ]
     )
     return float(out.strip())
+
+
+def speech_span(path: Path, noise: str = "-40dB") -> tuple[float, float]:
+    """파일 안에서 실제로 소리가 나는 구간 (시작, 끝)을 돌려줍니다.
+
+    합성기가 붙인 앞뒤 무음을 빼기 위한 것입니다. 무음을 못 찾으면 파일
+    전체를 소리 구간으로 봅니다.
+    """
+    done = subprocess.run(
+        [
+            "ffmpeg",
+            "-hide_banner",
+            "-nostats",
+            "-i",
+            str(path),
+            "-af",
+            f"silencedetect=noise={noise}:duration=0.05",
+            "-f",
+            "null",
+            "-",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
+    log = done.stderr
+    total = duration(path)
+    starts = [float(v) for v in _SILENCE_START.findall(log)]
+    ends = [float(v) for v in _SILENCE_END.findall(log)]
+    # 파일 맨 앞이 무음이면 그 무음이 끝나는 지점부터 소리입니다.
+    begin = ends[0] if starts and starts[0] <= 0.01 and ends else 0.0
+    # 맨 뒤 무음은 silence_end가 찍히지 않고 열린 채 끝납니다.
+    finish = starts[-1] if len(starts) > len(ends) else total
+    if finish <= begin:
+        return 0.0, total
+    return begin, finish
 
 
 def main() -> int:
@@ -100,8 +144,15 @@ def main() -> int:
             ]
         )
         length = duration(part)
+        # 조각 안에서 실제로 말이 시작·끝나는 지점을 씁니다. 조각 경계가 아닙니다.
+        begin, finish = speech_span(part)
         expected.append(
-            {"text": sentence, "start": round(cursor, 3), "end": round(cursor + length, 3)}
+            {
+                "text": sentence,
+                "start": round(cursor + begin, 3),
+                "end": round(cursor + finish, 3),
+                "lead_silence": round(begin, 3),
+            }
         )
         cursor += length + GAP
         parts.append(part)
@@ -136,7 +187,10 @@ def main() -> int:
     )
     print(f"{sample} ({duration(sample):.2f}초), 문장 {len(expected)}개")
     for item in expected:
-        print(f"  {item['start']:>6.2f}초 ~ {item['end']:>6.2f}초  {item['text']}")
+        print(
+            f"  {item['start']:>6.2f}초 ~ {item['end']:>6.2f}초  "
+            f"(합성기 앞 무음 {item['lead_silence']:.2f}초)  {item['text']}"
+        )
     return 0
 
 
