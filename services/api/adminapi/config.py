@@ -34,6 +34,8 @@ class Settings(BaseSettings):
 
     # Explicit deployment switches: tests and default installs never call paid APIs.
     paid_processing_enabled: bool = False
+    max_job_budget_usd: Decimal | None = Field(default=None, ge=0)
+    max_monthly_budget_usd: Decimal | None = Field(default=None, ge=0)
     google_cloud_project: str | None = None
     elevenlabs_api_key: str | None = None
     tts_model: str = "eleven_multilingual_v2"

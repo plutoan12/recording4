@@ -135,3 +135,17 @@ def test_reservation_row_records_expiry(session: Session) -> None:
     stored = session.get(BudgetReservation, reservation.id)
     assert stored is not None
     assert stored.expires_at > utcnow()
+
+
+@pytest.mark.parametrize("scope,cap", [("job", "1"), ("monthly", "10")])
+def test_deployment_ceiling_overrides_larger_saved_budget(session, monkeypatch, scope, cap):
+    from adminapi.config import get_settings
+
+    settings = get_settings().model_copy(update={f"max_{scope}_budget_usd": Decimal(cap)})
+    monkeypatch.setattr(budget_service, "get_settings", lambda: settings)
+    record = make_budget(session, limit="100", spent=str(Decimal(cap) - Decimal("0.5")))
+    record.scope = scope
+    session.commit()
+    budget_service.reserve(session, budget_id=record.id, estimate=Decimal("0.4"))
+    with pytest.raises(BudgetShortfall):
+        budget_service.reserve(session, budget_id=record.id, estimate=Decimal("0.2"))

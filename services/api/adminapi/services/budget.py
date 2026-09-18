@@ -13,6 +13,7 @@ from decimal import Decimal
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from adminapi.config import get_settings
 from adminapi.models import Budget, BudgetReservation
 from pipeline.budget import ReservationState, check_affordable, settle_amount
 
@@ -43,9 +44,12 @@ def reserve(
     끝날 때까지 기다립니다. 호출자는 이 함수가 성공한 뒤에만 유료 호출을 합니다.
     """
     budget = session.scalars(select(Budget).where(Budget.id == budget_id).with_for_update()).one()
-    check_affordable(
-        budget.limit_amount, budget.spent_amount, held_total(session, budget_id), estimate
+    settings = get_settings()
+    cap = {"job": settings.max_job_budget_usd, "monthly": settings.max_monthly_budget_usd}.get(
+        budget.scope
     )
+    limit = min(budget.limit_amount, cap) if cap is not None else budget.limit_amount
+    check_affordable(limit, budget.spent_amount, held_total(session, budget_id), estimate)
     reservation = BudgetReservation(
         budget_id=budget_id,
         stage_run_id=stage_run_id,
