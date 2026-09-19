@@ -31,11 +31,15 @@ class Settings(BaseSettings):
     s3_public_endpoint_url: str | None = None
     whisper_model: str = "small"
     whisper_device: str = "cpu"
+    # 화자 분리(pyannote)는 Hugging Face 게이트 모델이라 토큰과 약관 동의가 필요합니다.
+    hf_token: str | None = None
 
-    # 자막 표시 규칙. 기본값은 한국어 기준 제안이며 실제 화면 측정 후 조정합니다.
-    subtitle_max_chars_per_line: int = 20
+    # 자막 표시 규칙. 길이 단위는 글자 폭입니다(한글 1자, 라틴·공백·문장부호 0.5자).
+    # 기본값은 Netflix 한국어 자막 지침 I부(일반 번역 자막, 성인물)입니다.
+    # 14자/초는 SDH 상향값이라 쓰지 않습니다. 실제 화면 측정 후 조정합니다.
+    subtitle_max_chars_per_line: int = 16
     subtitle_max_lines: int = 2
-    subtitle_max_cps: float = 20.0
+    subtitle_max_cps: float = 12.0
     subtitle_min_duration: float = 1.0
     subtitle_max_duration: float = 7.0
 

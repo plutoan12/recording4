@@ -315,5 +315,293 @@ SRT/VTT 내보내기는 이미 쓰는 pysubs2로 가능하므로 새 의존성�
 
 - WhisperX는 여전히 미사용입니다. 화자 분리로 `voice_assignments`를 채우는 작업이 남아 있습니다.
 - 자막 기본값(줄 길이 20자·2줄·20 CPS)은 측정 근거가 없는 제안값입니다.
-- 워커 이미지에 `[subtitles]`와 CPU 전용 PyTorch를 추가했습니다. **이미지 빌드는 검증하지 못했습니다**(작업 환경에 Docker 데몬이 없고 `download.pytorch.org`가 차단됨). 배포 전에 `docker compose -f infra/docker-compose.yml build worker`로 확인해야 합니다.
+- 워커 이미지에 `[subtitles]`와 CPU 전용 PyTorch를 추가했습니다. 작업 환경에는 Docker 데몬이 없고 `download.pytorch.org`가 차단되어 빌드를 돌릴 수 없었으므로, CI에 **워커 이미지 빌드 잡**을 추가해 거기서 검증합니다. 잡은 이미지를 빌드하고 컨테이너 안에서 `torch.__version__`에 `+cpu`가 들어 있는지와 워커 모듈 임포트를 확인합니다. PR과 main에서만 돌아갑니다.
 - Dockerfile의 torch 고정값은 whisperx 요구 범위와 연동됩니다. whisperx를 올릴 때 함께 고치지 않으면 빌드가 실패합니다.
+
+
+## 자막 표시 규칙에 표준 근거 적용 (2026-09-18)
+
+- 사용자 요청: 자막 관련 코드를 더 조사하고, 필요한 것은 설치하고 참고할 것은 반영. 브랜치 `claude/claude-md-design-review-v8qdz4`(PR #7).
+- 담당 파일: `packages/pipeline/pipeline/subtitles.py`, `services/api/adminapi/config.py`, `tests/test_subtitles.py`, `docs/{ARCHITECTURE,OPEN_SOURCE_INTEGRATIONS,TECH_DECISIONS,HANDOFF}.md`, `.github/workflows/ci.yml`.
+- 의존 작업: 없음. 새 런타임 의존성을 추가하지 않았습니다.
+
+### 반영한 것
+
+- 길이 단위를 글자 폭으로 변경(`text_width()`). 한글 1자, 라틴·숫자·공백·문장부호 0.5자. 줄바꿈·분할·CPS 검사가 모두 이 값을 씁니다.
+- 기본값을 Netflix 한국어 자막 지침(성인물)에 맞춤: 줄당 16자, 2줄, 초당 14자, 최대 7초. 최소 표시 시간은 1초로 유지(지침 5/6초보다 보수적).
+- 근거와 출처, 반영하지 않은 규칙을 `docs/OPEN_SOURCE_INTEGRATIONS.md`에 기록.
+
+### 설치 판단
+
+- **새로 설치한 런타임 의존성 없음**. ffsubsync는 쓸 자리가 없고, silero-vad는 faster-whisper 내장 VAD를 `transcribe()`에서 이미 쓰고 있습니다. subaligner·NeMo는 설치량이 CPU 전용 결정과 어긋납니다. 근거는 오픈소스 통합 문서에 남겼습니다.
+- 개발 환경에만 kss 6.0.6을 설치해 문장 분리 경로를 처음으로 실제 실행 확인했습니다(그전에는 구두점 대체 경로만 돌았습니다).
+
+### 검증 결과
+
+- `pytest -q`: 204 통과 / 5 skip. kss 설치 전후 모두 동일.
+- `ruff check`, `ruff format --check` 통과.
+- CI(`5c139cc`) 세 잡 모두 성공. 워커 이미지 **4.66GB**, API 이미지 256MB, 컨테이너 안 `torch 2.8.0+cpu` 확인.
+
+### 남은 문제
+
+- 기본값은 OTT 번역 자막 기준입니다. 숏폼 세로 화면에서의 적정성은 여전히 측정하지 않았습니다.
+- 구·절 단위 줄 나눔 미구현. 두 줄로 끊길 때 어절 경계까지만 맞춥니다.
+- WhisperX는 여전히 미사용입니다(화자 분리 → `voice_assignments`).
+- 실제 stable-ts 정렬 품질과 모델 다운로드는 미검증입니다.
+- Netflix 지침 원문 페이지는 이그레스 정책으로 직접 열지 못했습니다. 검색 결과 스니펫으로 확인한 값입니다.
+
+
+## 남은 문제 해소: 근거·측정·화자 분리 (2026-09-18)
+
+- 사용자 요청: 남겨 둔 세 가지(숏폼 화면 적정성 미측정, Netflix 원문 미확인, WhisperX 미사용·정렬 품질 미검증)를 해결. 브랜치 `claude/claude-md-design-review-v8qdz4`(PR #7).
+- 담당 파일: `packages/pipeline/pipeline/speakers.py`(신규), `services/worker/worker/{analysis,media_tasks}.py`, `services/api/adminapi/{config,models}.py`, `services/api/adminapi/routers/{editing,jobs}.py`, `migrations/versions/0005_diarize_media_task.py`(신규), `scripts/{measure_subtitles,make_speech_sample,verify_align}.py`(신규), `.github/workflows/ci.yml`, 테스트 2개.
+
+### 1. 원문 확인 → 기본값 정정
+
+검색 도구의 서버 측 조회로 Netflix 한국어 지침 본문을 확인했습니다(원문 페이지 직접 접근은 이그레스 정책이 막습니다). **제가 넣은 14자/초가 틀렸습니다.** I.15(일반 번역 자막)는 성인 12자/초, 아동 9자/초이고, 14/11은 II.3 SDH에서만 허용하는 상향값입니다. 기본값을 12자/초로 내렸습니다. 줄당 16자와 0.5자 계산, 2줄, 5/6초·7초는 확인한 값과 같습니다.
+
+### 2. 숏폼 화면 적정성 → CI 실측
+
+`scripts/measure_subtitles.py`가 워커 이미지 안에서 1080x1920 프레임에 자막을 그리고 FFmpeg cropdetect로 글자 픽셀 상자를 잽니다. 기본 줄 길이 16자가 좌우 여백(쓸 수 있는 폭 980px) 안에 한 줄로 들어가지 않으면 CI가 실패합니다. 추정이 아니라 libass 렌더 결과입니다.
+
+### 3. WhisperX 화자 분리 연결
+
+- `worker/analysis.py:diarize()` — WhisperX `DiarizationPipeline`. 토큰이 없으면 모델을 내려받기 전에 막습니다.
+- `pipeline/speakers.py` — 겹친 시간이 가장 긴 화자를 자막에 붙이는 순수 규칙. 겹치는 화자가 없으면 비워 둡니다.
+- `diarize` MediaTask 종류(마이그레이션 `0005_diarize`) — 대본 글자는 그대로 두고 화자만 붙인 새 버전을 만듭니다.
+- API — `POST /source-assets/{id}/diarize`, `GET /source-assets/{id}/speakers`, `GET·PUT /jobs/{id}/voice-assignments`.
+- 워커 이미지 안에서 `DiarizationPipeline` 진입점이 실제로 있는지 CI가 확인합니다.
+
+### 4. 정렬 품질 검증
+
+`scripts/make_speech_sample.py`가 espeak-ng로 문장 사이 1초 무음을 넣은 한국어 음성을 만들어 문장 시작 시각을 확정하고, `scripts/verify_align.py`가 같은 대본을 타이밍 없이 정렬해 오차를 잽니다. 글자 변형·자막 겹침·문장 시작 오차 3초 초과면 실패합니다. 모델을 실제로 내려받으므로 PR `verify-align` 라벨이나 커밋 메시지 `[verify-align]`이 있을 때만 돌립니다.
+
+### 검증 결과
+
+- `pytest -q`: 221 통과 / 5 skip. 새 테스트 17개(`test_speakers.py` 7, `test_diarize_api.py` 10).
+- `ruff check`, `ruff format --check` 통과. 마이그레이션 `0005` SQLite 왕복 통과.
+
+### 실측 결과 (CI `cdd4c5a`, 세 잡 모두 성공)
+
+- 자막 화면: 글자 크기 64에서 한글 16자는 **647px**(화면 폭의 60%), 여백 980px 안에 한 줄. 20자까지 들어갑니다. 한 줄 높이 41px.
+- 정렬(whisper small): 문장 경계 3/3개를 자막 경계로 찾음. 오차는 자막 1 **0.00초**, 자막 2 0.01초, 자막 3 0.00초.
+- 이미지: 워커 4.66GB, API 256MB, `torch 2.8.0+cpu`.
+
+### 남은 한계
+
+- 자막 시각 오차는 합성 음성 기준 0.01초입니다. **실제 사람 목소리에서도 같은지는 미확인입니다.**
+- **실제 pyannote 화자 분리 추론은 아직 돌려 보지 못했습니다.** 게이트 모델 토큰이 필요합니다. 코드 경로와 진입점만 확인한 상태입니다.
+- 정렬 검증은 합성 음성 기준입니다. 사람 목소리 품질을 대신하지 않습니다.
+- 자막 줄 나눔은 여전히 어절 경계까지만 맞춥니다. 구·절 단위는 미구현입니다.
+- 화자 분리 결과를 쓰는 관리화면은 아직 없습니다. API까지만 열려 있습니다.
+
+
+## 자막 시각 정확도 추적 (2026-09-18)
+
+- 사용자 요청: 첫 자막이 1초 늦게 시작하는 문제를 줄일 것. 브랜치 `claude/claude-md-design-review-v8qdz4`(PR #7).
+- 담당 파일: `packages/pipeline/pipeline/alignment.py`(신규), `services/worker/worker/analysis.py`, `scripts/{make_speech_sample,verify_align}.py`, `.github/workflows/ci.yml`, `tests/test_alignment.py`(신규).
+
+### 원인 두 가지
+
+같은 음성에 설정을 바꿔 가며 재서 좁혔습니다. 무음 보정과 VAD는 영향이 없었습니다.
+
+| 원인 | 증상 | 처리 |
+|---|---|---|
+| 정렬기의 줄 유지 옵션(`original_split`) | 첫 자막 **1.00초 지연** (옵션 켬 2.00초, 끔 0.98초, 실제 1.00초) | 옵션을 버리고 단어 시각으로 직접 줄을 나눔(`cues_for_lines`) |
+| 단어 시각이 무음 안쪽으로 당겨짐 | 마지막 자막 **1.73초 선행** (tiny·small 동일) | 자막 시작을 발화 시작에 맞춤(`snap_starts`) |
+
+### 결과 (CI `bd42bf2`, whisper small)
+
+자막 1 오차 0.00초, 자막 2 0.01초, 자막 3 0.00초. 문장 경계 3/3개 유지.
+
+### 판단 기록
+
+- 검증 모델을 `tiny`에서 운영 기본값 `small`로 바꿨습니다. 쓰지도 않는 모델의 오차를 재고 있었습니다.
+- `snap_starts`는 옮겨도 되는 경우만 옮깁니다. 앞 자막 침범, 자막 소멸, 2초 밖 발화 시작은 건드리지 않습니다. 각각 테스트로 고정했습니다.
+- 줄 묶기는 맞출 수 없으면 포기하고 정렬기 구간을 그대로 씁니다. 글자가 바뀌거나 단어가 줄 경계를 넘으면 포기합니다.
+
+### 남은 한계
+
+- 합성 음성(espeak) 기준입니다. 사람 목소리 실측은 아래 「사람 목소리 정렬 실측과 발화 구간 문제」 절에 있습니다.
+- 화자 분리(pyannote) 실제 추론은 게이트 모델 토큰이 없어 미검증입니다.
+
+
+## 사람 목소리·실제 화자 분리 검증 연결 (2026-09-18)
+
+- 사용자 요청: 남은 두 한계(합성 음성 기준 정확도, pyannote 실추론 미검증)를 처리. 브랜치 `claude/claude-md-design-review-v8qdz4`(PR #7).
+- 담당 파일: `scripts/{speech_sample,fetch_korean_speech,make_speech_sample,make_two_speaker_sample,verify_diarize}.py`, `.github/workflows/ci.yml`, 문서.
+
+### 한 것
+
+- `speech_sample.py`로 음성 묶음 만드는 공통 도구를 분리했습니다. 합성 음성과 사람 목소리가 같은 형식(sample.wav + expected.json)을 만들어 같은 검증기가 읽습니다.
+- `fetch_korean_speech.py`: 공개 한국어 낭독 음성을 datasets-server에서 받아 검증용 음성을 만듭니다. CI가 합성 음성 검사에 이어 사람 목소리 검사를 한 번 더 돌립니다.
+- `make_two_speaker_sample.py`: 서로 다른 두 목소리를 번갈아 넣고 조각마다 정답 화자를 기록합니다. 사람 목소리 조각이 있으면 한쪽 화자로 씁니다.
+- `verify_diarize.py`: pyannote를 실제로 돌려 화자가 둘 이상 갈리는지, 정답 화자별로 결과가 한 표시로 몰리는지 확인합니다.
+- CI: 사람 목소리 검사는 `verify-align` 라벨로, 화자 분리 검사는 저장소 시크릿 `HF_TOKEN`으로 켜집니다. 단계 `if`에서는 `secrets` 컨텍스트를 못 쓰므로 잡 수준 env로 받아 `env.HF_TOKEN != ''`로 판정합니다.
+
+### 사용자 조치가 필요한 것
+
+**화자 분리 실검증은 `HF_TOKEN` 시크릿 없이는 돌지 않습니다.** 제가 대신 만들 수 없는 값입니다.
+
+1. https://huggingface.co/pyannote/speaker-diarization-3.1 에서 약관에 동의합니다.
+2. 같은 계정에서 읽기 토큰을 발급합니다.
+3. 저장소 Settings → Secrets and variables → Actions에 `HF_TOKEN`으로 넣습니다.
+
+시크릿이 없으면 이 단계는 건너뛰고 나머지는 그대로 돕니다.
+
+### 남은 한계
+
+- 사람 목소리 검증은 네트워크로 공개 데이터셋을 받습니다. 이 작업 환경에서는 `huggingface.co`와 `openslr.org`가 모두 막혀 있어 **CI에서만 확인됩니다**. 데이터셋 주소나 응답 형식이 바뀌면 그 단계가 실패합니다.
+- 화자 분리의 정확도(경계 오차 등)는 재지 않습니다. 화자가 갈리는지만 봅니다.
+
+
+## 로컬(VS Code)에서 이어서 하기 (2026-09-18)
+
+클라우드 세션에서 하던 작업을 로컬로 옮깁니다. 코드와 상태는 모두 브랜치와 이 문서에 있습니다.
+
+```bash
+git clone https://github.com/plutoan12/recording4.git
+cd recording4
+git checkout claude/claude-md-design-review-v8qdz4   # PR #7
+pip install -e ".[dev]"
+pytest -q && ruff check . && ruff format --check .
+```
+
+### 로컬에서 하면 빨라지는 것
+
+클라우드 세션은 Docker 데몬이 없고 `huggingface.co`·`download.pytorch.org`·`openslr.org`가 모두 막혀 있어, 아래를 전부 CI로 보내고 한 번에 6분씩 기다렸습니다. 로컬에서는 바로 돌아갑니다.
+
+```bash
+# 워커 이미지 (4.66GB, 첫 빌드는 오래 걸립니다)
+docker build -f infra/Dockerfile.worker -t recording4-worker:local .
+
+# 자막이 세로 화면 여백 안에 들어가는지 실측
+docker run --rm -v "$PWD/scripts:/work:ro" --entrypoint python \
+  recording4-worker:local /work/measure_subtitles.py
+
+# 합성 음성으로 정렬 정확도 측정
+sudo apt-get install -y espeak-ng ffmpeg   # macOS: brew install espeak-ng ffmpeg
+python3 scripts/make_speech_sample.py --out /tmp/align
+docker run --rm -v /tmp/align:/audio -v "$PWD/scripts:/work:ro" \
+  --entrypoint python recording4-worker:local /work/verify_align.py \
+  --directory /audio --model small
+
+# 사람 목소리로 같은 측정 (공개 데이터셋을 내려받습니다)
+python3 scripts/fetch_korean_speech.py --out /tmp/human --count 3
+docker run --rm -v /tmp/human:/audio -v "$PWD/scripts:/work:ro" \
+  --entrypoint python recording4-worker:local /work/verify_align.py \
+  --directory /audio --model small
+```
+
+**`fetch_korean_speech.py`는 클라우드에서 한 번도 실행하지 못했습니다.** 네트워크가 막혀 CI에서만 처음 돌아갑니다. datasets-server 응답 형식이 가정과 다르면 여기서 실패하니, 로컬에서 먼저 돌려 보는 편이 빠릅니다.
+
+### 토큰이 있어야 되는 것
+
+화자 분리(pyannote)는 게이트 모델입니다. 환경을 옮겨도 토큰 없이는 못 돌립니다.
+
+1. https://huggingface.co/pyannote/speaker-diarization-3.1 약관 동의
+2. 같은 계정에서 읽기 토큰 발급
+3. 로컬은 `R4_HF_TOKEN`, CI는 저장소 시크릿 `HF_TOKEN`
+
+```bash
+python3 scripts/make_two_speaker_sample.py --out /tmp/two --human /tmp/human
+docker run --rm -v /tmp/two:/audio -v "$PWD/scripts:/work:ro" \
+  -e R4_HF_TOKEN --entrypoint python recording4-worker:local \
+  /work/verify_diarize.py --directory /audio --max-speakers 2
+```
+
+### 같은 브랜치를 두 곳에서 밀지 않기
+
+클라우드 세션이 PR #7을 감시하며 CI 실패를 고쳐 왔습니다. 로컬에서 같은 브랜치에 커밋한다면 한쪽만 푸시해야 충돌이 없습니다.
+
+
+## 사람 목소리 정렬 실측과 발화 구간 문제 (2026-09-18)
+
+- 사용자 요청: 첫 자막 지연을 줄이고 정렬을 다시 검증할 것. 브랜치 `claude/claude-md-design-review-v8qdz4`(PR #7).
+- 담당 파일: `packages/pipeline/pipeline/alignment.py`, `services/worker/worker/analysis.py`, `scripts/{speech_sample,verify_align}.py`, `tests/test_alignment.py`.
+
+### 고친 것 두 가지
+
+| 어긋난 곳 | 증상 | 처리 |
+|---|---|---|
+| VAD `min_silence_duration_ms` 기본 2000ms | 문장 사이 1초 쉼이 무시돼 **18초 음성 전체가 발화 구간 1개**(0.99~18.06). 맞출 시작점이 없어 자막 2·3이 1.57·1.71초 밀린 채 남음 | 200ms로 낮춰 문장마다 끊고, 조각은 `merge_spans(0.3)`이 다시 합침 |
+| 정답 앞 무음을 -40dB 고정 문턱으로 측정 | 실내 잡음이 문턱보다 커서 잡음 시작을 말 시작으로 기록(2번 조각 0.08초 기록, 실제 1.65초) | 조각마다 최대 음량 -35dB로 문턱을 다시 잡고, 고정 문턱 값도 함께 기록 |
+
+설정은 `supported_options()`가 이름별로 걸러 넘깁니다. 이전에는 `TypeError`를 통째로 잡아 설정이 하나도 안 걸린 채 기본값으로 돌아갔고, 위 첫 번째 원인이 거기 가려져 있었습니다.
+
+### 검증 결과 (CI `09bbe82`, whisper small, 전 단계 초록)
+
+| 음성 | 자막 1 | 자막 2 | 자막 3 | 문장 경계 |
+|---|---|---|---|---|
+| 합성(espeak) | 0.01초 | 0.05초 | 0.02초 | 3/3 |
+| 사람 목소리(zeroth-korean) | **0.77초** | 0.08초 | 0.07초 | 3/3 |
+
+이전 값은 합성 1.71초, 사람 목소리 1.65초였습니다. 판정 한계는 1.0초입니다.
+
+### 이 수치의 한계
+
+- zeroth-korean에는 단어 시각 정답이 없습니다. "실제 시작"은 우리가 에너지(FFmpeg)로 재는 값이고, 자막 시작은 Silero VAD가 찾는 값입니다. 서로 다른 방법이라 맞아떨어지는 것은 교차 확인이 되지만, **외부 정답으로 잰 정확도는 아닙니다.**
+- 남은 0.77초가 정렬이 늦은 것인지 정답이 이른 것인지 이 방법으로는 가리지 못합니다. 단어 시각이 있는 한국어 공개 데이터가 필요합니다.
+- 문턱을 바꾸면 정답이 움직이므로, 고정 -40dB로 잰 값을 `expected.json`(`lead_silence_at_40db`)과 로그에 함께 남깁니다. 이번에 실제로 움직인 것은 세 조각 중 하나였습니다(0.08 → 1.65초).
+- 화자 분리(pyannote) 실추론은 `HF_TOKEN` 시크릿이 없어 여전히 미검증입니다. 절차는 위 절을 보세요.
+
+
+## 스택 전체 기동·실제 S3·전사 품질 실측 (2026-09-19)
+
+- 사용자 요청: 자막 끝 시각 검증 → Compose 전체 기동 → 실제 S3/MinIO → 실제 STT 전사 품질 → 게시 경로 실측을 차례대로. 브랜치 `claude/claude-md-design-review-v8qdz4`(PR #7).
+- 담당 파일: `.github/workflows/ci.yml`, `scripts/{verify_align,verify_transcribe}.py`, `tests/test_verify_{align,transcribe}.py`.
+
+### 1. 자막 끝 시각 (CI `055be31`, whisper small)
+
+시작만 재던 검증에 끝을 넣었습니다. 끝의 정답은 시작만큼 또렷하지 않아서(말끝 숨소리·잔향) **정답과의 차이는 찍기만** 하고, 판정은 자막이 지켜야 할 것으로 합니다.
+
+사람 목소리 실측:
+
+| 자막 | 정렬 끝 | 정답 끝 | 차이 | 표시 시간 |
+|---|---|---|---|---|
+| 1 | 10.52초 | 11.93초 | 1.41초 | 8.66초 |
+| 2 | 20.54초 | 21.75초 | 1.21초 | 5.88초 |
+| 3 | 31.44초 | 33.18초 | 1.74초 | 7.92초 |
+
+세 번 다 자막이 정답보다 **이르게** 끝납니다. 방향이 일정한 것이 단서입니다. 같은 구간의 VAD 발화 끝은 10.46 / 20.29 / 31.71초로, 자막 끝과 0.06~0.27초 차이입니다. 즉 정렬과 VAD는 서로 맞고 에너지 문턱으로 잰 정답 끝만 늦습니다. 말끝 뒤에 남는 숨소리와 잔향이 문턱을 넘기 때문입니다. 자막은 말이 끝나는 지점에서 사라지고 있습니다.
+
+판정 결과: 다음 문장 침범 없음, 표시 규칙 적용 뒤 줄 수·겹침 위반 없음. 규칙 적용 뒤 자막은 3개 → 7개로 나뉘고 읽기 속도는 6.8~7.3자/초로 한도(12자/초) 안입니다.
+
+**이 검사에서 버그가 하나 나왔습니다.** 0.99초에 시작하는 자막이 1.00초 문장을 정확히 맞춘 것인데, "자막 시작보다 뒤에 시작하는 문장"을 다음 문장으로 보다가 자기 문장에 걸렸습니다. 순서가 아니라 가까움으로 자기 문장을 고르게 고쳤고, 한 자막이 두 문장을 담은 경우도 침범이 아니게 했습니다. 두 경우 모두 테스트로 고정했습니다.
+
+### 2·3. Compose 전체 기동과 실제 S3/MinIO (CI `7b565b4`, 첫 시도 통과)
+
+CI 잡 `스택 기동 검증`이 **운영에서 쓰는 구성**(`compose.runtime.yml`)을 그대로 띄웁니다. 개발용(`docker-compose.yml`)이 아닙니다.
+
+- 컨테이너 9개: postgres·redis·minio(healthy), api(healthy), worker(celery, healthy), dispatcher, monitor, backup, web(caddy). 기동 3분 21초.
+- `scripts/smoke.py`로 전 경로 8초: 로그인 → 원본 생성 → **실제 S3 PUT**(Caddy `/recording4/*` → MinIO, presigned URL) → 검증 → 제작(transcribe·render 단계 succeeded) → 결과물 내려받기 → FFmpeg 디코딩.
+- 결과: `state=review_required`, `paid_calls=0`, `youtube_uploads=0`.
+
+이 작업 환경에는 Docker **데몬**이 없어(CLI만 있음) 직접 띄울 수 없습니다. CI가 대신합니다.
+
+### 4. 실제 STT 전사 품질 (CI `055be31`, whisper small, 사람 목소리)
+
+| 문장 | CER | 어긋난 곳 |
+|---|---|---|
+| 1 | 3.9% | 삼 월 → 3월, 장동련 → 장동연 |
+| 2 | 11.8% | 겹쳐 → 격쳐, 한창 → 한참, 폭 파묻혀 버렸다 → 폭파무차버렸다 |
+| 3 | 14.3% | 오픈해 → 오픈에, 이천 십 팔 년 → 2018년, 진행돼 왔다 → 진행되어왔다 |
+
+**전체 CER 9.7%** (원문 134자). 한계는 첫 실측을 보고 35% → **20%**로 내렸습니다. 품질 목표가 아니라 회귀 감시용 상한입니다. 표본이 세 문장뿐이고 데이터셋 행이 바뀌면 값도 움직이므로 실측의 두 배로 둡니다.
+
+숫자 표기 차이(이천 십 팔 년 ↔ 2018년)가 CER을 올립니다. 문장 3의 14.3% 중 상당 부분이 그것입니다. 다만 문장 2는 진짜 오인식입니다. 수치만 보지 말고 문장별 비교를 봐야 하는 이유입니다.
+
+### 남은 것
+
+- **게시 경로 실측(YouTube 비공개 업로드)은 아직입니다.** 실제 계정에 영상이 올라가고 API 할당량을 쓰므로 사용자 확인 뒤에 합니다.
+- 화자 분리(pyannote) 실추론은 `HF_TOKEN` 시크릿이 없어 여전히 미검증입니다.
+- 전사 품질은 낭독 음성 세 문장 기준입니다. 잡음·대화체·여러 화자는 재지 않았습니다.
+
+### 5. 게시 경로 (2026-09-19)
+
+사용자가 "대역 검증 + 로컬 실행 절차서"를 선택했습니다. 실제 업로드는 하지 않았습니다.
+
+- **대역 검증을 한 겹 더 넣었습니다.** 지금까지 업로드 경로는 Google SDK를 통째로 대역으로 바꿔서만 검증했습니다. 정작 위험한 곳은 SDK와 주고받는 재개 규약인데(`docs/OPEN_SOURCE_INTEGRATIONS.md`에 "SDK 버전 변경 시 재개 계약 테스트를 다시 실행"하라고 적혀 있습니다) 그 테스트가 없었습니다. `tests/test_youtube_resumable.py`가 **실제 SDK**를 로컬 가짜 YouTube 서버에 붙여 돌립니다: 세션 재사용(중단 후 재개해도 세션 1개), 저장한 오프셋을 믿지 않고 서버에 다시 묻기, 완료된 업로드 재시도 안 함, 승인본이 다르면 네트워크 전에 중단. 계정도 네트워크도 쓰지 않습니다.
+- 쓰면서 알게 된 것: 재개 업로드의 "아직 안 끝났다"는 308인데, SDK가 `build_http()`에서 308을 리다이렉트 목록에서 빼 둡니다. 맨 `httplib2.Http()`를 넘기면 httplib2가 리다이렉트로 처리해 실패합니다. 서비스를 직접 만들어 쓰는 코드가 생기면 여기를 봐야 합니다.
+- CI `파이썬 검사`가 `[dev,providers]`로 설치합니다. google-api-python-client는 torch를 끌어오지 않아 가볍습니다.
+- 실제 업로드 절차는 [게시 경로 실행 절차](PUBLISH_RUNBOOK.md)에 있습니다. OAuth 인증 파일은 계정 소유자의 컴퓨터에만 둡니다. 클라우드 세션이나 CI 시크릿에 갱신 토큰을 올리면 그 토큰으로 계정 영상을 올리고 지울 수 있습니다.

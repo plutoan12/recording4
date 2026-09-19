@@ -5,10 +5,11 @@ from __future__ import annotations
 import uuid
 
 from fastapi import APIRouter, HTTPException, Query, status
-from sqlalchemy import select
+from pydantic import BaseModel, Field
+from sqlalchemy import func, select
 
 from adminapi.deps import CurrentUser, SessionDep
-from adminapi.models import Budget, Job, SourceAsset, utcnow
+from adminapi.models import Budget, Job, SourceAsset, VoiceAssignment, utcnow
 from adminapi.outbox import enqueue
 from adminapi.schemas import JobCreateRequest, JobResponse, JobTransitionRequest
 from pipeline.states import JobState, TransitionError, assert_transition
@@ -98,6 +99,71 @@ def transition(
     job.state_reason = payload.reason
     session.flush()
     return job
+
+
+class VoiceAssignmentRequest(BaseModel):
+    """화자 표시 → 공급자 음성 ID. 화자 분리 결과를 실제 음성에 연결합니다."""
+
+    assignments: dict[str, str] = Field(min_length=1, max_length=20)
+
+
+@router.get("/{job_id}/voice-assignments")
+def get_voice_assignments(job_id: uuid.UUID, user: CurrentUser, session: SessionDep):
+    """최신 버전의 화자별 음성 배정을 돌려줍니다."""
+    _get_job(session, job_id)
+    version = session.scalar(
+        select(func.max(VoiceAssignment.version)).where(VoiceAssignment.job_id == job_id)
+    )
+    rows = (
+        list(
+            session.scalars(
+                select(VoiceAssignment).where(
+                    VoiceAssignment.job_id == job_id, VoiceAssignment.version == version
+                )
+            )
+        )
+        if version
+        else []
+    )
+    return {
+        "version": version,
+        "assignments": {row.speaker: row.provider_voice_id for row in rows},
+    }
+
+
+@router.put("/{job_id}/voice-assignments")
+def put_voice_assignments(
+    job_id: uuid.UUID,
+    payload: VoiceAssignmentRequest,
+    user: CurrentUser,
+    session: SessionDep,
+):
+    """음성 배정을 새 버전으로 저장합니다. 기존 버전은 감사용으로 남깁니다.
+
+    화자 표시는 화자 분리가 만든 값(`SPEAKER_00` 등)이나 `default`입니다.
+    어떤 음성을 쓸지는 사람이 고릅니다. 여기서 추측하지 않습니다.
+    """
+    _get_job(session, job_id)
+    for speaker, voice in payload.assignments.items():
+        if not speaker.strip() or not voice.strip():
+            raise HTTPException(422, "화자 표시와 음성 ID는 비어 있을 수 없습니다.")
+        if len(speaker) > 64 or len(voice) > 128:
+            raise HTTPException(422, "화자 표시 또는 음성 ID가 너무 깁니다.")
+    version = (
+        session.scalar(
+            select(func.max(VoiceAssignment.version)).where(VoiceAssignment.job_id == job_id)
+        )
+        or 0
+    ) + 1
+    session.add_all(
+        [
+            VoiceAssignment(
+                job_id=job_id, speaker=speaker, provider_voice_id=voice, version=version
+            )
+            for speaker, voice in payload.assignments.items()
+        ]
+    )
+    return {"version": version, "count": len(payload.assignments)}
 
 
 def _get_job(session, job_id: uuid.UUID) -> Job:  # noqa: ANN001

@@ -176,3 +176,24 @@ def test_missing_dependency_message_reaches_the_operator(
     media_tasks.run_media.run(str(task.id))
     session.expire_all()
     assert "[subtitles]" in session.get(MediaTask, task.id).error
+
+
+def test_word_timings_are_collected_from_the_alignment_result() -> None:
+    """정렬 결과의 단어 시각만 뽑습니다. 빈 단어와 시각 없는 단어는 버립니다."""
+    from types import SimpleNamespace
+
+    from worker.analysis import word_timings
+
+    result = SimpleNamespace(
+        segments=[
+            SimpleNamespace(
+                words=[
+                    SimpleNamespace(word=" 안녕", start=0.0, end=0.5),
+                    SimpleNamespace(word="  ", start=0.5, end=0.6),
+                    SimpleNamespace(word="하세요", start=None, end=1.0),
+                ]
+            ),
+            SimpleNamespace(words=None),
+        ]
+    )
+    assert [(w.text.strip(), w.start, w.end) for w in word_timings(result)] == [("안녕", 0.0, 0.5)]

@@ -12,6 +12,7 @@ from pipeline.subtitles import (
     check,
     normalize,
     split_text,
+    text_width,
     wrap_text,
 )
 
@@ -25,8 +26,26 @@ def test_rules_reject_impossible_values() -> None:
         SubtitleRules(max_cps=0)
 
 
+def test_width_counts_latin_and_spaces_as_half() -> None:
+    """Netflix 한국어 지침의 계산 방식입니다. 한글 1자, 라틴·공백·문장부호 0.5자."""
+    assert text_width("가나다") == 3.0
+    assert text_width("abc") == 1.5
+    assert text_width("가 나") == 2.5
+    assert text_width("가나다, hello!") == 7.0
+
+
 def test_wrap_breaks_at_word_boundaries() -> None:
-    assert wrap_text("가나다 라마바 사아자", NARROW) == ["가나다 라마바", "사아자"]
+    assert wrap_text("가나다 라마바 사아자 차카타", NARROW) == ["가나다 라마바 사아자", "차카타"]
+
+
+def test_wrap_keeps_one_line_while_it_fits() -> None:
+    """공백이 0.5자이므로 한글 9자+공백 2개는 10자 폭에 들어갑니다."""
+    assert wrap_text("가나다 라마바 사아자", NARROW) == ["가나다 라마바 사아자"]
+
+
+def test_wrap_fits_more_latin_than_hangul_per_line() -> None:
+    assert wrap_text("abcdefghijklmnopqrst", NARROW) == ["abcdefghijklmnopqrst"]
+    assert len(wrap_text("가" * 20, NARROW)) == 2
 
 
 def test_wrap_hard_splits_token_longer_than_line() -> None:
@@ -96,13 +115,23 @@ def test_short_cue_is_only_wrapped() -> None:
 
 
 def test_check_reports_reading_speed() -> None:
-    fast = [Cue(start=0, end=1, text="가" * 40)]
+    # 두 줄(폭 32)에는 들어가지만 1초에 30자는 기본 한도 12자/초를 넘습니다.
+    fast = [Cue(start=0, end=1, text="가" * 30)]
     assert [v.kind for v in check(fast, DEFAULT_RULES)] == ["cps"]
 
 
+def test_default_rules_follow_the_korean_guide() -> None:
+    """근거는 Netflix 한국어 지침 I부입니다. SDH 상향값(14자/초)은 쓰지 않습니다."""
+    assert DEFAULT_RULES.max_chars_per_line == 16
+    assert DEFAULT_RULES.max_lines == 2
+    assert DEFAULT_RULES.max_cps == 12.0
+    assert DEFAULT_RULES.max_duration == 7.0
+    assert DEFAULT_RULES.min_duration >= 5 / 6
+
+
 def test_check_reports_line_overflow() -> None:
-    """두 줄에 담기지 않는 자막을 보고합니다."""
-    assert [v.kind for v in check([Cue(start=0, end=5, text="가" * 41)], DEFAULT_RULES)] == [
+    """두 줄에 담기지 않는 자막을 보고합니다. 폭 32자를 넘으면 세 줄이 됩니다."""
+    assert [v.kind for v in check([Cue(start=0, end=5, text="가" * 33)], DEFAULT_RULES)] == [
         "lines"
     ]
 

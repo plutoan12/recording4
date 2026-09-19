@@ -149,6 +149,13 @@ class AnalysisRequest(BaseModel):
     language: str | None = Field(default=None, pattern=r"^[a-z]{2,3}$")
 
 
+class DiarizeRequest(BaseModel):
+    """화자 분리 요청. 화자 수를 알면 알려 주는 편이 정확합니다."""
+
+    min_speakers: int | None = Field(default=None, ge=1, le=20)
+    max_speakers: int | None = Field(default=None, ge=1, le=20)
+
+
 class AlignRequest(BaseModel):
     """타이밍 없는 대본. 글자는 그대로 두고 시각만 찾습니다."""
 
@@ -197,6 +204,59 @@ def align(asset_id: uuid.UUID, payload: AlignRequest, user: CurrentUser, session
             settings={"text": payload.text, "language": payload.language},
         ),
     )
+
+
+@router.post("/source-assets/{asset_id}/diarize", status_code=202)
+def diarize(asset_id: uuid.UUID, payload: DiarizeRequest, user: CurrentUser, session: SessionDep):
+    """누가 말했는지 찾아 최신 대본에 화자를 붙인 새 버전을 만듭니다."""
+    asset_for_edit(session, asset_id)
+    if (
+        payload.min_speakers
+        and payload.max_speakers
+        and payload.min_speakers > payload.max_speakers
+    ):
+        raise HTTPException(422, "최소 화자 수가 최대 화자 수보다 큽니다.")
+    if not transcript(session, asset_id):
+        raise HTTPException(409, "화자를 붙일 대본이 없습니다. 먼저 전사하거나 대본을 올리세요.")
+    existing = session.scalar(
+        select(MediaTask).where(
+            MediaTask.source_asset_id == asset_id,
+            MediaTask.kind == "diarize",
+            MediaTask.state.in_(["pending", "running"]),
+        )
+    )
+    if existing:
+        return task_response(existing)
+    return schedule(
+        session,
+        MediaTask(
+            source_asset_id=asset_id,
+            kind="diarize",
+            settings={
+                "min_speakers": payload.min_speakers,
+                "max_speakers": payload.max_speakers,
+            },
+        ),
+    )
+
+
+@router.get("/source-assets/{asset_id}/speakers")
+def speakers(asset_id: uuid.UUID, user: CurrentUser, session: SessionDep):
+    """최신 대본에 붙은 화자 목록. 화자별 발화 시간과 구간 수를 함께 봅니다."""
+    asset_for_edit(session, asset_id)
+    rows = transcript(session, asset_id)
+    found: dict[str, dict] = {}
+    for row in rows:
+        if not row.speaker:
+            continue
+        entry = found.setdefault(row.speaker, {"speaker": row.speaker, "seconds": 0.0, "count": 0})
+        entry["seconds"] += float(row.end_seconds) - float(row.start_seconds)
+        entry["count"] += 1
+    return {
+        "version": rows[0].transcript_version if rows else None,
+        "unlabeled": sum(1 for row in rows if not row.speaker),
+        "speakers": sorted(found.values(), key=lambda e: (-e["seconds"], e["speaker"])),
+    }
 
 
 @router.get("/source-assets/{asset_id}/subtitle-check")
