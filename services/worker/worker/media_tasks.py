@@ -16,10 +16,38 @@ from adminapi.models import Artifact, MediaTask, SourceAsset, TranscriptSegment,
 from adminapi.storage import get_storage
 from pipeline.editing import Cue, EditSpec
 from pipeline.speakers import SpeakerTurn, assign_speakers, speaker_totals
-from worker.analysis import MissingDependency, align_text, detect_scenes, diarize, transcribe
+from worker.analysis import (
+    MissingDependency,
+    align_text,
+    detect_scenes,
+    diarize,
+    sync_subtitles,
+    transcribe,
+)
 from worker.celery_app import celery_app
 from worker.rendering import render_clip
 from worker.subtitle_rules import rules_from_settings
+
+
+def latest_transcript(session, task_uuid) -> list[Cue]:  # noqa: ANN001
+    """그 원본의 최신 대본 자막. 없으면 빈 목록입니다."""
+    task = session.get(MediaTask, task_uuid)
+    version = session.scalar(
+        select(func.max(TranscriptSegment.transcript_version)).where(
+            TranscriptSegment.source_asset_id == task.source_asset_id
+        )
+    )
+    if not version:
+        return []
+    rows = session.scalars(
+        select(TranscriptSegment)
+        .where(
+            TranscriptSegment.source_asset_id == task.source_asset_id,
+            TranscriptSegment.transcript_version == version,
+        )
+        .order_by(TranscriptSegment.start_seconds)
+    )
+    return [Cue(start=float(r.start_seconds), end=float(r.end_seconds), text=r.text) for r in rows]
 
 
 @celery_app.task(name="worker.media_tasks.run_media", soft_time_limit=3500, time_limit=3600)
@@ -74,6 +102,14 @@ def run_media(task_id: str) -> dict:
                     max_speakers=spec.get("max_speakers"),
                 )
                 result = {"speakers": speaker_totals(turns)}
+            elif kind == "sync":
+                # 글자는 그대로 두고 시각만 통째로 옮깁니다. 얼마나 옮겼는지 남깁니다.
+                with get_session_factory()() as session:
+                    rows = latest_transcript(session, task_uuid)
+                if not rows:
+                    raise ValueError("보정할 대본이 없습니다.")
+                cues, report = sync_subtitles(source, rows)
+                result = {"sync": report}
             elif kind == "align":
                 # 전사가 아니라 정렬입니다. 대본 글자는 그대로 두고 시각만 찾습니다.
                 cues = align_text(
@@ -162,7 +198,7 @@ def run_media(task_id: str) -> dict:
                             )
                         result["transcript_version"] = version + 1
                         result["labeled"] = sum(1 for label in labels if label)
-                elif kind in ("transcribe", "align"):
+                elif kind in ("transcribe", "align", "sync"):
                     # Serialize transcript imports and STT completion on the source row.
                     session.scalar(
                         select(SourceAsset)
@@ -187,7 +223,7 @@ def run_media(task_id: str) -> dict:
                                 text=cue.text,
                             )
                         )
-                    result = {"transcript_version": version, "count": len(cues)}
+                    result = {**result, "transcript_version": version, "count": len(cues)}
                 task.state, task.result, task.finished_at = "succeeded", result, utcnow()
                 session.commit()
                 return {"status": "succeeded", **result}

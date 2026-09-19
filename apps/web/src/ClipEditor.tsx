@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { downloadFile, request, type SourceAsset } from './api'
+import { downloadFile, importSubtitles, request, type EncodingChoice, type ImportResult, type SourceAsset } from './api'
 import { PublicationForm } from './PublicationForm'
 import type { WorkflowDraft } from './WorkflowPanel'
 
@@ -7,7 +7,7 @@ type Cue = { start: number; end: number; text: string }
 type Suggestion = { start: number; end: number; title: string; reason: string }
 type Violation = { index: number; kind: string; detail: string }
 type Task = { id: string; source_asset_id: string; clip_edit_id: string | null; kind: string; state: string; error: string | null;
-  result: { artifact_id?: string; scenes?: {start: number; end: number}[] } }
+  result: { artifact_id?: string; scenes?: {start: number; end: number}[]; sync?: {offset_seconds:number; framerate_scale:number; clamped:number} } }
 
 export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWorkflow: (draft:WorkflowDraft)=>void }) {
   const [assetId, setAssetId] = useState('')
@@ -27,6 +27,9 @@ export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWo
   const [previewId, setPreviewId] = useState('')
   const [approvedId,setApprovedId] = useState('')
   const [message, setMessage] = useState('')
+  // 인코딩을 물어야 하는 파일. used가 있으면 판별기가 고른 것으로 이미 들인 뒤라
+  // 글자를 확인하고 되돌릴 수 있게 남겨 둡니다.
+  const [pending, setPending] = useState<{file: File; choices: EncodingChoice[]; used?: string} | null>(null)
   const [busy, setBusy] = useState(false)
   const video = useRef<HTMLVideoElement>(null)
   const selection = useRef('')
@@ -60,6 +63,27 @@ export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWo
       ])
       if (selection.current !== id) return
       setSourceUrl(preview.url); setCaptions(cues)
+    })
+  }
+  async function bring(file: File, encoding?: string) {
+    await act(async () => {
+      const imported: ImportResult = await importSubtitles(assetId, file, encoding)
+      if (!imported.ok) {
+        setPending({file, choices: imported.choices})
+        setMessage(imported.message)
+        return
+      }
+      // 판별기가 고른 인코딩이면 다른 후보를 남겨 둡니다. 글자가 깨져도 파일
+      // 모양은 멀쩡해서 서버가 못 거릅니다. 사람이 보고 되돌려야 합니다.
+      setPending(imported.encoding_detected
+        ? {file, used: imported.encoding,
+           choices: (imported.choices ?? []).filter(c => c.encoding !== imported.encoding)}
+        : null)
+      setCaptions(await request<Cue[]>(`/source-assets/${assetId}/transcript`))
+      setViolations(imported.violations)
+      setMessage(`자막 ${imported.count}개를 대본 ${imported.version}번으로 들였습니다`
+        + ` (${imported.encoding}${imported.encoding_detected ? ' 자동 판별' : ''}).`
+        + (imported.skipped.length ? ` 뺀 자막 ${imported.skipped.length}개: ${imported.skipped.join(' ')}` : ''))
     })
   }
   function updateCue(index: number, patch: Partial<Cue>) {
@@ -104,22 +128,28 @@ export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWo
         <input type="file" accept=".srt,.vtt,.ass,.ssa,text/plain" disabled={busy} onChange={e => {
           const file = e.target.files?.[0]
           e.target.value = ''
-          if (!file) return
-          void act(async () => {
-            const imported = await request<{version:number;count:number;skipped:string[];violations:Violation[]}>(
-              `/source-assets/${assetId}/transcript/import`, {method:'POST', body: JSON.stringify({text: await file.text()})})
-            setCaptions(await request<Cue[]>(`/source-assets/${assetId}/transcript`))
-            setViolations(imported.violations)
-            setMessage(`자막 ${imported.count}개를 대본 ${imported.version}번으로 들였습니다.`
-              + (imported.skipped.length ? ` 뺀 자막 ${imported.skipped.length}개: ${imported.skipped.join(' ')}` : ''))
-          })
+          if (file) void bring(file)
         }} />
+        {pending && <div className="error">
+          {pending.used
+            ? <p><b>{pending.used}</b>(으)로 자동 판별해 읽었습니다. <b>대본 글자가 제대로 보이는지 확인하세요.</b> 깨졌다면 아래에서 다시 고르면 새 대본 버전으로 들입니다.</p>
+            : <p>이 파일의 인코딩을 알 수 없습니다. <b>글자가 제대로 보이는 것</b>을 고르세요. 잘못 고르면 깨진 채로 저장됩니다.</p>}
+          {pending.choices.map(choice => <button key={choice.encoding} disabled={busy}
+            onClick={() => void bring(pending.file, choice.encoding)}>
+            {choice.encoding}: {choice.preview}
+          </button>)}
+          <button disabled={busy} onClick={() => setPending(null)}>{pending.used ? '확인했습니다' : '취소'}</button>
+        </div>}
       </details>
       <details>
         <summary>시간 없는 대본 붙여넣기</summary>
         <p>이미 있는 대본을 원본 음성에 맞춰 시각을 찾습니다. 글자는 그대로 두고 시간만 붙입니다. 유료 호출이 아닙니다.</p>
         <textarea rows={6} maxLength={50000} value={plainScript} placeholder="대본을 붙여넣으세요"
           onChange={e => setPlainScript(e.target.value)} />
+        <button disabled={busy} onClick={() => void act(async () => {
+          await request(`/source-assets/${assetId}/transcript/sync`, {method:'POST'})
+          setMessage('자막 싱크 보정을 요청했습니다. 끝나면 아래 결과에 옮긴 초가 나옵니다. 대본 다시 읽기를 누르세요.'); await refresh()
+        })}>자막 싱크 보정 (원본 음성에 맞추기)</button>
         <button disabled={busy || !plainScript.trim()} onClick={() => void act(async () => {
           await request(`/source-assets/${assetId}/align`, {method:'POST', body: JSON.stringify({text: plainScript})})
           setMessage('대본 정렬을 요청했습니다. 완료 후 대본 다시 읽기를 누르세요.'); await refresh()
@@ -165,6 +195,9 @@ export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWo
     <h3>분석·렌더 결과</h3>
     <ul>{tasks.filter(t => !assetId || t.source_asset_id === assetId).map(t => <li key={t.id}>
       {t.kind} · {t.state} {t.error}
+      {t.result.sync && <span> · {t.result.sync.offset_seconds >= 0 ? '뒤로' : '앞으로'} {Math.abs(t.result.sync.offset_seconds).toFixed(2)}초 옮김
+        {t.result.sync.framerate_scale !== 1 && ` · 속도 ${t.result.sync.framerate_scale}배`}
+        {t.result.sync.clamped > 0 && ` · 0초로 잘린 자막 ${t.result.sync.clamped}개`}</span>}
       {t.result.scenes?.map((s,i) => <button key={i} onClick={() => {setStart(s.start);setEnd(Math.min(s.end,s.start+180))}}>{s.start.toFixed(1)}–{s.end.toFixed(1)}초</button>)}
       {t.state === 'failed' && <button disabled={busy} onClick={() => void act(async () => {
         await request(`/media-tasks/${t.id}/retry`, {method:'POST'}); await refresh()
