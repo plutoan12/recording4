@@ -26,7 +26,7 @@ from pathlib import Path
 import numpy as np
 
 from pipeline.editing import Cue, EditSpec
-from pipeline.subtitles import DEFAULT_RULES, SubtitleRules, text_width
+from pipeline.subtitles import DEFAULT_RULES, SubtitleRules, rules_for, text_width
 from worker.rendering import ffmpeg_binary, write_subtitles
 
 # 배경(제한 범위 검정, Y=16)과 검은 외곽선을 빼고 글자만 남기는 문턱입니다.
@@ -142,7 +142,27 @@ def main() -> int:
     print(f"기본 한도({DEFAULT_RULES.max_chars_per_line}자) 한 줄: {filled[0]}x{filled[1]}px")
     print(f"예문 '{SAMPLE}' (폭 {text_width(SAMPLE):.1f}자): {sample_box[0]}px")
 
+    # 영어 자막은 지침이 달라 줄이 더 깁니다(42자). 폭으로는 21이라 한글
+    # 16자보다 큽니다. 같은 화면에 들어가는지 직접 재야 합니다.
+    english_rules = rules_for("en")
+    english = "M" * int(english_rules.max_chars_per_line * 2)
+    english_box = measure(
+        english, spec_for(english, args.font_size, args.width, args.height), single_line
+    )
+    if english_box is None:
+        print("영어 자막이 그려지지 않았습니다.")
+        return 1
+    print(
+        f"영어 한도({len(english)}자, 폭 {text_width(english):.1f}) 한 줄: "
+        f"{english_box[0]}x{english_box[1]}px ({english_box[0] / args.width:.0%})"
+    )
+
     problems = []
+    if english_box[0] > usable:
+        problems.append(
+            f"영어 줄 길이 {len(english)}자가 {english_box[0]}px로 여백 안({usable}px)을 "
+            "넘습니다. 영어 기본값을 줄이거나 글자 크기를 낮춰야 합니다."
+        )
     if filled[0] > usable:
         problems.append(
             f"기본 줄 길이 {DEFAULT_RULES.max_chars_per_line}자가 {filled[0]}px로 "

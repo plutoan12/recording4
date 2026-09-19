@@ -339,19 +339,20 @@ def execute_step(name, options, data, asset, directory, stage_id, remote_id, sav
     if name == "render":
         output = directory / "final.mp4"
         dubbed = options.audio_mode == "dub"
+        # 자막이 어느 언어인지에 따라 표시 규칙이 다릅니다. 번역한 자막이면
+        # 목표 언어, 원본 대본 그대로면 원본 언어입니다.
+        shown = "aligned" if "aligned" in data else ("translated" if "translated" in data else None)
+        language = data.get("target") if shown else options.source_language
         render_final(
             source,
             output,
-            cues=[
-                Cue.model_validate(c)
-                for c in data.get("aligned", data.get("translated", data["cues"]))
-            ],
+            cues=[Cue.model_validate(c) for c in data.get(shown or "cues", data["cues"])],
             duration=data["duration"],
             start=0 if dubbed else data["start"],
             clip=options.clip,
             width=asset.width or 1920,
             height=asset.height or 1080,
-            rules=rules_from_settings(settings),
+            rules=rules_from_settings(settings, language),
         )
         with output.open("rb") as stream:
             checksum = hashlib.file_digest(stream, "sha256").hexdigest()

@@ -1,0 +1,18 @@
+[
+  {
+    "source": "안녕하세요 오늘은 자막 정렬을 검증합니다",
+    "reference": "Hello, today we are verifying subtitle alignment."
+  },
+  {
+    "source": "지난해 삼 월 김 전 장관의 동료인 장동련 홍익대 교수가 민간 자문단장으로 위촉되면서 본격적인 공모와 개발 작업에 들어갔다",
+    "reference": "In March last year, Professor Jang Dong-ryun of Hongik University, a colleague of former Minister Kim, was appointed head of the civilian advisory group, and the full competition and development work began."
+  },
+  {
+    "source": "현재 백화점과 영화관 등은 오픈해 영업하고 있고 테마파크 및 아파트 등의 공사는 이천 십 팔 년 완공을 목표로 진행돼 왔다",
+    "reference": "Department stores and cinemas are currently open for business, and construction of the theme park and apartments has been under way with a target completion in 2018."
+  },
+  {
+    "source": "이 영상은 짧게 편집해서 세로 화면으로 올릴 예정입니다",
+    "reference": "This video will be cut short and uploaded in a vertical format."
+  }
+]
