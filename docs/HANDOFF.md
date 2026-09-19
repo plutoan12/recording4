@@ -1,3 +1,11 @@
+## 2026-09-19: 다국어 자막 전용 번역 (Codex)
+
+- 브랜치 `codex/multilingual-subtitles`. 담당: WorkflowOptions, workflow_tasks, WorkflowPanel, test_connected_workflow, 관련 문서.
+- 자막만 번역 모드와 ko/en/ja/zh 선택을 연결. 원음·원문 시각 유지, 더빙·립싱크 제외, 기존 검수·수정·SRT/VTT·YouTube 트랙 경로 재사용.
+- 365개 테스트 통과, 5개 조건부 skip. 네 언어 간 12방향을 공급자 대역으로 검증. TypeScript·Vite build·Ruff 통과. 실제 유료 번역 호출은 하지 않았으며 번역 품질 검증은 남아 있습니다.
+- ffsubsync 0.4.27, stable-ts 2.19.1 설치 및 다국어 small 모델 로드 확인. 사람 목소리 싱크 실패는 이번 변경으로 해결되지 않음. PR #23의 별도 싱크 수정과 합치지 않았습니다.
+- 기존 PR #20의 자막 전용 모드와 일부 중복되므로 추후 병합 시 중복을 정리해야 합니다. PR #20의 CI 조건 수정과 PR #17·#21의 별도 기능은 포함하지 않습니다.
+
 # 협업 인수인계
 
 ## 2026-09-19: API·워커 재빌드 및 자막 표시 방식

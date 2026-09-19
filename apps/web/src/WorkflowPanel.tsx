@@ -14,7 +14,7 @@ type Configuration = {paid_enabled:boolean;translation_configured:boolean;speech
 
 export function WorkflowPanel({assets,jobs,draft,onCreated}:{assets:SourceAsset[];jobs:Job[];draft:WorkflowDraft|null;onCreated:()=>Promise<void>}) {
   const [asset,setAsset]=useState('')
-  const [audio,setAudio]=useState('original')
+  const [audio,setAudio]=useState('subtitles')
   const [burn,setBurn] = useState(true)
   const [sourceLanguage,setSourceLanguage] = useState('ko')
   const [target,setTarget]=useState('en')
@@ -59,16 +59,17 @@ export function WorkflowPanel({assets,jobs,draft,onCreated}:{assets:SourceAsset[
   function choose(id:string){setSelected(id);setDetail(null);setTranslated([]);setUrl('');setPlayed(false)}
   return <section className="clip-editor">
     <h2>단계별 영상 제작·게시</h2>
-    <p>음성 인식 → 번역 → 문장별 더빙 → 길이 조정·합성 → 선택적 립싱크 → 최종 검수 → 승인 후 예약</p>
+    <p>음성 인식·대본 확인 → 자막 번역 → 선택적 더빙 → 최종 검수 → 승인 후 예약</p>
     {config && <p>유료 처리 {config.paid_enabled?'켜짐':'꺼짐'} · 번역 {config.translation_configured?'준비됨':'설정 필요'} · 더빙 {config.speech_configured?'준비됨':'설정 필요'} · YouTube {config.youtube_configured?'준비됨':'설정 필요'}</p>}
     <form onSubmit={create} className="editor-fields">
       <label>원본<select value={asset} onChange={e=>{setAsset(e.target.value);setUseClip(false)}} required><option value="">선택</option>{assets.filter(a=>a.upload_state==='verified').map(a=><option key={a.id} value={a.id}>{a.original_filename}</option>)}</select></label>
-      <label>음성<select value={audio} onChange={e=>setAudio(e.target.value)}><option value="original">원어 유지·자막 합성</option><option value="dub">번역·더빙</option></select></label>
+      <label>제작 방식<select value={audio} onChange={e=>setAudio(e.target.value)}><option value="original">원어 유지·자막 합성</option><option value="subtitles">자막만 번역 · 원음 유지</option><option value="dub">번역·더빙</option></select></label>
       <label>자막 표시<select value={burn?'burn':'track'} onChange={e=>setBurn(e.target.value==='burn')}><option value="burn">영상에 굽기 · 트랙 업로드 안 함</option><option value="track">YouTube 트랙만 · 영상에 굽지 않음</option></select></label>
-      <label>원본 언어<input value={sourceLanguage} onChange={e=>setSourceLanguage(e.target.value)} pattern="[a-z]{2,3}" placeholder="ko, en, ja" required={!burn&&audio==='original'} /></label>
-      <label>대상 언어<input value={target} onChange={e=>setTarget(e.target.value)} required /></label>
+      <label>원본 언어<select value={sourceLanguage} onChange={e=>setSourceLanguage(e.target.value)} required={!burn&&audio==='original'}><option value="">자동 감지</option>{[['ko','한국어'],['en','영어'],['ja','일본어'],['zh','중국어']].map(([code,label])=><option key={code} value={code}>{label}</option>)}</select></label>
+      {audio!=='original' && <label>자막 번역 언어<select value={target} onChange={e=>setTarget(e.target.value)} required>{[['ko','한국어'],['en','영어'],['ja','일본어'],['zh','중국어']].map(([code,label])=><option key={code} value={code}>{label}</option>)}</select></label>}
+      {audio==='subtitles' && <p>원래 음성과 자막 시간을 유지합니다. 번역 결과는 검수 후 수정하거나 SRT·VTT로 내려받을 수 있습니다.</p>}
+      {audio!=='original' && <label>작업 예산 상한 (USD)<input type="number" min="0" max="1" step="0.0001" value={budget} onChange={e=>setBudget(e.target.value)} required /></label>}
       {audio==='dub' && <><label>더빙 음성 ID<input value={voice} onChange={e=>setVoice(e.target.value)} required /></label>
-        <label>작업 예산 상한 (USD)<input type="number" min="0" max="10000" step="0.0001" value={budget} onChange={e=>setBudget(e.target.value)} required /></label>
         <label><input type="checkbox" checked={lip} onChange={e=>setLip(e.target.checked)} /> 립싱크 사용</label>
         <p>더빙 경로는 원래 대사와 배경음을 새 음성으로 교체합니다.</p></>}
       {draft&&draft.source_asset_id===asset && <label><input type="checkbox" checked={useClip} onChange={e=>setUseClip(e.target.checked)} /> 편집기에서 고른 {draft.start}~{draft.end}초를 숏폼으로 제작</label>}
