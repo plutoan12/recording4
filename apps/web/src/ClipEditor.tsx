@@ -7,7 +7,7 @@ type Cue = { start: number; end: number; text: string }
 type Suggestion = { start: number; end: number; title: string; reason: string }
 type Violation = { index: number; kind: string; detail: string }
 type Task = { id: string; source_asset_id: string; clip_edit_id: string | null; kind: string; state: string; error: string | null;
-  result: { artifact_id?: string; scenes?: {start: number; end: number}[]; sync?: {offset_seconds:number; framerate_scale:number; clamped:number} } }
+  result: { artifact_id?: string; scenes?: {start: number; end: number}[]; sync?: {offset_seconds:number; framerate_scale:number; clamped?:number; profile?:string; audio_normalized?:boolean} } }
 
 export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWorkflow: (draft:WorkflowDraft)=>void }) {
   const [assetId, setAssetId] = useState('')
@@ -23,6 +23,7 @@ export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWo
   const [suggestions, setSuggestions] = useState<Suggestion[]>([])
   const [violations, setViolations] = useState<Violation[]>([])
   const [plainScript, setPlainScript] = useState('')
+  const [syncProfile, setSyncProfile] = useState('standard')
   const [tasks, setTasks] = useState<Task[]>([])
   const [outputUrl, setOutputUrl] = useState('')
   const [previewed, setPreviewed] = useState('')
@@ -144,14 +145,23 @@ export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWo
         </div>}
       </details>
       <details>
+        <summary>자막 싱크 보정</summary>
+        <label>보정 방식 <select value={syncProfile} disabled={busy} onChange={e => setSyncProfile(e.target.value)}>
+          <option value="standard">기본 보정</option>
+          <option value="quiet">작은 음량·음량 차이 보정</option>
+          <option value="long_cues">긴 문장 자막 보정</option>
+        </select></label>
+        <p>작은 음량 보정은 분석용 오디오만 조정합니다. 긴 문장 보정은 자막 전체 길이를 비교합니다. 원음과 글자는 유지하며, 보정 후 앞·중간·끝의 싱크를 확인해 주세요.</p>
+        <button disabled={busy || !captions.length} onClick={() => void act(async () => {
+          await request(`/source-assets/${assetId}/transcript/sync?profile=${syncProfile}`, {method:'POST'})
+          setMessage('싱크 보정을 요청했습니다. 완료 후 대본 다시 읽기로 새 버전을 확인하세요. 실패하면 기존 대본을 유지합니다.'); await refresh()
+        })}>자막 싱크 보정 (원본 음성에 맞추기)</button>
+      </details>
+      <details>
         <summary>시간 없는 대본 붙여넣기</summary>
         <p>이미 있는 대본을 원본 음성에 맞춰 시각을 찾습니다. 글자는 그대로 두고 시간만 붙입니다. 유료 호출이 아닙니다.</p>
         <textarea rows={6} maxLength={50000} value={plainScript} placeholder="대본을 붙여넣으세요"
           onChange={e => setPlainScript(e.target.value)} />
-        <button disabled={busy} onClick={() => void act(async () => {
-          await request(`/source-assets/${assetId}/transcript/sync`, {method:'POST'})
-          setMessage('자막 싱크 보정을 요청했습니다. 끝나면 아래 결과에 옮긴 초가 나옵니다. 대본 다시 읽기를 누르세요.'); await refresh()
-        })}>자막 싱크 보정 (원본 음성에 맞추기)</button>
         <button disabled={busy || !plainScript.trim()} onClick={() => void act(async () => {
           await request(`/source-assets/${assetId}/align`, {method:'POST', body: JSON.stringify({text: plainScript})})
           setMessage('대본 정렬을 요청했습니다. 완료 후 대본 다시 읽기를 누르세요.'); await refresh()
@@ -200,8 +210,10 @@ export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWo
     <ul>{tasks.filter(t => !assetId || t.source_asset_id === assetId).map(t => <li key={t.id}>
       {t.kind} · {t.state} {t.error}
       {t.result.sync && <span> · {t.result.sync.offset_seconds >= 0 ? '뒤로' : '앞으로'} {Math.abs(t.result.sync.offset_seconds).toFixed(2)}초 옮김
+        {t.result.sync.profile === 'quiet' && ' · 작은 음량 보정'}
+        {t.result.sync.profile === 'long_cues' && ' · 긴 문장 보정'}
         {t.result.sync.framerate_scale !== 1 && ` · 속도 ${t.result.sync.framerate_scale}배`}
-        {t.result.sync.clamped > 0 && ` · 0초로 잘린 자막 ${t.result.sync.clamped}개`}</span>}
+        {(t.result.sync.clamped ?? 0) > 0 && ` · 0초로 잘린 자막 ${t.result.sync.clamped}개`}</span>}
       {t.result.scenes?.map((s,i) => <button key={i} onClick={() => {setStart(s.start);setEnd(Math.min(s.end,s.start+180))}}>{s.start.toFixed(1)}–{s.end.toFixed(1)}초</button>)}
       {t.state === 'failed' && <button disabled={busy} onClick={() => void act(async () => {
         await request(`/media-tasks/${t.id}/retry`, {method:'POST'}); await refresh()

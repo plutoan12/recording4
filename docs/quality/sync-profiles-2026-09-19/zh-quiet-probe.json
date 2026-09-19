@@ -1,0 +1,195 @@
+{
+  "limit": 0.5,
+  "results": [
+    {
+      "variant": "short",
+      "duration_seconds": 37.38,
+      "cue_count": 3,
+      "cases": {
+        "0.0": {
+          "pass": true,
+          "max_error_seconds": 0.03,
+          "text_preserved": true,
+          "offset_seconds": 0.03
+        },
+        "2.5": {
+          "pass": true,
+          "max_error_seconds": 0.03,
+          "text_preserved": true,
+          "offset_seconds": -2.47
+        }
+      }
+    },
+    {
+      "variant": "long_repeated",
+      "duration_seconds": 328.42,
+      "cue_count": 27,
+      "cases": {
+        "0.0": {
+          "pass": true,
+          "max_error_seconds": 0.03,
+          "text_preserved": true,
+          "offset_seconds": 0.03
+        },
+        "2.5": {
+          "pass": true,
+          "max_error_seconds": 0.03,
+          "text_preserved": true,
+          "offset_seconds": -2.47
+        }
+      }
+    },
+    {
+      "variant": "dense",
+      "duration_seconds": 102.49,
+      "cue_count": 9,
+      "cases": {
+        "0.0": {
+          "pass": true,
+          "max_error_seconds": 0.02,
+          "text_preserved": true,
+          "offset_seconds": 0.02
+        },
+        "2.5": {
+          "pass": true,
+          "max_error_seconds": 0.03,
+          "text_preserved": true,
+          "offset_seconds": -2.47
+        }
+      }
+    },
+    {
+      "variant": "long_pauses",
+      "duration_seconds": 146.14,
+      "cue_count": 9,
+      "cases": {
+        "0.0": {
+          "pass": true,
+          "max_error_seconds": 0.01,
+          "text_preserved": true,
+          "offset_seconds": -0.01
+        },
+        "2.5": {
+          "pass": true,
+          "max_error_seconds": 0.01,
+          "text_preserved": true,
+          "offset_seconds": -2.51
+        }
+      }
+    },
+    {
+      "variant": "fast",
+      "duration_seconds": 88.112,
+      "cue_count": 9,
+      "cases": {
+        "0.0": {
+          "pass": true,
+          "max_error_seconds": 0.05,
+          "text_preserved": true,
+          "offset_seconds": 0.05
+        },
+        "2.5": {
+          "pass": true,
+          "max_error_seconds": 0.05,
+          "text_preserved": true,
+          "offset_seconds": -2.45
+        }
+      }
+    },
+    {
+      "variant": "slow",
+      "duration_seconds": 137.675,
+      "cue_count": 9,
+      "cases": {
+        "0.0": {
+          "pass": true,
+          "max_error_seconds": 0.03,
+          "text_preserved": true,
+          "offset_seconds": -0.03
+        },
+        "2.5": {
+          "pass": true,
+          "max_error_seconds": 0.03,
+          "text_preserved": true,
+          "offset_seconds": -2.53
+        }
+      }
+    },
+    {
+      "variant": "quiet_voice",
+      "duration_seconds": 110.14,
+      "cue_count": 9,
+      "cases": {
+        "0.0": {
+          "pass": true,
+          "max_error_seconds": 0.02,
+          "text_preserved": true,
+          "offset_seconds": -0.02
+        },
+        "2.5": {
+          "pass": true,
+          "max_error_seconds": 0.02,
+          "text_preserved": true,
+          "offset_seconds": -2.52
+        }
+      }
+    },
+    {
+      "variant": "noise_15db",
+      "duration_seconds": 110.14,
+      "cue_count": 9,
+      "cases": {
+        "0.0": {
+          "pass": true,
+          "max_error_seconds": 0.04,
+          "text_preserved": true,
+          "offset_seconds": 0.04
+        },
+        "2.5": {
+          "pass": true,
+          "max_error_seconds": 0.04,
+          "text_preserved": true,
+          "offset_seconds": -2.46
+        }
+      }
+    },
+    {
+      "variant": "noise_5db",
+      "duration_seconds": 110.14,
+      "cue_count": 9,
+      "cases": {
+        "0.0": {
+          "pass": true,
+          "max_error_seconds": 0.04,
+          "text_preserved": true,
+          "offset_seconds": 0.04
+        },
+        "2.5": {
+          "pass": true,
+          "max_error_seconds": 0.05,
+          "text_preserved": true,
+          "offset_seconds": -2.45
+        }
+      }
+    },
+    {
+      "variant": "music_intro",
+      "duration_seconds": 118.14,
+      "cue_count": 9,
+      "cases": {
+        "0.0": {
+          "pass": true,
+          "max_error_seconds": 0.05,
+          "text_preserved": true,
+          "offset_seconds": 0.05
+        },
+        "2.5": {
+          "pass": true,
+          "max_error_seconds": 0.05,
+          "text_preserved": true,
+          "offset_seconds": -2.45
+        }
+      }
+    }
+  ]
+}
