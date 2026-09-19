@@ -157,6 +157,26 @@ def evaluate(
         return {"pass": False, "rejected": str(exc)}
 
 
+def summarize(results: list[dict], methods: tuple[str, ...]) -> None:
+    """조건마다 방법별 최대 오차를 한 표로 찍습니다. 눈으로 견줄 수 있어야 합니다."""
+    print("\n조건별 최대 오차(초) — 작을수록 좋습니다")
+    head = "  ".join(f"{m:>18}" for m in methods)
+    print(f"{'조건':22} {'길이(초)':>9}  {head}")
+    for entry in results:
+        cells = []
+        for method in methods:
+            worst = [
+                case
+                for key, case in entry["cases"].items()
+                if key.split(":")[0] == method or len(methods) == 1
+            ]
+            if any("rejected" in case for case in worst):
+                cells.append(f"{'거부':>18}")
+            else:
+                cells.append(f"{max(c['max_error_seconds'] for c in worst):18.3f}")
+        print(f"{entry['variant']:22} {entry['duration_seconds']:9.1f}  " + "  ".join(cells))
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--directory", type=Path, required=True)
@@ -164,11 +184,28 @@ def main() -> int:
     parser.add_argument("--limit", type=float, default=0.5)
     # 같은 조건에서 두 방법을 나란히 잽니다. 손으로 따로 돌려 비교하지 않게 합니다.
     parser.add_argument("--method", choices=("shift", "align", "both"), default="shift")
+    # 판정에 넣을 방법. 재기만 하고 아직 보증하지 않는 방법이 있습니다. 재는 것과
+    # 보증하는 것을 섞으면, 채택하지도 않은 방법 때문에 CI가 빨개집니다.
+    parser.add_argument("--gate", choices=("shift", "align", "both"), default=None)
+    # 조건이 10가지라 둘 다 재면 오래 걸립니다. 필요한 조건만 고를 수 있게 합니다.
+    parser.add_argument("--variants", default="", help="쉼표로 구분한 조건 이름")
     args = parser.parse_args()
     methods = ("shift", "align") if args.method == "both" else (args.method,)
+    gated = (
+        methods
+        if args.gate is None
+        else (("shift", "align") if args.gate == "both" else (args.gate,))
+    )
+    wanted = [name.strip() for name in args.variants.split(",") if name.strip()]
+    known = {spec[0] for spec in VARIANTS}
+    if unknown := set(wanted) - known:
+        parser.error(
+            f"모르는 조건입니다: {', '.join(sorted(unknown))}. 쓸 수 있는 값: {sorted(known)}"
+        )
+    variants = [spec for spec in VARIANTS if not wanted or spec[0] in wanted]
     args.out.mkdir(parents=True, exist_ok=True)
     results = []
-    for spec in VARIANTS:
+    for spec in variants:
         source, truth, duration = make_variant(args.directory, args.out, spec)
         entry = {
             "variant": spec[0],
@@ -190,13 +227,25 @@ def main() -> int:
         results.append(entry)
         (args.out / "results.json").write_text(
             json.dumps(
-                {"limit": args.limit, "methods": list(methods), "results": results},
+                {
+                    "limit": args.limit,
+                    "methods": list(methods),
+                    "gated": list(gated),
+                    "results": results,
+                },
                 ensure_ascii=False,
                 indent=2,
             )
         )
         print(json.dumps(entry, ensure_ascii=False), flush=True)
-    return 0 if all(c["pass"] for r in results for c in r["cases"].values()) else 1
+    summarize(results, methods)
+    failed = [
+        key
+        for entry in results
+        for key, case in entry["cases"].items()
+        if not case["pass"] and key.split(":")[0] in gated
+    ]
+    return 1 if failed else 0
 
 
 if __name__ == "__main__":
