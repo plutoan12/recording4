@@ -15,7 +15,15 @@ from pathlib import Path
 
 import pytest
 
-from pipeline.noise import NOISE_SNRS, SPEECH_SNRS, conditions, gain_for_snr, worse
+from pipeline.noise import (
+    NOISE_SNRS,
+    PARTIAL_SNRS,
+    SPEECH_SNRS,
+    conditions,
+    gain_for_snr,
+    partial_window,
+    worse,
+)
 
 
 def test_equal_loudness_needs_no_gain_at_zero_snr() -> None:
@@ -53,7 +61,7 @@ def test_overlapping_speech_is_skipped_when_there_is_no_second_voice() -> None:
 
 def test_every_condition_is_listed_when_a_second_voice_exists() -> None:
     rows = conditions(with_speech=True)
-    assert len(rows) == 1 + len(NOISE_SNRS) + len(SPEECH_SNRS)
+    assert len(rows) == 1 + len(NOISE_SNRS) + len(SPEECH_SNRS) + len(PARTIAL_SNRS)
     assert [row.name for row in rows].count("clean") == 1
     # 이름이 겹치면 만든 파일을 서로 덮어씁니다.
     assert len({row.name for row in rows}) == len(rows)
@@ -111,12 +119,27 @@ def test_the_mix_really_lands_on_the_requested_snr() -> None:
 
 
 def test_the_limits_come_from_a_real_measurement() -> None:
-    """지어낸 선은 통과하는 것 말고 아무 뜻이 없습니다. 실측에서 옵니다."""
+    """지어낸 선은 통과하는 것 말고 아무 뜻이 없습니다. 실측에서 옵니다.
+
+    아직 안 잰 조건은 여기 이름을 적어 둡니다. 그 조건은 상한이 없어야 하고
+    (보고만 함), 잰 뒤에는 이 목록에서 빼고 MEASURED_CER에 넣어야 합니다.
+    """
     from pipeline.noise import HEADROOM, MEASURED_CER, limit_for
 
+    not_measured_yet = {"partial0"}
     for row in conditions(with_speech=True):
+        if row.name in not_measured_yet:
+            assert limit_for(row.name) is None, f"{row.name}은 잰 적 없는데 상한이 있습니다."
+            continue
         assert row.name in MEASURED_CER, f"{row.name}을 재지 않았습니다."
         assert limit_for(row.name) == pytest.approx(MEASURED_CER[row.name] + HEADROOM)
+
+
+def test_the_partial_window_sits_in_the_middle_and_leaves_both_sides() -> None:
+    """앞뒤가 남아야 화자별 전사가 무엇을 살리는지 보입니다."""
+    begin, end = partial_window(30.0)
+    assert begin == pytest.approx(10.0) and end == pytest.approx(20.0)
+    assert begin > 0 and end < 30.0
 
 
 def test_an_unmeasured_condition_gets_no_invented_limit() -> None:

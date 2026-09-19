@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -32,8 +33,9 @@ from pathlib import Path
 
 from verify_transcribe import cer, squeeze
 
-from pipeline.noise import Condition, conditions, gain_for_snr, limit_for, worse
-from worker.analysis import transcribe
+from pipeline.noise import Condition, conditions, gain_for_snr, limit_for, partial_window, worse
+from pipeline.overlap import coverage, pick_speaker, speaker_spans
+from worker.analysis import diarize, diarize_by_embedding, transcribe, transcribe_by_speaker
 
 # 재 볼 후보 손잡이. 소음에서 휘파람처럼 같은 말을 되풀이하는 것은 앞 문장을
 # 물고 가는 설정 탓이라고 알려져 있습니다. 정말 그런지는 이 검사가 답합니다.
@@ -113,6 +115,18 @@ def seconds_of(path: Path) -> float:
     return float(out.strip().splitlines()[-1])
 
 
+def placed(source: Path, target: Path, *, at: float, total: float) -> Path:
+    """소리를 `at`초부터 놓고 앞뒤를 무음으로 채워 `total`초로 만듭니다."""
+    run(
+        [
+            "ffmpeg", "-nostdin", "-y", "-v", "error", "-i", str(source),
+            "-af", f"adelay={int(at * 1000)}:all=1,apad=whole_dur={total:.2f}",
+            "-ar", "16000", "-ac", "1", "-c:a", "pcm_s16le", str(target),
+        ]
+    )  # fmt: skip
+    return target
+
+
 def make(condition: Condition, sample: Path, interference: Path | None, work: Path) -> Path:
     """이 조건의 음성을 만듭니다."""
     if condition.kind == "clean":
@@ -121,11 +135,70 @@ def make(condition: Condition, sample: Path, interference: Path | None, work: Pa
     target = work / f"{condition.name}.wav"
     if condition.kind == "noise":
         other = fitted(noise_file(work / "pink.wav", span), work / "pink-fit.wav", span)
-    else:
-        assert interference is not None  # conditions()가 없으면 넣지 않습니다.
+        gain = gain_for_snr(loudness(sample), loudness(other), condition.snr_db)
+        return mixed(sample, other, gain, target)
+    assert interference is not None  # conditions()가 없으면 넣지 않습니다.
+    if condition.kind == "speech":
         other = fitted(interference, work / "voice-fit.wav", span)
-    gain = gain_for_snr(loudness(sample), loudness(other), condition.snr_db)
-    return mixed(sample, other, gain, target)
+        gain = gain_for_snr(loudness(sample), loudness(other), condition.snr_db)
+        return mixed(sample, other, gain, target)
+    # 부분 겹말. 이득은 **채우기 전** 조각으로 잽니다. 앞뒤 무음까지 평균에
+    # 넣으면 조각이 작게 재어져 실제보다 크게 섞입니다.
+    begin, finish = partial_window(span)
+    piece = fitted(interference, work / "voice-piece.wav", finish - begin)
+    gain = gain_for_snr(loudness(sample), loudness(piece), condition.snr_db)
+    return mixed(
+        sample, placed(piece, work / "voice-placed.wav", at=begin, total=span), gain, target
+    )
+
+
+def speaker_report(
+    audio: Path,
+    reference: str,
+    target_spans: list[tuple[float, float]],
+    truth: tuple[float, float] | None,
+    *,
+    token: str | None,
+    model: str,
+    language: str,
+) -> dict:
+    """화자를 나눠 화자별로 받아쓰고, 우리가 아는 목소리의 자막만 채점합니다.
+
+    돌려주는 것: 찾은 화자 수, 그 목소리의 자막 CER(전체 / 겹침 표시를 뺀 것),
+    겹침 표시의 정밀도·재현율(부분 겹말에서만, 진짜 겹친 시각을 알 때).
+    """
+    try:
+        turns = (
+            diarize(audio, token=token, device="cpu", max_speakers=2)
+            if token
+            else diarize_by_embedding(audio, device="cpu", speakers=2)
+        )
+    except Exception as exc:  # noqa: BLE001 - 무엇이 막았는지 표에 남깁니다.
+        return {"error": f"{type(exc).__name__}: {str(exc)[:160]}"}
+    found = sorted({t.speaker for t in turns})
+    who = pick_speaker(turns, target_spans)
+    if len(found) < 2 or who is None:
+        return {"speakers": len(found), "error": "화자를 둘로 가르지 못했습니다."}
+
+    spoken = transcribe_by_speaker(audio, turns, model=model, language=language, device="cpu")
+    mine = [item for item in spoken if item.speaker == who]
+    heard_all = " ".join(item.cue.text for item in mine)
+    heard_clear = " ".join(item.cue.text for item in mine if not item.overlap)
+    report = {
+        "speakers": len(found),
+        "who": who,
+        "cues": len(mine),
+        "flagged": sum(1 for item in mine if item.overlap),
+        "cer_all": cer(reference, heard_all),
+        "cer_clear": cer(reference, heard_clear),
+        "heard": heard_all[:300],
+    }
+    if truth is not None:
+        marked = [(item.cue.start, item.cue.end) for item in spoken if item.overlap]
+        report["precision"], report["recall"] = coverage(marked, [truth])
+        report["truth"] = truth
+        report["spans"] = speaker_spans(turns, who)
+    return report
 
 
 def main() -> int:
@@ -140,6 +213,11 @@ def main() -> int:
         "--denoise",
         action="store_true",
         help="목소리만 분리(Demucs)한 뒤 전사해 한 번 더 견줍니다. 느립니다.",
+    )
+    parser.add_argument(
+        "--by-speaker",
+        action="store_true",
+        help="겹말 조건에서 화자를 나눠 화자별로 받아쓰고 겹침 표시를 잽니다.",
     )
     # 조건마다 상한이 다릅니다(pipeline.noise.MEASURED_CER, 실측 + 10%p).
     # 이 값을 주면 모든 조건에 같은 상한을 씁니다.
@@ -169,12 +247,35 @@ def main() -> int:
         settings.append(("분리 후", None, True))
         print("후보: 목소리만 분리한 뒤 전사 (겹말은 갈라지지 않습니다)")
 
+    target_spans = [(float(item["start"]), float(item["end"])) for item in expected["sentences"]]
+    token = os.environ.get("R4_HF_TOKEN")
+    if args.by_speaker:
+        print(f"화자 분리: {'pyannote' if token else 'embedding (토큰 없음)'}")
+
     rows: list[tuple[Condition, dict[str, float]]] = []
+    by_speaker: list[tuple[Condition, dict]] = []
     problems: list[str] = []
     with tempfile.TemporaryDirectory(prefix="robust-") as temp:
         work = Path(temp)
         for condition in conditions(with_speech=has_speech):
             audio = make(condition, sample, interference if has_speech else None, work)
+            if args.by_speaker and condition.has_other_voice:
+                by_speaker.append(
+                    (
+                        condition,
+                        speaker_report(
+                            audio,
+                            reference,
+                            target_spans,
+                            partial_window(seconds_of(sample))
+                            if condition.kind == "partial"
+                            else None,
+                            token=token,
+                            model=args.model,
+                            language=args.language,
+                        ),
+                    )
+                )
             scores: dict[str, float] = {}
             for label, tuning, denoise in settings:
                 heard_from = audio
@@ -222,6 +323,27 @@ def main() -> int:
     if len(settings) > 1:
         print("\n**전체가 고르게 좋아질 때만 기본값을 바꿉니다.** 한 조건만 좋아진 것은")
         print("표본 하나에서 나온 우연일 수 있습니다.")
+
+    if by_speaker:
+        print("\n화자별 전사 (겹말 조건만). 우리가 아는 목소리의 자막만 채점합니다.")
+        print("  '겹침 뺀 것'은 겹침 표시가 붙은 자막을 버리고 잰 값입니다.")
+        for condition, report in by_speaker:
+            plain = next(scores for row, scores in rows if row is condition)["지금 설정"]
+            if "error" in report:
+                count = report.get("speakers", "?")
+                print(f"  {condition.label:<16} 화자 {count}명 — {report['error']}")
+                continue
+            line = (
+                f"  {condition.label:<16} 화자 {report['speakers']}명, 자막 {report['cues']}개"
+                f"(겹침 표시 {report['flagged']}개)  섞어서 {plain:.1%} → "
+                f"화자별 {report['cer_all']:.1%} / 겹침 뺀 것 {report['cer_clear']:.1%}"
+            )
+            if "precision" in report:
+                line += f"  표시 정밀도 {report['precision']:.0%} 재현율 {report['recall']:.0%}"
+            print(line)
+            print(f"      {report['heard'] or '(없음)'}")
+        print("\n**겹친 시간의 자막은 여전히 못 믿습니다.** 이 방법은 겹치지 않은 시간을")
+        print("살리고 겹친 시간에 표시를 붙이는 것까지입니다.")
 
     if not has_speech:
         print("\n겹말은 재지 못했습니다.")

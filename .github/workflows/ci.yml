@@ -375,12 +375,16 @@ jobs:
           !cancelled() && (
           contains(github.event.pull_request.labels.*.name, 'verify-align') ||
           contains(github.event.head_commit.message, '[verify-align]'))
+        env:
+          R4_HF_TOKEN: ${{ env.HF_TOKEN }}
         run: |
           set -eo pipefail
           mkdir -p "$RUNNER_TEMP/verify"
+          # --by-speaker는 겹말 조건에서 화자를 나눠 화자별로 받아쓰고 겹침
+          # 표시를 잽니다. 토큰이 있으면 pyannote, 없으면 embedding으로 나눕니다.
           docker run --rm -v /tmp/human-sample:/audio -v "$PWD/scripts:/work:ro" \
-            --entrypoint python recording4-worker:ci /work/verify_robust.py \
-            --directory /audio --model small --compare \
+            -e R4_HF_TOKEN --entrypoint python recording4-worker:ci /work/verify_robust.py \
+            --directory /audio --model small --compare --by-speaker \
             2>&1 | tee -a "$RUNNER_TEMP/verify/robust.log"
 
       - name: 배경음 분리 검증

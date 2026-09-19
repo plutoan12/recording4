@@ -135,6 +135,7 @@ def main() -> int:
         found = rows(dataset, config, split, wanted * 2, args.offset)
         pieces: list[tuple[Path, str]] = []
         extra: list[Path] = []
+        extra_text: list[str] = []
         for index, row in enumerate(found):
             pair = audio_and_text(row)
             if not pair:
@@ -151,6 +152,7 @@ def main() -> int:
             else:
                 spare = to_mono16k(raw, args.out / f"other{len(extra)}.wav")
                 extra.append(spare)
+                extra_text.append(text)
                 print(f"  겹말용: {text[:40]}")
             if len(pieces) >= args.count and len(extra) >= args.interference:
                 break
@@ -158,6 +160,13 @@ def main() -> int:
             build_sample(pieces, args.out)
             if extra:
                 join(extra, args.out / "interference.wav")
+                # 끼어드는 쪽의 원문도 남깁니다. 화자별 전사 검증이 "끼어든
+                # 사람의 말도 제대로 받아썼는지"를 볼 때 씁니다.
+                expected = json.loads((args.out / "expected.json").read_text(encoding="utf-8"))
+                expected["interference"] = extra_text
+                (args.out / "expected.json").write_text(
+                    json.dumps(expected, ensure_ascii=False, indent=2), encoding="utf-8"
+                )
                 print(f"겹말용 목소리 {len(extra)}조각 → {args.out / 'interference.wav'}")
             elif args.interference:
                 print("겹말용 조각을 받지 못했습니다. 겹말 검증은 건너뜁니다.")

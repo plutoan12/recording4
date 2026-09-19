@@ -17,6 +17,11 @@ NOISE_SNRS = (20.0, 10.0, 5.0, 0.0)
 # 겹말은 끼어든 목소리가 대상보다 얼마나 작은지로 잡습니다. 0dB면 같은 크기라
 # 사람도 알아듣기 어렵습니다.
 SPEECH_SNRS = (10.0, 5.0, 0.0)
+# 위 겹말은 처음부터 끝까지 겹친 최악의 경우입니다. 실제 겹말은 잠깐입니다.
+# 부분 겹말은 가운데 이 비율만큼만 끼어듭니다. 겹치지 않은 앞뒤가 있어야
+# 화자별 전사가 무엇을 살리는지 보입니다.
+PARTIAL_FRACTION = 1.0 / 3.0
+PARTIAL_SNRS = (0.0,)
 
 
 @dataclass(frozen=True)
@@ -24,15 +29,19 @@ class Condition:
     """재는 조건 하나."""
 
     name: str
-    kind: str  # "clean" | "noise" | "speech"
+    kind: str  # "clean" | "noise" | "speech" | "partial"
     snr_db: float | None = None
 
     @property
     def label(self) -> str:
         if self.kind == "clean":
             return "원음"
-        what = "소음" if self.kind == "noise" else "겹말"
+        what = {"noise": "소음", "speech": "겹말", "partial": "부분 겹말"}[self.kind]
         return f"{what} SNR {self.snr_db:+.0f}dB"
+
+    @property
+    def has_other_voice(self) -> bool:
+        return self.kind in ("speech", "partial")
 
 
 def conditions(*, with_speech: bool) -> list[Condition]:
@@ -44,7 +53,15 @@ def conditions(*, with_speech: bool) -> list[Condition]:
     rows += [Condition(f"noise{snr:g}", "noise", snr) for snr in NOISE_SNRS]
     if with_speech:
         rows += [Condition(f"speech{snr:g}", "speech", snr) for snr in SPEECH_SNRS]
+        rows += [Condition(f"partial{snr:g}", "partial", snr) for snr in PARTIAL_SNRS]
     return rows
+
+
+def partial_window(seconds: float, fraction: float = PARTIAL_FRACTION) -> tuple[float, float]:
+    """부분 겹말이 끼어드는 시각. 가운데에 둡니다. 앞뒤가 남아야 합니다."""
+    length = seconds * fraction
+    start = (seconds - length) / 2
+    return (round(start, 3), round(start + length, 3))
 
 
 def gain_for_snr(target_dbfs: float, other_dbfs: float, snr_db: float) -> float:
