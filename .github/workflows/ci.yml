@@ -218,6 +218,12 @@ jobs:
           print('CascadeClassifier 있음', hasattr(cv2, 'CascadeClassifier'))
           print('FaceDetectorYN 있음', hasattr(cv2, 'FaceDetectorYN'))
           print('얼굴 관련 이름', sorted(n for n in dir(cv2) if 'ascade' in n or 'FaceDetector' in n))
+          # 휠이 캐스케이드 XML을 싣고 있는지 재 둡니다. 싣고 있다면 이미지가
+          # 빌드할 때 따로 받는 단계를 지울 수 있습니다.
+          import os
+          place = getattr(getattr(cv2, 'data', None), 'haarcascades', None)
+          names = sorted(os.listdir(place)) if place and os.path.isdir(place) else []
+          print('cv2.data 자리', place, '/ 파일', len(names), names[:3])
           "
 
       - name: API 이미지 빌드

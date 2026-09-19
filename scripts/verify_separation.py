@@ -17,6 +17,8 @@ make_speech_sample.py와 verify_align.py로 나뉜 것과 같은 이유입니다
     python3 scripts/verify_separation.py --make --out /tmp/separation   # ffmpeg, espeak-ng
     docker run --rm -v /tmp/separation:/audio ... verify_separation.py --directory /audio
 
+표본 폴더는 **읽기만** 합니다. 분리 결과는 임시 폴더에 씁니다.
+
 **수치 두 개로 음질을 말할 수 없습니다.** 이 검사는 "분리가 돌고 있고 결과가
 예전과 크게 달라지지 않았다"를 보는 것입니다. 실제로 들어 보는 것을 대신하지
 않습니다.
@@ -27,6 +29,7 @@ from __future__ import annotations
 import argparse
 import subprocess
 import sys
+import tempfile
 import wave
 from pathlib import Path
 
@@ -148,17 +151,23 @@ def main() -> int:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "services/worker"))
     from worker.separation import MissingDependency, separate_background
 
-    try:
-        result = separate_background(mixed, directory / "background.wav", device=args.device)
-    except MissingDependency as exc:
-        print(f"분리를 돌릴 수 없습니다: {exc}")
-        return 2
-
-    before_tone, before_rest = powers(samples(mixed), RATE)
-    after_tone, after_rest = powers(samples(result.background), result.sample_rate)
+    # 결과는 표본 폴더가 **아니라** 임시 폴더에 씁니다. 컨테이너 안에서 돌 때
+    # 표본 폴더는 바깥에서 붙여 준 자리라 쓸 수가 없습니다. 이미지는 uid 10001로
+    # 도는데 그 폴더는 러너가 만들었습니다(CI 실측: soundfile.LibsndfileError:
+    # Error opening '/audio/background.wav': System error.). 읽기만 하면 되는
+    # 자리에 쓰려 한 것이 잘못이었습니다.
+    with tempfile.TemporaryDirectory(prefix="separation-") as work:
+        try:
+            result = separate_background(mixed, Path(work) / "background.wav", device=args.device)
+        except MissingDependency as exc:
+            print(f"분리를 돌릴 수 없습니다: {exc}")
+            return 2
+        before_tone, before_rest = powers(samples(mixed), RATE)
+        after_tone, after_rest = powers(samples(result.background), result.sample_rate)
+        seconds, rate = result.seconds, result.sample_rate
     kept, left = ratio(after_tone, before_tone), ratio(after_rest, before_rest)
 
-    print(f"섞은 소리 {result.seconds:.1f}초, {result.sample_rate}Hz")
+    print(f"섞은 소리 {seconds:.1f}초, {rate}Hz")
     print(f"  배경음({TONE_HZ:.0f}Hz 순음) 남은 비율: {kept:.2f} (한계 {args.min_kept:.2f} 이상)")
     print(f"  그 밖의 소리(목소리) 남은 비율: {left:.2f} (한계 {args.max_voice:.2f} 이하)")
 

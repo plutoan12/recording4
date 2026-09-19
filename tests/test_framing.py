@@ -87,7 +87,7 @@ def test_sample_times_stay_inside_the_clip() -> None:
 
 
 def test_the_cascade_file_is_looked_for_where_the_image_puts_it(tmp_path, monkeypatch) -> None:
-    """opencv-python-headless에는 이 파일이 없습니다(CI 실측). 어디를 보는지 고정합니다."""
+    """5.0.0 휠에는 이 파일이 없었습니다(CI 실측). 어디를 보는지 고정합니다."""
     from worker.faces import CASCADE_NAME, MissingDependency, cascade_path
 
     placed = tmp_path / CASCADE_NAME

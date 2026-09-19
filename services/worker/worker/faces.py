@@ -10,9 +10,13 @@
 검출기는 OpenCV의 Haar 캐스케이드입니다. **정면 얼굴만** 그럭저럭 찾습니다.
 옆얼굴·가린 얼굴·작은 얼굴은 놓칩니다. 바꿀 자리는 `detect_faces` 하나입니다.
 
-캐스케이드 XML은 `opencv-python-headless` 휠에 **들어 있지 않습니다**(CI 실측:
-`cv2.data` 경로는 있는데 파일이 없습니다). 워커 이미지가 빌드할 때 체크섬을
-확인하며 받아 두고 `R4_FACE_CASCADE`로 그 자리를 알려 줍니다. 파일이 없으면
+OpenCV 버전을 4.x로 못 박아 둡니다. 5.0.0 휠에는 `cv2.CascadeClassifier`
+자체가 없습니다(CI 실측). 5로 올리려면 얼굴 검출을 다른 것으로 갈아야 합니다.
+
+캐스케이드 XML은 `opencv-python-headless` **5.0.0** 휠에 들어 있지
+않았습니다(CI 실측: `cv2.data` 경로는 있는데 파일이 없습니다). 4.x가 싣고
+있는지는 아직 재지 않았습니다. 그래서 워커 이미지가 빌드할 때 버전·체크섬을
+고정해 받아 두고 `R4_FACE_CASCADE`로 그 자리를 먼저 봅니다. 파일이 없으면
 조용히 "얼굴 없음"으로 넘어가지 않고 무엇이 없는지 말합니다.
 """
 
@@ -55,8 +59,8 @@ def cascade_path() -> Path:
         if place.is_file():
             return place
     raise MissingDependency(
-        "얼굴 검출기 파일을 찾지 못했습니다. opencv-python-headless에는 들어 있지 "
-        "않습니다. infra/fetch_face_model.py로 받아 두고 R4_FACE_CASCADE로 "
+        "얼굴 검출기 파일을 찾지 못했습니다. opencv-python-headless 5.0.0 휠에는 "
+        "들어 있지 않았습니다. infra/fetch_face_model.py로 받아 두고 R4_FACE_CASCADE로 "
         "알려 주세요. 찾아본 자리: " + ", ".join(str(p) for p in places)
     )
 
@@ -74,7 +78,8 @@ def _cascade():  # noqa: ANN202 - cv2 타입을 여기서 들이지 않습니다
         raise MissingDependency(
             f"이 cv2에는 CascadeClassifier가 없습니다(objdetect 없음). "
             f"버전 {getattr(cv2, '__version__', '?')}, 자리 {getattr(cv2, '__file__', '?')}. "
-            "얼굴 검출을 쓰려면 objdetect가 든 OpenCV가 필요합니다."
+            "얼굴 검출을 쓰려면 4.x처럼 objdetect가 든 OpenCV가 필요합니다. "
+            "pyproject.toml의 analysis 묶음에서 버전을 봅니다."
         )
     path = cascade_path()
     found = cv2.CascadeClassifier(str(path))

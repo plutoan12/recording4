@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """얼굴 검출기 파일을 받아 이미지 안에 둡니다. 빌드할 때 한 번 돕니다.
 
-`opencv-python-headless` 휠에는 Haar 캐스케이드 XML이 **들어 있지 않습니다.**
-(CI 실측: `cv2/data/haarcascade_frontalface_default.xml` 없음. `cv2.data`
-경로는 있는데 파일이 없습니다.) 얼굴 검출은 이 파일이 있어야 돌아갑니다.
+`opencv-python-headless` **5.0.0** 휠에는 Haar 캐스케이드 XML이 들어 있지
+않았습니다(CI 실측: `cv2/data/haarcascade_frontalface_default.xml` 없음.
+`cv2.data` 경로는 있는데 파일이 없습니다). 지금은 4.x로 내려 고정했는데, 그
+휠이 싣고 있는지는 아직 재지 않았습니다. 임포트 확인이 매번 찍습니다. 싣고
+있다고 확인되면 이 내려받기는 지워도 됩니다.
 
 저장소에 900KB짜리 남의 데이터 파일을 넣는 대신 **버전과 체크섬을 고정해서**
 받습니다. 워커 이미지는 이미 빌드할 때 PyTorch를 받으므로 망을 쓰는 것 자체가
