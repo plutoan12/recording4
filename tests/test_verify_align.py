@@ -21,19 +21,25 @@ def verify():
 
 
 SENTENCES = [
-    {"text": "가", "start": 1.0, "end": 5.45},
-    {"text": "나", "start": 6.45, "end": 11.23},
+    {"text": "첫 문장입니다", "start": 1.0, "end": 5.45},
+    {"text": "두 번째 문장입니다", "start": 6.45, "end": 11.23},
 ]
 
 
 def test_end_inside_its_own_sentence_is_fine(verify) -> None:
-    cues = [Cue(start=1.0, end=5.4, text="가"), Cue(start=6.45, end=11.2, text="나")]
+    cues = [
+        Cue(start=1.0, end=5.4, text="첫 문장입니다"),
+        Cue(start=6.45, end=11.2, text="두 번째 문장입니다"),
+    ]
     assert verify.report_ends(cues, SENTENCES) == []
 
 
 def test_end_reaching_into_the_next_sentence_is_reported(verify) -> None:
     """앞 자막이 다음 말이 시작된 뒤에도 남으면 화면에서 겹쳐 보입니다."""
-    cues = [Cue(start=1.0, end=7.0, text="가"), Cue(start=7.05, end=11.2, text="나")]
+    cues = [
+        Cue(start=1.0, end=7.0, text="첫 문장입니다"),
+        Cue(start=7.05, end=11.2, text="두 번째 문장입니다"),
+    ]
     problems = verify.report_ends(cues, SENTENCES)
     assert len(problems) == 1
     assert "6.45" in problems[0]
@@ -41,7 +47,24 @@ def test_end_reaching_into_the_next_sentence_is_reported(verify) -> None:
 
 def test_a_cue_spanning_its_own_sentence_only_is_not_an_intrusion(verify) -> None:
     """자기 문장의 시작은 침범 판정에서 빼야 합니다. 안 빼면 모든 자막이 걸립니다."""
-    cues = [Cue(start=1.0, end=5.45, text="가")]
+    cues = [Cue(start=1.0, end=5.45, text="첫 문장입니다")]
+    assert verify.report_ends(cues, SENTENCES) == []
+
+
+def test_a_cue_starting_a_hair_before_its_own_sentence_is_not_an_intrusion(verify) -> None:
+    """맞게 맞춘 자막도 정답보다 0.01초쯤 이릅니다. 그걸 침범으로 세면 안 됩니다.
+
+    측정에서 나온 실패입니다: 0.99초에 시작하는 자막이 1.00초에 시작하는
+    자기 문장을 '다음 문장'으로 세어 침범으로 잡혔습니다.
+    """
+    cues = [Cue(start=0.99, end=4.90, text="첫 문장입니다")]
+    assert verify.report_ends(cues, SENTENCES) == []
+
+
+def test_a_cue_holding_both_sentences_is_not_an_intrusion(verify) -> None:
+    """두 문장을 담은 자막은 그 문장까지 걸치는 게 맞습니다. 합쳐진 것 자체는
+    시작 시각 검사가 따로 잡습니다."""
+    cues = [Cue(start=1.0, end=11.2, text="첫 문장입니다 두 번째 문장입니다")]
     assert verify.report_ends(cues, SENTENCES) == []
 
 

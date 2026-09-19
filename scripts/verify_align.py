@@ -125,7 +125,6 @@ def report_ends(cues: list[Cue], sentences: list[dict]) -> list[str]:
     """
     problems: list[str] = []
     ends = [item["end"] for item in sentences]
-    starts = [item["start"] for item in sentences]
     print(f"\n{'자막':>4} {'정렬 끝':>10} {'가장 가까운 실제':>16} {'차이':>8} {'표시 시간':>10}")
     for index, cue in enumerate(cues, start=1):
         nearest = min(ends, key=lambda value: abs(value - cue.end))
@@ -134,15 +133,23 @@ def report_ends(cues: list[Cue], sentences: list[dict]) -> list[str]:
             f"{abs(nearest - cue.end):>7.2f}초 {cue.end - cue.start:>9.2f}초"
         )
     for cue in cues:
-        # 이 자막이 끝나기 전에 시작하는 다음 문장. 자기 문장은 빼야 하므로
-        # 자막 시작 뒤에 오는 문장만 봅니다.
-        later = [value for value in starts if value > cue.start + 0.001]
-        intruded = [value for value in later if cue.end > value + 0.001]
-        if intruded:
+        # 이 자막이 맡은 문장. 자막 시작에 가장 가까운 문장입니다. 자막 시작이
+        # 정답보다 조금 이르면(맞게 맞춘 경우에도 0.01초 정도) 자기 문장이
+        # "다음 문장"으로 잡힙니다. 그래서 순서가 아니라 가까움으로 고릅니다.
+        own = min(sentences, key=lambda item: abs(item["start"] - cue.start))
+        for item in sentences:
+            if item["start"] <= own["start"] + 0.001 or cue.end <= item["start"] + 0.001:
+                continue
+            # 한 자막이 두 문장을 담고 있으면 그 문장까지 걸치는 게 맞습니다.
+            # 합쳐진 것 자체는 시작 시각 검사가 따로 잡습니다.
+            if squeeze(item["text"]) in squeeze(cue.text):
+                continue
             problems.append(
                 f"자막이 다음 문장 발화를 침범합니다: {cue.start:.2f}~{cue.end:.2f}초 자막이 "
-                f"{intruded[0]:.2f}초에 시작하는 문장까지 남습니다."
+                f"{item['start']:.2f}초에 시작하는 문장까지 남습니다."
             )
+            break
+        if problems:
             break
     return problems
 
