@@ -69,3 +69,11 @@ def test_upload_switch_must_be_on(preflight) -> None:
     assert preflight.check_enabled("true") == []
     assert preflight.check_enabled("false")
     assert preflight.check_enabled(None)
+
+
+def test_a_file_without_scopes_is_reported_not_passed(preflight, tmp_path) -> None:
+    """모르는 것은 모른다고 적습니다. 조용히 통과시키면 점검을 둔 뜻이 없습니다."""
+    data = {**GOOD}
+    del data["scopes"]
+    problems = preflight.check_credentials_file(write(tmp_path / "t.json", data))
+    assert any("확인하지 못했습니다" in p for p in problems)

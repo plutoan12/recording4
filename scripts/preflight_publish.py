@@ -62,8 +62,14 @@ def check_credentials_file(path: Path) -> list[str]:
             "(access_type=offline, prompt=consent)."
         )
     granted = set(data.get("scopes") or [])
-    missing = [scope for scope in NEEDED_SCOPES if scope not in granted]
-    if granted and missing:
+    if not granted:
+        # 권한 목록이 없으면 확인할 수 없습니다. 조용히 통과시키면 이 점검을
+        # 둔 뜻이 없어집니다. 모르는 것은 모른다고 적습니다.
+        problems.append(
+            "인증 파일에 권한 목록이 없어 업로드 권한을 확인하지 못했습니다. "
+            "채널 조회가 통과해도 업로드에서 거절당할 수 있습니다."
+        )
+    elif missing := [scope for scope in NEEDED_SCOPES if scope not in granted]:
         problems.append("업로드 권한이 없습니다: " + ", ".join(missing))
     return problems
 
