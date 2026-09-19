@@ -29,6 +29,7 @@ from adminapi.outbox import enqueue
 from adminapi.storage import ObjectStorage, get_storage
 from adminapi.subtitle_rules import subtitle_rules
 from pipeline.editing import Cue, EditSpec, suggest_clips
+from pipeline.speakers import MULTIPLE_SPEAKERS
 from pipeline.states import JobState
 from pipeline.subtitle_files import (
     MEDIA_TYPES,
@@ -222,6 +223,7 @@ class AnalysisRequest(BaseModel):
 class DiarizeRequest(BaseModel):
     """화자 분리 요청. 화자 수를 알면 알려 주는 편이 정확합니다."""
 
+    language: Literal["ko", "en", "ja", "zh"] | None = None
     min_speakers: int | None = Field(default=None, ge=1, le=20)
     max_speakers: int | None = Field(default=None, ge=1, le=20)
 
@@ -279,7 +281,7 @@ def align(asset_id: uuid.UUID, payload: AlignRequest, user: CurrentUser, session
 @router.post("/source-assets/{asset_id}/diarize", status_code=202)
 def diarize(asset_id: uuid.UUID, payload: DiarizeRequest, user: CurrentUser, session: SessionDep):
     """누가 말했는지 찾아 최신 대본에 화자를 붙인 새 버전을 만듭니다."""
-    asset_for_edit(session, asset_id)
+    asset = asset_for_edit(session, asset_id)
     if (
         payload.min_speakers
         and payload.max_speakers
@@ -303,6 +305,8 @@ def diarize(asset_id: uuid.UUID, payload: DiarizeRequest, user: CurrentUser, ses
             source_asset_id=asset_id,
             kind="diarize",
             settings={
+                "transcript_version": transcript(session, asset_id)[0].transcript_version,
+                "source_language": payload.language or asset.source_language,
                 "min_speakers": payload.min_speakers,
                 "max_speakers": payload.max_speakers,
             },
@@ -369,14 +373,32 @@ def speakers(asset_id: uuid.UUID, user: CurrentUser, session: SessionDep):
     rows = transcript(session, asset_id)
     found: dict[str, dict] = {}
     for row in rows:
-        if not row.speaker:
+        if not row.speaker or row.speaker == MULTIPLE_SPEAKERS:
             continue
         entry = found.setdefault(row.speaker, {"speaker": row.speaker, "seconds": 0.0, "count": 0})
         entry["seconds"] += float(row.end_seconds) - float(row.start_seconds)
         entry["count"] += 1
+    reviews = []
+    if rows:
+        completed = session.scalars(
+            select(MediaTask)
+            .where(
+                MediaTask.source_asset_id == asset_id,
+                MediaTask.kind == "diarize",
+                MediaTask.state == "succeeded",
+            )
+            .order_by(MediaTask.finished_at.desc())
+        )
+        for task in completed:
+            if task.result.get("transcript_version") == rows[0].transcript_version:
+                reviews = task.result.get("speaker_review", [])
+                break
     return {
+        "review": reviews,
+        "needs_review": any(r["needs_review"] for r in reviews),
         "version": rows[0].transcript_version if rows else None,
         "unlabeled": sum(1 for row in rows if not row.speaker),
+        "multiple_speaker_segments": sum(row.speaker == MULTIPLE_SPEAKERS for row in rows),
         "speakers": sorted(found.values(), key=lambda e: (-e["seconds"], e["speaker"])),
     }
 

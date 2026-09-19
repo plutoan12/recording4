@@ -192,3 +192,41 @@ def test_gated_hint_finds_the_model_in_the_failure_text() -> None:
     )
     text = gated_hint(detail)
     assert "https://huggingface.co/pyannote/speaker-diarization-community-1" in text
+
+
+def test_word_assignment_preserves_changes_and_marks_simultaneous_speakers():
+    from pipeline.alignment import WordTiming
+    from pipeline.speakers import MULTIPLE_SPEAKERS, review_speakers
+
+    cue = Cue(start=0, end=3, text="one two three")
+    turns = [SpeakerTurn(0, 2, "A"), SpeakerTurn(1, 3, "B")]
+    words = [WordTiming(0, 1, "one "), WordTiming(1, 2, "two "), WordTiming(2, 3, "three")]
+    result = review_speakers([cue], turns, [words])[0]
+    assert [word["speaker"] for word in result["words"]] == ["A", MULTIPLE_SPEAKERS, "B"]
+    assert result["speaker"] == MULTIPLE_SPEAKERS
+    assert result["needs_review"]
+    assert result["overlaps"] == [{"start": 1, "end": 2}]
+
+
+def test_missing_or_changed_word_alignment_is_not_forced_to_dominant_speaker():
+    from pipeline.alignment import WordTiming
+    from pipeline.speakers import MULTIPLE_SPEAKERS, review_speakers
+
+    cue = Cue(start=0, end=3, text="original text")
+    turns = [SpeakerTurn(0, 2.8, "A"), SpeakerTurn(2.8, 3, "B")]
+    for words in ([], [WordTiming(0, 1, "wrong text")], [WordTiming(0, 4, cue.text)]):
+        result = review_speakers([cue], turns, [words])[0]
+        assert result["speaker"] == MULTIPLE_SPEAKERS
+        assert result["needs_review"]
+        assert not result["alignment_available"]
+        assert result["words"] == []
+
+
+def test_duplicate_turns_are_not_treated_as_multiple_speakers():
+    from pipeline.alignment import WordTiming
+    from pipeline.speakers import review_speakers
+
+    cue = Cue(start=0, end=1, text="same")
+    result = review_speakers([cue], [SpeakerTurn(0, 1, "A")] * 2, [[WordTiming(0, 1, "same")]])[0]
+    assert result["speaker"] == "A"
+    assert not result["needs_review"]

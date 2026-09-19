@@ -4,6 +4,7 @@ import { PublicationForm } from './PublicationForm'
 import type { WorkflowDraft } from './WorkflowPanel'
 
 type Cue = { start: number; end: number; text: string }
+type SpeakerReview = { version: number | null; needs_review: boolean; review: {start:number;end:number;text:string;speaker:string|null;needs_review:boolean;alignment_available:boolean;words:{start:number;end:number;text:string;speaker:string|null;needs_review:boolean}[]}[] }
 type Suggestion = { start: number; end: number; title: string; reason: string }
 type Violation = { index: number; kind: string; detail: string }
 type Task = { id: string; source_asset_id: string; clip_edit_id: string | null; kind: string; state: string; error: string | null;
@@ -25,6 +26,7 @@ export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWo
   const [plainScript, setPlainScript] = useState('')
   const [syncProfile, setSyncProfile] = useState('standard')
   const [syncLanguage, setSyncLanguage] = useState('')
+  const [speakerReview, setSpeakerReview] = useState<SpeakerReview|null>(null)
   const [tasks, setTasks] = useState<Task[]>([])
   const [outputUrl, setOutputUrl] = useState('')
   const [previewed, setPreviewed] = useState('')
@@ -48,6 +50,15 @@ export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWo
     return () => clearInterval(timer)
   }, [refresh])
 
+  useEffect(() => {
+    let active = true
+    if (!assetId) { setSpeakerReview(null); return }
+    void request<SpeakerReview>(`/source-assets/${assetId}/speakers`)
+      .then(value => { if (active) setSpeakerReview(value) })
+      .catch(() => { if (active) setSpeakerReview(null) })
+    return () => { active = false }
+  }, [assetId, tasks])
+
   async function act(operation: () => Promise<void>) {
     setBusy(true); setMessage('')
     try { await operation() }
@@ -56,7 +67,7 @@ export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWo
   }
   async function loadSource(id: string) {
     selection.current = id
-    setAssetId(id); setSourceUrl(''); setSuggestions([]); setCaptions([]); setSyncLanguage('')
+    setAssetId(id); setSpeakerReview(null); setSourceUrl(''); setSuggestions([]); setCaptions([]); setSyncLanguage('')
     const asset = assets.find(a => a.id === id)
     setStart(0); setEnd(Math.min(30, Number(asset?.duration_seconds ?? 30)))
     if (!id) return
@@ -177,6 +188,24 @@ export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWo
         <p>자막 가독성 문제 {violations.length}건. 렌더에서 줄바꿈과 분할은 자동으로 적용되지만 아래는 사람이 고쳐야 합니다.</p>
         <ul>{violations.map((v,i) => <li key={i}>{v.index + 1}번 자막 · {v.kind} · {v.detail}</li>)}</ul>
       </div>}
+      <h3>화자·겹말 검수</h3>
+      <label>화자 분석 원문 언어<select value={syncLanguage} onChange={e=>setSyncLanguage(e.target.value)}>
+        <option value="">원본에 저장된 언어</option><option value="ko">한국어</option><option value="en">영어</option><option value="ja">일본어</option><option value="zh">중국어</option>
+      </select></label>
+      <button disabled={busy || !captions.length} onClick={() => void act(async () => {
+        await request(`/source-assets/${assetId}/diarize`, {method:'POST',body:JSON.stringify({language:syncLanguage || null})})
+        setMessage('저장된 대본의 단어별 화자 분석을 요청했습니다.'); await refresh()
+      })}>저장된 대본 화자 분석</button>
+      <p>원본 언어와 저장된 대본으로 분석합니다. 단어 시각이 없거나 여러 화자가 겹치면 검수가 필요합니다.</p>
+      {speakerReview && speakerReview.review.length > 0 && <aside aria-label="화자 검수 결과">
+        <p>저장된 대본 {speakerReview.version}번 · {speakerReview.needs_review ? '검수 필요' : '화자 분석 완료'}</p>
+        {speakerReview.review.map((segment, i) => <details key={i}>
+          <summary>{segment.start.toFixed(2)}–{segment.end.toFixed(2)}초 · {segment.speaker ?? '미확인'}{segment.needs_review ? ' · 검수 필요' : ''}</summary>
+          <p>{segment.text}</p>
+          {!segment.alignment_available && <p>단어 시각을 확인하지 못했습니다. 화자를 추측하지 않았습니다.</p>}
+          <ul>{segment.words.map((word,j) => <li key={j}>{word.start.toFixed(2)}–{word.end.toFixed(2)}초 · {word.text} · {word.speaker ?? '미확인'}{word.needs_review ? ' · 검수 필요' : ''}</li>)}</ul>
+        </details>)}
+      </aside>}
       <h3>자막 편집</h3>
       <p>시간은 원본 영상 기준입니다. 선택 구간 밖의 자막은 최종 영상에서 자동으로 제외됩니다.</p>
       <label>자막 표시<select value={burn?'burn':'track'} onChange={e=>setBurn(e.target.value==='burn')}><option value="burn">영상에 굽기 · 트랙 업로드 안 함</option><option value="track">YouTube 트랙만 · 영상에 굽지 않음</option></select></label>

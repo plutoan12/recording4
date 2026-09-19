@@ -157,3 +157,71 @@ def turns_from_labels(
         if finish > begin:
             turns.append(SpeakerTurn(start=begin, end=finish, speaker=name))
     return turns
+
+
+MULTIPLE_SPEAKERS = "복수 화자"
+
+
+def review_speakers(cues, turns, words_by_cue):
+    """단어마다 근거가 있는 단일 화자만 배정합니다. 불확실하면 검수합니다."""
+    from pipeline.alignment import squeeze
+
+    if len(cues) != len(words_by_cue):
+        raise ValueError("대본과 단어 정렬 개수가 다릅니다.")
+    reviewed = []
+    for cue, words in zip(cues, words_by_cue, strict=True):
+        candidates = sorted({t.speaker for t in turns if _overlap(cue.start, cue.end, t) > 0})
+        overlaps = []
+        relevant = [t for t in turns if _overlap(cue.start, cue.end, t) > 0]
+        for index, left in enumerate(relevant):
+            for right in relevant[index + 1 :]:
+                begin, finish = (
+                    max(cue.start, left.start, right.start),
+                    min(cue.end, left.end, right.end),
+                )
+                if left.speaker != right.speaker and finish > begin:
+                    overlaps.append({"start": begin, "end": finish})
+        valid = bool(words) and squeeze("".join(w.text for w in words)) == squeeze(cue.text)
+        valid = valid and all(cue.start <= w.start < w.end <= cue.end for w in words)
+        valid = valid and all(
+            a.end <= b.start + 0.001 for a, b in zip(words, words[1:], strict=False)
+        )
+        assignments = []
+        if valid:
+            for word in words:
+                labels = sorted({t.speaker for t in turns if _overlap(word.start, word.end, t) > 0})
+                label = labels[0] if len(labels) == 1 else MULTIPLE_SPEAKERS if labels else None
+                assignments.append(
+                    {
+                        "start": word.start,
+                        "end": word.end,
+                        "text": word.text,
+                        "speaker": label,
+                        "candidates": labels,
+                        "needs_review": len(labels) != 1,
+                    }
+                )
+        resolved = {
+            w["speaker"] for w in assignments if w["speaker"] not in (None, MULTIPLE_SPEAKERS)
+        }
+        needs_review = bool(overlaps) or not valid or any(w["needs_review"] for w in assignments)
+        if valid and len(resolved) == 1 and not needs_review:
+            label = next(iter(resolved))
+        elif len(candidates) > 1 or len(resolved) > 1:
+            label = MULTIPLE_SPEAKERS
+        else:
+            label = None
+        reviewed.append(
+            {
+                "start": cue.start,
+                "end": cue.end,
+                "text": cue.text,
+                "speaker": label,
+                "candidates": candidates,
+                "needs_review": needs_review or label == MULTIPLE_SPEAKERS,
+                "alignment_available": bool(valid),
+                "overlaps": overlaps,
+                "words": assignments,
+            }
+        )
+    return reviewed

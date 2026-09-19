@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from adminapi.models import Job, MediaTask, SourceAsset, TranscriptSegment, VoiceAssignment
+from pipeline.alignment import WordTiming
 from pipeline.speakers import SpeakerTurn
 
 
@@ -112,6 +113,13 @@ def test_worker_labels_the_transcript_with_speakers(
 
     monkeypatch.setattr(media_tasks, "get_storage", lambda: storage)
     monkeypatch.setattr(media_tasks, "diarize", fake_diarize)
+    monkeypatch.setattr(
+        media_tasks,
+        "align_speaker_words",
+        lambda source, cues, **kwargs: [
+            [WordTiming(start=c.start, end=c.end, text=c.text)] for c in cues
+        ],
+    )
 
     result = media_tasks.run_media.run(str(task.id))
     assert result["status"] == "succeeded"
@@ -253,3 +261,84 @@ def test_voice_assignments_reject_empty_values(
         json={"assignments": {"SPEAKER_00": "  "}},
     )
     assert response.status_code == 422
+
+
+def test_overlap_review_is_persisted_and_hidden_for_a_newer_transcript(
+    session, user, storage, monkeypatch, client, auth_headers
+):
+    from worker import media_tasks
+
+    asset = verified_asset(session, user)
+    with_transcript(session, asset)
+    task = MediaTask(source_asset_id=asset.id, kind="diarize", settings={})
+    session.add(task)
+    session.commit()
+    monkeypatch.setattr(media_tasks, "get_storage", lambda: storage)
+    monkeypatch.setattr(
+        media_tasks, "diarize", lambda *a, **kw: [SpeakerTurn(0, 4, "A"), SpeakerTurn(1, 3, "B")]
+    )
+    monkeypatch.setattr(
+        media_tasks,
+        "align_speaker_words",
+        lambda source, cues, **kw: [[WordTiming(c.start, c.end, c.text)] for c in cues],
+    )
+    result = media_tasks.run_media.run(str(task.id))
+    assert result["needs_review"]
+    assert result["labeled"] == 0
+    response = client.get(f"/source-assets/{asset.id}/speakers", headers=auth_headers).json()
+    assert response["needs_review"]
+    assert response["speakers"] == []
+    assert response["multiple_speaker_segments"] == 2
+    assert all(s["speaker"] == "복수 화자" for s in response["review"])
+    session.add(
+        TranscriptSegment(
+            source_asset_id=asset.id,
+            transcript_version=3,
+            start_seconds=0,
+            end_seconds=2,
+            text="새 대본",
+        )
+    )
+    session.commit()
+    assert (
+        client.get(f"/source-assets/{asset.id}/speakers", headers=auth_headers).json()["review"]
+        == []
+    )
+
+
+def test_diarization_does_not_overwrite_transcript_edited_during_analysis(
+    session, user, storage, monkeypatch
+):
+    from worker import media_tasks
+
+    asset = verified_asset(session, user)
+    with_transcript(session, asset)
+    task = MediaTask(source_asset_id=asset.id, kind="diarize", settings={})
+    session.add(task)
+    session.commit()
+
+    def changed(source, **kwargs):
+        session.add(
+            TranscriptSegment(
+                source_asset_id=asset.id,
+                transcript_version=2,
+                start_seconds=0,
+                end_seconds=2,
+                text="다른 대본",
+            )
+        )
+        session.commit()
+        return [SpeakerTurn(0, 4, "A")]
+
+    monkeypatch.setattr(media_tasks, "get_storage", lambda: storage)
+    monkeypatch.setattr(media_tasks, "diarize", changed)
+    monkeypatch.setattr(
+        media_tasks, "align_speaker_words", lambda source, cues, **kw: [[] for c in cues]
+    )
+    assert media_tasks.run_media.run(str(task.id))["status"] == "failed"
+    assert (
+        session.query(TranscriptSegment)
+        .filter_by(source_asset_id=asset.id, transcript_version=3)
+        .count()
+        == 0
+    )

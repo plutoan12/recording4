@@ -15,10 +15,11 @@ from adminapi.db import get_session_factory
 from adminapi.models import Artifact, MediaTask, SourceAsset, TranscriptSegment, utcnow
 from adminapi.storage import get_storage
 from pipeline.editing import Cue, EditSpec
-from pipeline.speakers import SpeakerTurn, assign_speakers, speaker_totals
+from pipeline.speakers import MULTIPLE_SPEAKERS, SpeakerTurn, review_speakers, speaker_totals
 from worker.analysis import (
     MissingDependency,
     SyncOptions,
+    align_speaker_words,
     align_text,
     detect_scenes,
     diarize,
@@ -47,7 +48,7 @@ def latest_transcript(session, task_uuid) -> list[Cue]:  # noqa: ANN001
             TranscriptSegment.source_asset_id == task.source_asset_id,
             TranscriptSegment.transcript_version == version,
         )
-        .order_by(TranscriptSegment.start_seconds)
+        .order_by(TranscriptSegment.start_seconds, TranscriptSegment.id)
     )
     return [Cue(start=float(r.start_seconds), end=float(r.end_seconds), text=r.text) for r in rows]
 
@@ -68,7 +69,7 @@ def run_media(task_id: str) -> dict:
         task = session.get(MediaTask, task_uuid)
         asset = session.get(SourceAsset, task.source_asset_id)
         source_key, spec, kind, attempt = asset.storage_key, task.settings, task.kind, task.attempt
-        if kind == "sync" and not spec.get("transcript_version"):
+        if kind in ("sync", "diarize") and not spec.get("transcript_version"):
             # Jobs queued by an older API must also pin their input before slow
             # model inference, not read a different transcript at completion.
             spec = {
@@ -117,6 +118,16 @@ def run_media(task_id: str) -> dict:
                     min_speakers=spec.get("min_speakers"),
                     max_speakers=spec.get("max_speakers"),
                 )
+                with factory() as session:
+                    input_cues = latest_transcript(session, task_uuid)
+                words = align_speaker_words(
+                    source,
+                    input_cues,
+                    model=settings.whisper_model,
+                    language=spec.get("source_language"),
+                    device=settings.whisper_device,
+                )
+                speaker_review = review_speakers(input_cues, turns, words)
                 result = {"speakers": speaker_totals(turns)}
             elif kind == "sync":
                 # 글자는 그대로 두고 시각만 통째로 옮깁니다. 얼마나 옮겼는지 남깁니다.
@@ -194,26 +205,24 @@ def run_media(task_id: str) -> dict:
                                     TranscriptSegment.source_asset_id == task.source_asset_id,
                                     TranscriptSegment.transcript_version == version,
                                 )
-                                .order_by(TranscriptSegment.start_seconds)
+                                .order_by(TranscriptSegment.start_seconds, TranscriptSegment.id)
                             )
                         )
                         if version
                         else []
                     )
-                    result = {"speakers": speaker_totals(turns), "count": len(rows)}
-                    if rows:
-                        labels = assign_speakers(
-                            [
-                                Cue(
-                                    start=float(r.start_seconds),
-                                    end=float(r.end_seconds),
-                                    text=r.text,
-                                )
-                                for r in rows
-                            ],
-                            turns,
+                    if version != spec.get("transcript_version"):
+                        raise UnverifiedSync(
+                            "검사 중 대본이 바뀌었습니다. 새 대본으로 화자 분석을 다시 요청하세요."
                         )
-                        for row, label in zip(rows, labels, strict=True):
+                    result = {
+                        "speakers": speaker_totals(turns),
+                        "count": len(rows),
+                        "speaker_review": speaker_review,
+                        "needs_review": any(r["needs_review"] for r in speaker_review),
+                    }
+                    if rows:
+                        for row, review in zip(rows, speaker_review, strict=True):
                             session.add(
                                 TranscriptSegment(
                                     source_asset_id=task.source_asset_id,
@@ -221,11 +230,13 @@ def run_media(task_id: str) -> dict:
                                     start_seconds=row.start_seconds,
                                     end_seconds=row.end_seconds,
                                     text=row.text,
-                                    speaker=label,
+                                    speaker=review["speaker"],
                                 )
                             )
                         result["transcript_version"] = version + 1
-                        result["labeled"] = sum(1 for label in labels if label)
+                        result["labeled"] = sum(
+                            r["speaker"] not in (None, MULTIPLE_SPEAKERS) for r in speaker_review
+                        )
                 elif kind in ("transcribe", "align", "sync"):
                     # Serialize transcript imports and STT completion on the source row.
                     session.scalar(
