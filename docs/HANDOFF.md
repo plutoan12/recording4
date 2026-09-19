@@ -1,5 +1,7 @@
 ## 2026-09-19: 품질 문제 수정 (Codex)
 
+- [PR #26](https://github.com/plutoan12/recording4/pull/26)에 저장. 최종 API·워커 이미지를 운영 서버에 반영했고 모든 서비스 healthy. 운영 워커에서 숫자/시각·녹화 용어 규칙과 실제 사람 목소리 verify_sync.py(0.5초 기준)를 다시 통과했습니다.
+
 - 브랜치 `codex/subtitle-quality-fixes`. 담당: pipeline/subtitles, worker/providers·analysis·media_tasks, api/config, 관련 테스트와 보고서.
 - 숫자/금액/시각 분할 방지, ko/ja의 명시적 녹화 표현→zh 용어 보정. PR #23의 SyncOptions 관련 코드/테스트를 가져와 탐색 제한·입력 검사를 보강했습니다.
 - 382개 테스트 통과, 5개 조건부 skip. 실제 음성 보정 최대 오차 0.30초로 기존 0.5초 기준 통과. 실제 번역 두 방향 추가 비용 $0.0040, 녹화 용어 개선 확인.
