@@ -30,8 +30,20 @@ class MissingDependency(RuntimeError):
 
 
 def transcribe(
-    source: Path, *, model: str = "small", language: str | None = None, device: str = "cpu"
+    source: Path,
+    *,
+    model: str = "small",
+    language: str | None = None,
+    device: str = "cpu",
+    tuning: dict | None = None,
 ) -> list[Cue]:
+    """오디오를 받아씁니다.
+
+    `tuning`은 디코딩 손잡이를 그대로 넘기는 자리입니다. 비워 두면 **지금까지와
+    똑같이** 돕니다. 소음·겹말에서 무엇이 나아지는지 재기 전에는 기본값을 바꾸지
+    않습니다(`scripts/verify_robust.py`). 재 보지 않은 손잡이를 운영 기본값으로
+    올리면 좋아졌는지 나빠졌는지 알 수 없습니다.
+    """
     try:
         from faster_whisper import WhisperModel
     except ImportError as exc:
@@ -42,7 +54,11 @@ def transcribe(
         model, device=device, compute_type="int8" if device == "cpu" else "float16"
     )
     segments, _ = engine.transcribe(
-        str(source), language=language, vad_filter=True, word_timestamps=True
+        str(source),
+        language=language,
+        vad_filter=True,
+        word_timestamps=True,
+        **(tuning or {}),
     )
     return [
         Cue(start=s.start, end=s.end, text=s.text.strip())

@@ -23,7 +23,22 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
-from speech_sample import build_sample, to_mono16k
+from speech_sample import build_sample, run, to_mono16k
+
+
+def join(pieces: list[Path], target: Path) -> Path:
+    """조각들을 무음 없이 이어 붙입니다. 겹말은 쉬지 않고 깔려야 합니다."""
+    listing = target.with_suffix(".txt")
+    listing.write_text("".join(f"file '{p.resolve()}'\n" for p in pieces), encoding="utf-8")
+    run(
+        [
+            "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+            "-f", "concat", "-safe", "0", "-i", str(listing),
+            "-ar", "16000", "-ac", "1", str(target),
+        ]
+    )  # fmt: skip
+    return target
+
 
 SERVER = "https://datasets-server.huggingface.co"
 # 공개 CC 라이선스 한국어 낭독 음성. 앞에서부터 차례로 시도합니다.
@@ -96,6 +111,12 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--count", type=int, default=3)
+    parser.add_argument(
+        "--interference",
+        type=int,
+        default=0,
+        help="겹말 검증용으로 **다른 문장** 몇 개를 더 받아 interference.wav로 잇습니다.",
+    )
     parser.add_argument("--dataset", default=None, help="지정하면 이 데이터셋만 씁니다.")
     args = parser.parse_args()
     args.out.mkdir(parents=True, exist_ok=True)
@@ -107,8 +128,12 @@ def main() -> int:
             continue
         config, split = chosen
         print(f"  config={config} split={split}")
-        found = rows(dataset, config, split, args.count * 2)
+        # 겹말용 조각은 표본에 들어가지 않는 **뒤쪽 문장**에서 가져옵니다.
+        # 같은 문장을 겹치면 끼어든 말이 원문에 있어서 오류로 세어지지 않습니다.
+        wanted = args.count + args.interference
+        found = rows(dataset, config, split, wanted * 2)
         pieces: list[tuple[Path, str]] = []
+        extra: list[Path] = []
         for index, row in enumerate(found):
             pair = audio_and_text(row)
             if not pair:
@@ -118,13 +143,23 @@ def main() -> int:
             raw = args.out / f"raw{index}{suffix}"
             if not download(source, raw):
                 continue
-            piece = to_mono16k(raw, args.out / f"human{len(pieces)}.wav")
-            pieces.append((piece, text))
-            print(f"  받음: {text[:40]}")
-            if len(pieces) >= args.count:
+            if len(pieces) < args.count:
+                piece = to_mono16k(raw, args.out / f"human{len(pieces)}.wav")
+                pieces.append((piece, text))
+                print(f"  받음: {text[:40]}")
+            else:
+                spare = to_mono16k(raw, args.out / f"other{len(extra)}.wav")
+                extra.append(spare)
+                print(f"  겹말용: {text[:40]}")
+            if len(pieces) >= args.count and len(extra) >= args.interference:
                 break
         if len(pieces) >= 2:
             build_sample(pieces, args.out)
+            if extra:
+                join(extra, args.out / "interference.wav")
+                print(f"겹말용 목소리 {len(extra)}조각 → {args.out / 'interference.wav'}")
+            elif args.interference:
+                print("겹말용 조각을 받지 못했습니다. 겹말 검증은 건너뜁니다.")
             return 0
         print("  쓸 만한 조각을 충분히 받지 못했습니다.")
 

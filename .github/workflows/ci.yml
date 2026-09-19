@@ -275,7 +275,11 @@ jobs:
           contains(github.event.pull_request.labels.*.name, 'verify-align') ||
           contains(github.event.head_commit.message, '[verify-align]')
         run: |
-          python3 scripts/fetch_korean_speech.py --out /tmp/human-sample --count 3
+          # --interference는 표본에 **들어가지 않는 뒤쪽 문장**을 더 받습니다.
+          # 겹말 검증에서 끼어드는 목소리로 씁니다. 같은 문장을 겹치면
+          # 끼어든 말이 원문에 있어서 오류로 세어지지 않습니다.
+          python3 scripts/fetch_korean_speech.py --out /tmp/human-sample \
+            --count 3 --interference 2
           docker run --rm -v /tmp/human-sample:/audio -v "$PWD/scripts:/work:ro" \
             --entrypoint python recording4-worker:ci /work/verify_align.py \
             --directory /audio --model small --no-diagnose
@@ -360,6 +364,23 @@ jobs:
       # 돌립니다. 아는 두 소리(합성 음성 + 순음)를 섞어 무엇이 남는지 잽니다.
       # 측정 출력은 파일에도 남깁니다. 빌드 로그가 길어 중간 출력은 로그를
       # 뒤에서부터 읽는 도구에 안 잡힙니다. 마지막 단계가 다시 모아 찍습니다.
+      # 전사 품질은 깨끗한 낭독 음성으로만 쟀습니다. 실제 영상에는 소음이 깔리고
+      # 사람들이 말을 겹쳐 합니다. 거기서 몇 점인지 모르면 "정확도를 올렸다"고
+      # 말할 수 없습니다. --compare는 후보 손잡이로 한 번 더 재서 견줍니다.
+      # **첫 실측이라 한계값을 두지 않습니다.** 숫자를 보고 다음 변경에서 채웁니다.
+      - name: 소음·겹말 전사 검증
+        if: |
+          !cancelled() && (
+          contains(github.event.pull_request.labels.*.name, 'verify-align') ||
+          contains(github.event.head_commit.message, '[verify-align]'))
+        run: |
+          set -eo pipefail
+          mkdir -p "$RUNNER_TEMP/verify"
+          docker run --rm -v /tmp/human-sample:/audio -v "$PWD/scripts:/work:ro" \
+            --entrypoint python recording4-worker:ci /work/verify_robust.py \
+            --directory /audio --model small --compare \
+            2>&1 | tee -a "$RUNNER_TEMP/verify/robust.log"
+
       - name: 배경음 분리 검증
         if: |
           !cancelled() && (
