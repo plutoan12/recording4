@@ -87,6 +87,59 @@ jobs:
       - name: 빌드
         run: npm run build
 
+  stack:
+    name: 스택 기동 검증
+    runs-on: ubuntu-latest
+    # 이미지 두 개와 웹 서버를 빌드하고 전체 경로를 한 번 돌립니다. 느립니다.
+    if: github.event_name == 'pull_request' || github.ref == 'refs/heads/main'
+    timeout-minutes: 60
+
+    # compose 파일이 이 값으로 비밀값 파일을 찾습니다. ops.py는 스스로 넣지만
+    # 로그와 정리 단계는 docker compose를 직접 부르므로 잡 수준에 둡니다.
+    env:
+      R4_ENV_FILE: ${{ github.workspace }}/.runtime/production.env
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: 디스크 확보
+        run: |
+          df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+            /usr/local/share/boost "$AGENT_TOOLSDIRECTORY" || true
+          df -h /
+
+      # 지금까지 Compose 전체 기동과 실제 S3 연결은 "개발 환경에서 한 번 돌려봐야
+      # 한다"로 남아 있었습니다. 운영에서 쓰는 구성(compose.runtime.yml)을 그대로
+      # 띄웁니다. ops.py가 비밀값을 만들고 헬스체크가 통과할 때까지 기다립니다.
+      - name: 운영 스택 기동
+        run: |
+          python3 scripts/ops.py init
+          python3 scripts/ops.py up
+          python3 scripts/ops.py status
+
+      # 로그인 → 원본 업로드(실제 S3 PUT) → 검증 → 제작 → 결과물 내려받기 →
+      # FFmpeg 디코딩까지 한 번에 돕니다. 유료 호출과 업로드는 하지 않습니다.
+      - name: 전 경로 스모크
+        run: python3 scripts/smoke.py
+
+      - name: 실패 시 로그
+        if: failure()
+        run: |
+          python3 scripts/ops.py status || true
+          docker compose --env-file "$R4_ENV_FILE" \
+            -f infra/compose.runtime.yml logs --tail 200 || true
+
+      - name: 정리
+        if: ${{ !cancelled() }}
+        run: |
+          docker compose --env-file "$R4_ENV_FILE" \
+            -f infra/compose.runtime.yml down -v || true
+
   images:
     name: 워커 이미지 빌드
     runs-on: ubuntu-latest
@@ -171,6 +224,20 @@ jobs:
           docker run --rm -v /tmp/human-sample:/audio -v "$PWD/scripts:/work:ro" \
             --entrypoint python recording4-worker:ci /work/verify_align.py \
             --directory /audio --model small --no-diagnose
+
+      # 지금까지 STT는 불러오기와 설치만 확인했습니다. 실제로 무엇을 받아쓰는지는
+      # 잰 적이 없습니다. 정렬은 대본이 있을 때 시각만 붙이는 일이라 전사 품질과
+      # 다릅니다. 대본 없는 원본은 이 경로를 탑니다. 한계값은 품질 목표가 아니라
+      # 회귀 감시용 상한입니다. 낭독 원문은 숫자를 한글로 적고 모델은 아라비아
+      # 숫자로 적어서 같은 말이어도 글자가 다릅니다.
+      - name: 전사 품질 검증 (사람 목소리)
+        if: |
+          contains(github.event.pull_request.labels.*.name, 'verify-align') ||
+          contains(github.event.head_commit.message, '[verify-align]')
+        run: |
+          docker run --rm -v /tmp/human-sample:/audio -v "$PWD/scripts:/work:ro" \
+            --entrypoint python recording4-worker:ci /work/verify_transcribe.py \
+            --directory /audio --model small
 
       # pyannote는 게이트 모델이라 토큰이 있어야 돌아갑니다. 저장소 시크릿에
       # HF_TOKEN을 넣으면 이 단계가 켜집니다. 없으면 건너뜁니다.
