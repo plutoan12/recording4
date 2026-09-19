@@ -220,3 +220,48 @@ def test_cli_error_does_not_print_private_paths(tmp_path):
     assert "private-user" not in result.stderr
     assert "Traceback" not in result.stderr
     assert not (tmp_path / "out.json").exists()
+
+
+@pytest.mark.parametrize("value", [[], None, "private text"])
+def test_non_object_manifest_rejected_without_traceback(tmp_path, value):
+    import subprocess
+    import sys
+
+    source = tmp_path / "private-user.json"
+    source.write_text(json.dumps(value), encoding="utf-8")
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(Path(module.__file__)),
+            "--manifest",
+            str(source),
+            "--root",
+            str(tmp_path),
+            "--output",
+            str(tmp_path / "out.json"),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 1
+    assert "Traceback" not in result.stderr
+    assert "private-user" not in result.stderr and "private text" not in result.stderr
+    assert not (tmp_path / "out.json").exists()
+
+
+def test_truncated_wav_cannot_pass_with_matching_digest(corpus):
+    root, manifest = corpus
+    case = manifest["cases"][0]
+    path = root / case["audio"]
+    path.write_bytes(path.read_bytes()[:-20])
+    case["audio_sha256"] = module.digest(path)
+    with pytest.raises(ValueError, match="Truncated"):
+        module.prepare(manifest, root)
+
+
+def test_extreme_json_number_is_rejected_as_invalid_interval(corpus):
+    root, manifest = corpus
+    manifest["cases"][0]["evaluation_end"] = 10**400
+    with pytest.raises(ValueError, match="interval"):
+        module.prepare(manifest, root)

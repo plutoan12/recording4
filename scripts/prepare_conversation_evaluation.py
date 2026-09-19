@@ -47,10 +47,15 @@ def private_file(root, name):
 
 
 def number(value):
-    return type(value) in (int, float) and math.isfinite(value)
+    try:
+        return type(value) in (int, float) and math.isfinite(value)
+    except OverflowError:
+        return False
 
 
 def prepare(manifest, root):
+    if not isinstance(manifest, dict):
+        raise ValueError("Manifest must be an object")
     policy = manifest.get("policy")
     if (
         type(manifest.get("schema")) is not int
@@ -85,6 +90,12 @@ def prepare(manifest, root):
             duration = wav.getnframes() / wav.getframerate()
             if wav.getcomptype() != "NONE" or duration <= 0:
                 raise ValueError("Expected nonempty PCM WAV")
+            expected_bytes = wav.getnframes() * wav.getnchannels() * wav.getsampwidth()
+            actual_bytes = 0
+            while chunk := wav.readframes(65536):
+                actual_bytes += len(chunk)
+            if actual_bytes != expected_bytes:
+                raise ValueError("Truncated PCM payload")
         start, end = case["evaluation_start"], case["evaluation_end"]
         if not number(start) or not number(end) or not 0 <= start < end <= duration:
             raise ValueError("Invalid fixed evaluation interval")
