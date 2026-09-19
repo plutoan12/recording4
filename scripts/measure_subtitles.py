@@ -14,6 +14,9 @@ libass로 한 프레임을 그린 뒤 밝은 화소의 경계를 직접 찾습�
    제멋대로 다시 줄바꿈해서 우리 줄 규칙이 화면에서 깨집니다.
 2. 기본 줄 길이가 한 줄로 그려질 것. 두 줄이 되면 같은 문제입니다.
 3. 영어 줄 한도를 꽉 채운 줄도 여백 안에 들어갈 것.
+4. 우리가 끊은 줄이 화면에서 그대로 그려질 것. 한 줄이 넘치면 libass가 제
+   마음대로 다시 줄바꿈해서 두 줄이 세 줄이 됩니다. 폭만 재면 이건 안 보입니다.
+   줄을 세어야 압니다.
 
 **넘친 줄의 픽셀 값은 믿지 마세요.** 밝은 화소의 상자는 화면 가장자리에서
 멈추므로, 넘치면 글자 폭이 아니라 화면 폭이 나옵니다. 그래서 넘친 줄은
@@ -31,7 +34,14 @@ from pathlib import Path
 import numpy as np
 
 from pipeline.editing import Cue, EditSpec
-from pipeline.subtitles import DEFAULT_RULES, SubtitleRules, rules_for, text_width, wrap_text
+from pipeline.subtitles import (
+    DEFAULT_RULES,
+    SubtitleRules,
+    apply_rules,
+    rules_for,
+    text_width,
+    wrap_text,
+)
 from worker.rendering import ffmpeg_binary, write_subtitles
 
 # 배경(제한 범위 검정, Y=16)과 검은 외곽선을 빼고 글자만 남기는 문턱입니다.
@@ -56,14 +66,12 @@ ENGLISH_SAMPLE = "In March last year a colleague of the former minister was appo
 ALPHABET = "abcdefghijklmnopqrstuvwxyz"
 
 
-def measure(text: str, spec: EditSpec, rules: SubtitleRules) -> tuple[int, int] | str | None:
-    """글자가 그려진 픽셀 상자 (가로, 세로)를 돌려줍니다.
-
-    안 보이면 None, 화면 밖으로 넘쳐 잴 수 없으면 OVERFLOW입니다.
+def render_mask(spec: EditSpec, rules: SubtitleRules) -> np.ndarray | None:
+    """자막을 한 프레임에 그리고 글자 화소만 True인 배열을 돌려줍니다. 실패면 None.
 
     FFmpeg cropdetect는 레터박스용이라 행·열 평균으로 판정합니다. 세로 1920px
     중 자막 100px만 밝으면 열 평균이 문턱을 못 넘어 폭을 못 잽니다. 그래서
-    회색조 원본 프레임을 받아 밝은 화소의 경계를 직접 찾습니다.
+    회색조 원본 프레임을 받아 밝은 화소를 직접 봅니다.
     """
     with tempfile.TemporaryDirectory(prefix="r4-measure-") as directory:
         temp = Path(directory)
@@ -96,7 +104,17 @@ def measure(text: str, spec: EditSpec, rules: SubtitleRules) -> tuple[int, int] 
             print(f"  {line}")
         return None
     frame = np.frombuffer(done.stdout[:expected], dtype=np.uint8).reshape(spec.height, spec.width)
-    mask = frame > INK
+    return frame > INK
+
+
+def measure(spec: EditSpec, rules: SubtitleRules) -> tuple[int, int] | str | None:
+    """글자가 그려진 픽셀 상자 (가로, 세로)를 돌려줍니다.
+
+    안 보이면 None, 화면 밖으로 넘쳐 잴 수 없으면 OVERFLOW입니다.
+    """
+    mask = render_mask(spec, rules)
+    if mask is None:
+        return None
     rows = np.nonzero(mask.any(axis=1))[0]
     columns = np.nonzero(mask.any(axis=0))[0]
     if not rows.size or not columns.size:
@@ -108,6 +126,36 @@ def measure(text: str, spec: EditSpec, rules: SubtitleRules) -> tuple[int, int] 
         # 42자를 1068px이라고 적었는데, 그건 측정이 아니라 잘린 값이었습니다.
         return OVERFLOW
     return int(columns[-1] - columns[0] + 1), int(rows[-1] - rows[0] + 1)
+
+
+def drawn_lines(mask: np.ndarray) -> list[tuple[int, int]]:
+    """실제로 그려진 줄들의 (가로, 세로) 픽셀. 글자가 없는 행으로 끊어 셉니다.
+
+    폭만 재면 우리가 넣은 줄바꿈이 화면에서 지켜지는지 알 수 없습니다. 한 줄이
+    여백을 넘으면 libass가 제 마음대로 다시 줄바꿈해서 두 줄이 세 줄이 됩니다.
+    그러면 자막이 다른 자리에서 끊기고 화면 아래로 더 내려옵니다.
+
+    외곽선과 그림자 때문에 줄 사이가 붙으면 두 줄이 한 덩어리로 보일 수
+    있습니다. 그래서 **줄이 더 많이 그려진 경우만** 문제로 셉니다. 적게 나온
+    것은 세는 방법의 한계일 수 있으므로 적어만 둡니다.
+    """
+    ink = mask.any(axis=1)
+    bands: list[tuple[int, int]] = []
+    top: int | None = None
+    for index, lit in enumerate(ink):
+        if lit and top is None:
+            top = index
+        elif not lit and top is not None:
+            bands.append((top, index))
+            top = None
+    if top is not None:
+        bands.append((top, len(ink)))
+    found: list[tuple[int, int]] = []
+    for start, end in bands:
+        columns = np.nonzero(mask[start:end].any(axis=0))[0]
+        if columns.size:
+            found.append((int(columns[-1] - columns[0] + 1), int(end - start)))
+    return found
 
 
 def spec_for(text: str, font_size: int, width: int, height: int) -> EditSpec:
@@ -132,7 +180,7 @@ def table(header, counts, make, args, rules: SubtitleRules, usable: int) -> int:
     fits = 0
     for count in counts:
         text = make(count)
-        box = measure(text, spec_for(text, args.font_size, args.width, args.height), rules)
+        box = measure(spec_for(text, args.font_size, args.width, args.height), rules)
         if box is None:
             print(f"{count:>14} {'측정 실패':>12}")
             continue
@@ -169,12 +217,10 @@ def main() -> int:
 
     # 기본 규칙 그대로 그린 결과. 한 줄인지 두 줄인지 높이로 봅니다.
     print()
-    one = measure("가", spec_for("가", args.font_size, args.width, args.height), DEFAULT_RULES)
+    one = measure(spec_for("가", args.font_size, args.width, args.height), DEFAULT_RULES)
     full = "가" * DEFAULT_RULES.max_chars_per_line
-    filled = measure(full, spec_for(full, args.font_size, args.width, args.height), DEFAULT_RULES)
-    sample_box = measure(
-        SAMPLE, spec_for(SAMPLE, args.font_size, args.width, args.height), single_line
-    )
+    filled = measure(spec_for(full, args.font_size, args.width, args.height), DEFAULT_RULES)
+    sample_box = measure(spec_for(SAMPLE, args.font_size, args.width, args.height), single_line)
     if one is None or filled is None:
         print("자막이 그려지지 않았습니다. 글꼴과 FFmpeg subtitles 필터를 확인하세요.")
         return 1
@@ -197,13 +243,9 @@ def main() -> int:
     english_rules = rules_for("en")
     limit = int(english_rules.max_chars_per_line * 2)
     full_line = (ALPHABET * (limit // len(ALPHABET) + 1))[:limit]
-    english_box = measure(
-        full_line, spec_for(full_line, args.font_size, args.width, args.height), single_line
-    )
+    english_box = measure(spec_for(full_line, args.font_size, args.width, args.height), single_line)
     sentence = wrap_text(ENGLISH_SAMPLE, english_rules)[0]
-    sentence_box = measure(
-        sentence, spec_for(sentence, args.font_size, args.width, args.height), single_line
-    )
+    sentence_box = measure(spec_for(sentence, args.font_size, args.width, args.height), single_line)
     print(f"\n영어 한 줄 한도 {limit}자(폭 {english_rules.max_chars_per_line})")
     if english_box is None:
         print("  영어 자막이 그려지지 않았습니다.")
@@ -223,7 +265,39 @@ def main() -> int:
     )
     print(f"참고: 가장 넓은 글자 M만 반복하면 {worst_fits}자까지 들어갑니다.")
 
-    problems = []
+    problems: list[str] = []
+
+    # 여기까지는 "한 줄이 여백 안에 들어가는가"만 봤습니다. 정작 걱정하던 것은
+    # 우리가 끊은 줄이 화면에서 그대로 그려지는가입니다. 한 줄이 넘치면 libass가
+    # 제 마음대로 다시 줄바꿈해서 두 줄이 세 줄이 되고, 자막이 다른 자리에서
+    # 끊기며 화면 아래로 더 내려옵니다. 줄을 세어 봐야 압니다.
+    print("\n우리가 끊은 줄이 화면에서 그대로 그려지는가")
+    for label, text, rules in (
+        ("한글 한 줄", "다람쥐 헌 쳇바퀴에", DEFAULT_RULES),
+        ("한글 두 줄", "다람쥐 헌 쳇바퀴에 타고파 오늘도 즐겁게", DEFAULT_RULES),
+        ("영어 두 줄", ENGLISH_SAMPLE, english_rules),
+    ):
+        shaped = apply_rules([Cue(start=0, end=5, text=text)], rules)
+        wanted = shaped[0].text.split("\n")
+        mask = render_mask(spec_for(text, args.font_size, args.width, args.height), rules)
+        if mask is None:
+            problems.append(f"{label}: 자막이 그려지지 않았습니다.")
+            continue
+        found = drawn_lines(mask)
+        sizes = ", ".join(f"{w}x{h}" for w, h in found)
+        print(f"  {label}: 규칙 {len(wanted)}줄 / 화면 {len(found)}줄  [{sizes}]")
+        for line in wanted:
+            print(f"      '{line}' (폭 {text_width(line):.1f})")
+        if len(found) > len(wanted):
+            problems.append(
+                f"{label}: 규칙은 {len(wanted)}줄인데 화면에는 {len(found)}줄이 그려졌습니다. "
+                "libass가 다시 줄바꿈했습니다. 줄 길이를 줄이거나 글자 크기를 낮추세요."
+            )
+        elif len(found) < len(wanted):
+            # 외곽선·그림자로 줄 사이가 붙으면 한 덩어리로 보입니다. 세는
+            # 방법의 한계라 문제로 세지 않고 적어만 둡니다.
+            print("      (줄 사이가 붙어 보입니다. 외곽선 때문일 수 있어 문제로 세지 않습니다.)")
+
     if english_box is OVERFLOW or english_box[0] > usable:
         measured = OVERFLOW if english_box is OVERFLOW else f"{english_box[0]}px"
         problems.append(
