@@ -63,6 +63,9 @@ class Settings(BaseSettings):
     translate_usd_per_1k_chars: Decimal | None = None
     tts_usd_per_1k_chars: Decimal | None = None
     lipsync_usd_per_second: Decimal | None = None
+    # 하이라이트 추천(Claude). 실제 청구는 토큰 단위인데 여기는 글자 수로
+    # 잡으므로 **넉넉한 상한**을 적습니다. 비어 있으면 추천이 돌지 않습니다.
+    highlight_usd_per_1k_chars: Decimal | None = None
     youtube_upload_enabled: bool = False
     # 선택 가능한 자막 트랙 업로드. 영상에는 자막이 이미 구워져 있으므로 켜면
     # 시청자 화면에 자막이 두 벌 보일 수 있습니다. 확인한 뒤 켜세요.

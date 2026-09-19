@@ -462,7 +462,7 @@ class MediaTask(Base, TimestampMixin):
             "state in ('pending','running','succeeded','failed')", name="ck_media_task_state"
         ),
         CheckConstraint(
-            "kind in ('render','transcribe','scenes','align','diarize')",
+            "kind in ('render','transcribe','scenes','align','diarize','faces','highlights')",
             name="ck_media_task_kind",
         ),
     )

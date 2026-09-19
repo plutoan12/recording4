@@ -265,12 +265,47 @@ def subtitle_check(asset_id: uuid.UUID, user: CurrentUser, session: SessionDep):
 
 @router.get("/source-assets/{asset_id}/suggestions")
 def suggestions(asset_id: uuid.UUID, user: CurrentUser, session: SessionDep):
+    """공짜 규칙 추천. 문장 경계로 자를 뿐 무엇이 재미있는지는 모릅니다.
+
+    LLM에게 물어보는 쪽은 유료라 큐를 거칩니다(`POST .../highlights`).
+    """
     asset = asset_for_edit(session, asset_id)
     cues = [
         Cue(start=float(s.start_seconds), end=float(s.end_seconds), text=s.text)
         for s in transcript(session, asset_id)
     ]
     return suggest_clips(cues, duration=float(asset.duration_seconds))
+
+
+@router.post("/source-assets/{asset_id}/highlights", status_code=202)
+def highlights(asset_id: uuid.UUID, user: CurrentUser, session: SessionDep):
+    """LLM에게 숏폼 후보 구간을 물어봅니다. **제안이고, 유료입니다.**
+
+    여기서는 부르지 않습니다. 유료 호출은 예산을 잡은 뒤 워커가 합니다. 결과는
+    이 작업의 `result`에 들어옵니다. 자를지는 사람이 정합니다.
+    """
+    asset_for_edit(session, asset_id)
+    if not transcript(session, asset_id):
+        raise HTTPException(409, "대본이 없습니다. 먼저 전사하거나 대본을 올리세요.")
+    existing = session.scalar(
+        select(MediaTask).where(
+            MediaTask.source_asset_id == asset_id,
+            MediaTask.kind == "highlights",
+            MediaTask.state.in_(["pending", "running"]),
+        )
+    )
+    if existing:
+        return task_response(existing)
+    task = MediaTask(source_asset_id=asset_id, kind="highlights", settings={})
+    session.add(task)
+    session.flush()
+    enqueue(
+        session,
+        topic="media.highlights",
+        payload={"task_id": str(task.id)},
+        dedupe_key=f"media.highlights:{task.id}:{task.attempt}",
+    )
+    return task_response(task)
 
 
 class ClipRequest(EditSpec):

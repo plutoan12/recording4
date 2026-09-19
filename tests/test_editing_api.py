@@ -238,3 +238,46 @@ def test_broken_rules_record_falls_back_instead_of_failing() -> None:
 
     rules, source = rules_from_record({"max_chars_per_line": 9})
     assert source == "rendered" and rules.max_chars_per_line == 9
+
+
+def test_every_analysis_kind_the_api_accepts_can_actually_be_stored(client, auth_headers, asset):
+    """**이 시험이 없어서 faces가 깨진 채로 나갔습니다.**
+
+    API는 받는데 DB 제약이 거절했습니다(실측: CHECK constraint failed:
+    ck_media_task_kind). 받는 종류와 저장할 수 있는 종류를 여기서 묶어 둡니다.
+    """
+    import typing
+
+    from adminapi.routers.editing import AnalysisRequest
+
+    kinds = typing.get_args(AnalysisRequest.model_fields["kind"].annotation)
+    assert "faces" in kinds
+    for kind in kinds:
+        made = client.post(
+            f"/source-assets/{asset.id}/analyze", headers=auth_headers, json={"kind": kind}
+        )
+        assert made.status_code == 202, f"{kind}: {made.text}"
+
+
+def test_highlights_needs_a_transcript_and_is_queued_not_called(
+    client, auth_headers, asset, session
+):
+    """유료 호출은 여기서 하지 않습니다. 예산을 잡은 뒤 워커가 합니다."""
+    from adminapi.models import MediaTask, OutboxMessage
+
+    where = f"/source-assets/{asset.id}/highlights"
+    assert client.post(where, headers=auth_headers).status_code == 409
+
+    path = f"/source-assets/{asset.id}/transcript"
+    cues = [{"start": i * 6, "end": i * 6 + 6, "text": f"{i}번째"} for i in range(8)]
+    client.put(path, headers=auth_headers, json={"cues": cues})
+
+    made = client.post(where, headers=auth_headers)
+    assert made.status_code == 202 and made.json()["state"] == "pending"
+    # 같은 요청을 두 번 눌러도 유료 호출이 두 번 생기지 않습니다.
+    assert client.post(where, headers=auth_headers).json()["id"] == made.json()["id"]
+
+    task = session.get(MediaTask, uuid.UUID(made.json()["id"]))
+    assert task.kind == "highlights"
+    topics = [m.topic for m in session.scalars(select(OutboxMessage))]
+    assert "media.highlights" in topics

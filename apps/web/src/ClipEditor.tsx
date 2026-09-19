@@ -8,7 +8,8 @@ type Suggestion = { start: number; end: number; title: string; reason: string }
 type Violation = { index: number; kind: string; detail: string }
 type Task = { id: string; source_asset_id: string; clip_edit_id: string | null; kind: string; state: string; error: string | null;
   result: { artifact_id?: string; scenes?: {start: number; end: number}[];
-    focus?: {focus_x: number; samples: number; found: number; reason: string} } }
+    focus?: {focus_x: number; samples: number; found: number; reason: string};
+    clips?: Suggestion[]; rejected?: {first: number; last: number; why: string}[] } }
 
 export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWorkflow: (draft:WorkflowDraft)=>void }) {
   const [assetId, setAssetId] = useState('')
@@ -141,6 +142,18 @@ export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWo
           setSuggestions(await request<Suggestion[]>(`/source-assets/${assetId}/suggestions`))
           setMessage('저장된 대본의 문장 경계로 후보를 만들었습니다. AI 인기도 예측은 아닙니다.')
         })}>구간 후보 찾기</button>
+        <button disabled={busy} onClick={() => void act(async () => {
+          await request(`/source-assets/${assetId}/highlights`, {method:'POST'})
+          setMessage('AI에게 구간을 물어봤습니다. 유료 호출이고 결과는 아래 목록에 나옵니다. 끝나면 불러오기를 누르세요.'); await refresh()
+        })}>AI 구간 추천 요청 (유료)</button>
+        <button disabled={busy} onClick={() => void act(async () => {
+          const done = tasks.filter(t => t.source_asset_id === assetId && t.kind === 'highlights' && t.state === 'succeeded')
+          const latest = done[done.length - 1]
+          if (!latest?.result.clips) { setMessage('끝난 AI 추천이 없습니다. 먼저 요청하고 기다리세요.'); return }
+          setSuggestions(latest.result.clips)
+          const dropped = latest.result.rejected?.length ?? 0
+          setMessage(`AI 추천 ${latest.result.clips.length}건입니다. 버린 후보 ${dropped}건(대본에 없는 번호·겹침·길이). 자를지는 직접 정하세요.`)
+        })}>AI 추천 결과 불러오기</button>
         <button disabled={busy || end <= start || end-start > 180} onClick={() => void act(async () => {
           await request('/clips', {method:'POST', body: JSON.stringify({source_asset_id:assetId, start, end, mode, focus_x:focus, title, cues:captions})})
           setMessage('새 편집본의 렌더를 요청했습니다.'); await refresh()
