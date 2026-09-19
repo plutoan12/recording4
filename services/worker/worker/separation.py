@@ -89,12 +89,38 @@ def background_sources(names: list[str]) -> list[int]:
     return found
 
 
+def voice_sources(names: list[str]) -> list[int]:
+    """목소리 갈래의 번호. 전사 앞에 소음을 걷어낼 때 씁니다.
+
+    **두 사람이 겹쳐 말하는 것은 갈라지지 않습니다.** 둘 다 목소리라 같은
+    갈래에 들어옵니다. 이 함수가 돕는 것은 음악·소음이 깔린 경우뿐입니다.
+    """
+    found = [index for index, name in enumerate(names) if name == "vocals"]
+    if not found:
+        raise MissingDependency(f"분리 결과에 목소리 갈래가 없습니다: {names}")
+    return found
+
+
+def separate_voice(source: Path, output: Path, *, device: str = "cpu") -> Separated:
+    """원본에서 목소리만 남겨 `output`(WAV)에 씁니다. 전사 앞단용입니다.
+
+    쓸지 말지는 재 보고 정합니다(`scripts/verify_robust.py --denoise`). 분리는
+    소리를 건드리므로 깨끗한 음성에서는 오히려 나빠질 수 있습니다.
+    """
+    return _separate(source, output, voice_sources, device=device)
+
+
 def separate_background(source: Path, output: Path, *, device: str = "cpu") -> Separated:
     """원본에서 목소리를 빼고 나머지를 `output`(WAV)에 씁니다.
 
     느립니다. CPU에서 1분짜리 소리를 나누는 데 수십 초가 걸립니다. 그래서
     설정으로 켜야만 돕니다(`R4_BACKGROUND_AUDIO_ENABLED`).
     """
+    return _separate(source, output, background_sources, device=device)
+
+
+def _separate(source: Path, output: Path, pick, *, device: str = "cpu") -> Separated:  # noqa: ANN001
+    """고른 갈래만 더해 씁니다. `pick`이 갈래 이름 목록에서 번호를 고릅니다."""
     import torch
     import torchaudio
 
@@ -110,13 +136,13 @@ def separate_background(source: Path, output: Path, *, device: str = "cpu") -> S
     elif wave.shape[0] > 2:
         wave = wave[:2]
 
-    keep = background_sources(list(model.sources))
+    keep = pick(list(model.sources))
     mixed = torch.zeros_like(wave)
     counts = torch.zeros(wave.shape[1])
     with torch.no_grad():
         for start, end in chunk_bounds(wave.shape[1], rate):
             piece = wave[:, start:end].to(device)
-            # 모델은 (묶음, 갈래, 소리)로 돌려줍니다. 목소리만 빼고 더합니다.
+            # 모델은 (묶음, 갈래, 소리)로 돌려줍니다. 고른 갈래만 더합니다.
             found = model(piece.unsqueeze(0))[0]
             part = sum(found[index] for index in keep).cpu()
             mixed[:, start:end] += part

@@ -62,3 +62,33 @@ def worse(baseline: float, measured: float) -> float:
     비율로 나누지 않습니다. 원음이 0%에 가까우면 나눗셈이 무한대로 튑니다.
     """
     return measured - baseline
+
+
+# 2026-09-19 CI 실측(whisper small, zeroth-korean 낭독 3문장). **품질 목표가
+# 아니라 회귀 감시용**입니다. 조건마다 값이 크게 달라 하나의 상한으로는 재지
+# 못합니다. 겹말 0dB의 116%는 원문보다 많은 글자를 뱉었다는 뜻입니다. 끼어든
+# 사람의 말을 받아쓰고 있습니다.
+MEASURED_CER = {
+    "clean": 0.104,
+    "noise20": 0.112,
+    "noise10": 0.127,
+    "noise5": 0.172,
+    "noise0": 0.231,
+    "speech10": 0.291,
+    "speech5": 0.925,
+    "speech0": 1.164,
+}
+# 실측에 얹는 여유(백분율 포인트). 표본이 세 문장뿐이라 데이터셋 행이 바뀌면
+# 값이 움직입니다. 비율로 곱하면 무너진 조건에서 상한이 무의미해집니다
+# (116%의 두 배는 232%입니다). 모델이나 언어 설정이 어긋나는 수준의 회귀는
+# 이 선을 훌쩍 넘습니다.
+HEADROOM = 0.10
+
+
+def limit_for(name: str) -> float | None:
+    """이 조건의 회귀 감시 상한. 잰 적 없는 조건은 None입니다.
+
+    재 보지 않은 조건에 상한을 지어내지 않습니다.
+    """
+    measured = MEASURED_CER.get(name)
+    return None if measured is None else measured + HEADROOM

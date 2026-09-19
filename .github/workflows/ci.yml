@@ -367,7 +367,8 @@ jobs:
       # 전사 품질은 깨끗한 낭독 음성으로만 쟀습니다. 실제 영상에는 소음이 깔리고
       # 사람들이 말을 겹쳐 합니다. 거기서 몇 점인지 모르면 "정확도를 올렸다"고
       # 말할 수 없습니다. --compare는 후보 손잡이로 한 번 더 재서 견줍니다.
-      # **첫 실측이라 한계값을 두지 않습니다.** 숫자를 보고 다음 변경에서 채웁니다.
+      # 한계는 2026-09-19 실측 + 10%p입니다(pipeline.noise.MEASURED_CER).
+      # --denoise는 목소리만 분리한 뒤 전사해 견줍니다. 느립니다.
       - name: 소음·겹말 전사 검증
         if: |
           !cancelled() && (
@@ -378,7 +379,7 @@ jobs:
           mkdir -p "$RUNNER_TEMP/verify"
           docker run --rm -v /tmp/human-sample:/audio -v "$PWD/scripts:/work:ro" \
             --entrypoint python recording4-worker:ci /work/verify_robust.py \
-            --directory /audio --model small --compare \
+            --directory /audio --model small --compare --denoise \
             2>&1 | tee -a "$RUNNER_TEMP/verify/robust.log"
 
       - name: 배경음 분리 검증

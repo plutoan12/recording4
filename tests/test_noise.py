@@ -108,3 +108,27 @@ def test_the_mix_really_lands_on_the_requested_snr() -> None:
         # (normalize=0이라 대상 음량이 그대로입니다).
         together = mixed(speech, noise, gain, work / "m.wav")
         assert loud_speech <= loudness(together) <= loud_speech + 1.5
+
+
+def test_the_limits_come_from_a_real_measurement() -> None:
+    """지어낸 선은 통과하는 것 말고 아무 뜻이 없습니다. 실측에서 옵니다."""
+    from pipeline.noise import HEADROOM, MEASURED_CER, limit_for
+
+    for row in conditions(with_speech=True):
+        assert row.name in MEASURED_CER, f"{row.name}을 재지 않았습니다."
+        assert limit_for(row.name) == pytest.approx(MEASURED_CER[row.name] + HEADROOM)
+
+
+def test_an_unmeasured_condition_gets_no_invented_limit() -> None:
+    from pipeline.noise import limit_for
+
+    assert limit_for("noise99") is None
+
+
+def test_the_limits_get_harder_as_the_condition_gets_harder() -> None:
+    """쉬운 조건의 상한이 어려운 조건보다 높으면 순서가 뒤집힌 것입니다."""
+    from pipeline.noise import MEASURED_CER
+
+    order = ["clean", "noise20", "noise10", "noise5", "noise0", "speech10", "speech5", "speech0"]
+    values = [MEASURED_CER[name] for name in order]
+    assert values == sorted(values)

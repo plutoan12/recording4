@@ -32,7 +32,7 @@ from pathlib import Path
 
 from verify_transcribe import cer, squeeze
 
-from pipeline.noise import Condition, conditions, gain_for_snr, worse
+from pipeline.noise import Condition, conditions, gain_for_snr, limit_for, worse
 from worker.analysis import transcribe
 
 # 재 볼 후보 손잡이. 소음에서 휘파람처럼 같은 말을 되풀이하는 것은 앞 문장을
@@ -129,9 +129,14 @@ def main() -> int:
     parser.add_argument(
         "--compare", action="store_true", help="후보 손잡이로 한 번 더 재서 견줍니다."
     )
-    # 첫 실측 전에는 한계를 두지 않습니다. 재 보지도 않고 정한 선은 통과하는 것
-    # 말고는 아무 뜻이 없습니다. 숫자를 보고 다음 변경에서 채웁니다.
-    parser.add_argument("--max-cer", type=float, default=None, help="조건별 CER 상한")
+    parser.add_argument(
+        "--denoise",
+        action="store_true",
+        help="목소리만 분리(Demucs)한 뒤 전사해 한 번 더 견줍니다. 느립니다.",
+    )
+    # 조건마다 상한이 다릅니다(pipeline.noise.MEASURED_CER, 실측 + 10%p).
+    # 이 값을 주면 모든 조건에 같은 상한을 씁니다.
+    parser.add_argument("--max-cer", type=float, default=None, help="모든 조건에 쓸 CER 상한")
     args = parser.parse_args()
 
     directory = args.directory
@@ -148,10 +153,14 @@ def main() -> int:
     else:
         print("**겹말은 재지 않습니다.** interference.wav가 없습니다.")
 
-    settings = [("지금 설정", None)]
+    # (이름, 손잡이, 분리할지)
+    settings: list[tuple[str, dict | None, bool]] = [("지금 설정", None, False)]
     if args.compare:
-        settings.append(("후보", CANDIDATE))
+        settings.append(("손잡이", CANDIDATE, False))
         print(f"후보 손잡이: {CANDIDATE}")
+    if args.denoise:
+        settings.append(("분리 후", None, True))
+        print("후보: 목소리만 분리한 뒤 전사 (겹말은 갈라지지 않습니다)")
 
     rows: list[tuple[Condition, dict[str, float]]] = []
     problems: list[str] = []
@@ -160,9 +169,19 @@ def main() -> int:
         for condition in conditions(with_speech=has_speech):
             audio = make(condition, sample, interference if has_speech else None, work)
             scores: dict[str, float] = {}
-            for label, tuning in settings:
+            for label, tuning, denoise in settings:
+                heard_from = audio
+                if denoise:
+                    from worker.separation import separate_voice
+
+                    heard_from = separate_voice(audio, work / f"{condition.name}-voice.wav")
+                    heard_from = heard_from.background  # 고른 갈래가 담긴 파일입니다.
                 cues = transcribe(
-                    audio, model=args.model, language=args.language, device="cpu", tuning=tuning
+                    heard_from,
+                    model=args.model,
+                    language=args.language,
+                    device="cpu",
+                    tuning=tuning,
                 )
                 heard = " ".join(cue.text for cue in cues)
                 scores[label] = cer(reference, heard)
@@ -175,25 +194,25 @@ def main() -> int:
 
     baseline = rows[0][1]
     print("\n조건별 글자 오류율")
-    header = "  {:<16}".format("조건") + "".join(f"{label:>12}" for label, _ in settings)
+    header = "  {:<16}".format("조건") + "".join(f"{label:>12}" for label, _, _ in settings)
     print(header + f"{'원음 대비':>12}")
     for condition, scores in rows:
         line = f"  {condition.label:<16}"
-        line += "".join(f"{scores[label]:>11.1%}" for label, _ in settings)
+        line += "".join(f"{scores[label]:>11.1%}" for label, _, _ in settings)
         first = settings[0][0]
         line += f"{worse(baseline[first], scores[first]):>+11.1%}"
         print(line)
-        if args.max_cer is not None and scores[first] > args.max_cer:
+        limit = args.max_cer if args.max_cer is not None else limit_for(condition.name)
+        if limit is not None and scores[first] > limit:
             problems.append(
-                f"{condition.label}에서 CER {scores[first]:.1%}가 "
-                f"한계 {args.max_cer:.0%}를 넘습니다."
+                f"{condition.label}에서 CER {scores[first]:.1%}가 " f"한계 {limit:.1%}를 넘습니다."
             )
 
-    if args.compare:
-        print("\n후보 손잡이가 조건마다 몇 점 바꿨는가 (음수가 좋아진 것)")
+    for label, _, _ in settings[1:]:
+        print(f"\n'{label}'가 조건마다 몇 점 바꿨는가 (음수가 좋아진 것)")
         for condition, scores in rows:
-            change = scores["후보"] - scores["지금 설정"]
-            print(f"  {condition.label:<16}{change:>+11.1%}")
+            print(f"  {condition.label:<16}{scores[label] - scores['지금 설정']:>+11.1%}")
+    if len(settings) > 1:
         print("\n**전체가 고르게 좋아질 때만 기본값을 바꿉니다.** 한 조건만 좋아진 것은")
         print("표본 하나에서 나온 우연일 수 있습니다.")
 
