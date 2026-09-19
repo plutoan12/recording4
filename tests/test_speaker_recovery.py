@@ -48,7 +48,9 @@ def test_recovery_cannot_use_different_text_of_same_length():
     wrong = review_speakers(
         [Cue(start=0, end=1, text="two")], [SpeakerTurn(0, 1, "A")], [[WordTiming(0, 1, "two")]]
     )[0]
-    assert merge_agreed(base, wrong, wrong) == base
+    result = merge_agreed(base, wrong, wrong)
+    assert result["words"] == base["words"]
+    assert result["recovery_rejections"] == ["candidate_text_mismatch"]
 
 
 def test_reconsider_changes_only_overlapping_words_and_keeps_audit():
@@ -71,3 +73,21 @@ def test_reconsider_conflict_keeps_original_speaker():
     left = review_speakers([cue], [SpeakerTurn(0, 1, "B")], [[WordTiming(0, 1, "one")]])[0]
     right = review_speakers([cue], [SpeakerTurn(0, 1, "C")], [[WordTiming(0, 1, "one")]])[0]
     assert merge_agreed(base, left, right, reconsider=True)["words"][0]["speaker"] == "A"
+
+
+def test_reconsider_never_changes_resolved_word_with_placeholder_timing():
+    cue = Cue(start=0, end=1, text="one")
+    base = review_speakers([cue], [SpeakerTurn(0, 1, "A")], [[WordTiming(0, 1, "one")]])[0]
+    base["overlaps"] = [{"start": 0, "end": 1}]
+    base["words"][0]["timing_valid"] = False
+    other = review_speakers([cue], [SpeakerTurn(0, 1, "B")], [[WordTiming(0, 1, "one")]])[0]
+    assert merge_agreed(base, other, other, reconsider=True)["words"][0]["speaker"] == "A"
+
+
+def test_invalid_stage_does_not_silently_report_recovery():
+    import pytest
+
+    from worker.speaker_recovery import recover_speaker_reviews
+
+    with pytest.raises(ValueError, match="stage 4"):
+        recover_speaker_reviews(None, [], [], [], language="en", stage=3, reconsider=True)
