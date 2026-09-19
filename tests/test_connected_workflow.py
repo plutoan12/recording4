@@ -524,6 +524,8 @@ def test_subtitle_translation_budget_and_no_dubbing(
     def render(source, output, **kwargs):
         assert source.read_bytes() == b"source bytes"
         assert kwargs["cues"][0].text == "안녕하세요"
+        assert kwargs["cues"][0].original_text == "hello"
+        assert kwargs["subtitle_template"] == "bilingual"
         assert kwargs["cues"][0].start == 1
         output.write_bytes(b"final")
 
@@ -533,7 +535,11 @@ def test_subtitle_translation_budget_and_no_dubbing(
     monkeypatch.setattr(wf, "render_final", render)
     client.put("/workflow/monthly-budget", headers=auth_headers, json={"limit_usd": "10"})
     jid = create(
-        audio_mode="subtitles", source_language="en", target_language="ko", budget_usd=budget
+        audio_mode="subtitles",
+        source_language="en",
+        target_language="ko",
+        budget_usd=budget,
+        subtitle_template="bilingual",
     )
     assert wf.run_job(jid)["stage"] == "transcribe"
     result = wf.run_job(jid)

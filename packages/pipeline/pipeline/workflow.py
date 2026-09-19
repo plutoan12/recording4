@@ -8,12 +8,13 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from pipeline.editing import Cue, EditSpec
+from pipeline.editing import Cue, EditSpec, SubtitleTemplate
 
 
 class WorkflowOptions(BaseModel):
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
     audio_mode: Literal["original", "subtitles", "dub"] = "dub"
+    subtitle_template: SubtitleTemplate = "classic"
     source_language: str | None = Field(default=None, pattern=r"^[a-z]{2,3}$")
     voice_id: str | None = Field(default=None, max_length=128)
     lipsync: bool = False

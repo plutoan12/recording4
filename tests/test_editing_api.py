@@ -44,7 +44,7 @@ def test_range_validation_and_independent_clips(client, auth_headers, asset):
 
 def test_transcript_snapshots_and_suggestions(client, auth_headers, asset):
     path = f"/source-assets/{asset.id}/transcript"
-    cues = [{"start": 2, "end": 10, "text": "hello"}]
+    cues = [{"start": 2, "end": 10, "text": "hello", "speaker": "A"}]
     assert client.put(path, headers=auth_headers, json={"cues": cues}).json()["version"] == 1
     assert client.get(path, headers=auth_headers).json() == cues
     assert (

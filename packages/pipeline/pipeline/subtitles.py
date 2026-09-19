@@ -213,7 +213,9 @@ def _shape(cue: Cue, rules: SubtitleRules) -> list[Cue]:
 
     spans = _allocate(cue.start, duration, chunks, rules)
     return [
-        Cue(start=start, end=end, text="\n".join(wrap_text(chunk, rules)))
+        cue.model_copy(
+            update={"start": start, "end": end, "text": "\n".join(wrap_text(chunk, rules))}
+        )
         for chunk, (start, end) in zip(chunks, spans, strict=True)
     ]
 

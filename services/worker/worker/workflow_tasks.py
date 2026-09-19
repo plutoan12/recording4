@@ -237,7 +237,12 @@ def execute_step(name, options, data, asset, directory, stage_id, remote_id, sav
                 )
                 latest = rows[0].transcript_version if rows else None
                 cues = [
-                    Cue(start=float(r.start_seconds), end=float(r.end_seconds), text=r.text)
+                    Cue(
+                        start=float(r.start_seconds),
+                        end=float(r.end_seconds),
+                        text=r.text,
+                        speaker=r.speaker,
+                    )
                     for r in rows
                     if r.transcript_version == latest
                 ]
@@ -272,7 +277,10 @@ def execute_step(name, options, data, asset, directory, stage_id, remote_id, sav
             )
         return {
             "translated": data.get("translated", [])
-            + [{**cue, "text": text} for cue, text in zip(batch, texts, strict=True)]
+            + [
+                {**cue, "text": text, "original_text": cue["text"]}
+                for cue, text in zip(batch, texts, strict=True)
+            ]
         }
     if name.startswith("dub:"):
         cue = data["translated"][len(data.get("voices", []))]
@@ -354,6 +362,7 @@ def execute_step(name, options, data, asset, directory, stage_id, remote_id, sav
             width=asset.width or 1920,
             height=asset.height or 1080,
             rules=rules_from_settings(settings),
+            subtitle_template=options.subtitle_template,
         )
         with output.open("rb") as stream:
             checksum = hashlib.file_digest(stream, "sha256").hexdigest()

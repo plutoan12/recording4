@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useState } from 'react'
 import { request, type Job, type SourceAsset } from './api'
+import { SubtitleTemplatePicker } from './SubtitleTemplatePicker'
 import { PublicationForm } from './PublicationForm'
 
 export type WorkflowDraft = {source_asset_id:string; start:number; end:number; mode:string; focus_x:number;
-  title:string; cues:{start:number;end:number;text:string}[]}
-type Cue = {start:number;end:number;text:string}
+  title:string; subtitle_template?:string; cues:{start:number;end:number;text:string;speaker?:string|null;original_text?:string|null}[]}
+type Cue = {start:number;end:number;text:string;speaker?:string|null;original_text?:string|null}
 type Detail = {id:string;state:string;stage:string|null;reason:string|null;artifact_id:string|null;approval_id:string|null;
   options:Record<string,unknown>;cues:Cue[];translated:Cue[];
   stages:{id:string;name:string;state:string;attempt:number;uncertain:boolean;estimated_cost:string|null}[]}
@@ -15,6 +16,7 @@ type Configuration = {paid_enabled:boolean;translation_configured:boolean;speech
 export function WorkflowPanel({assets,jobs,draft,onCreated}:{assets:SourceAsset[];jobs:Job[];draft:WorkflowDraft|null;onCreated:()=>Promise<void>}) {
   const [asset,setAsset]=useState('')
   const [audio,setAudio]=useState('original')
+  const [template,setTemplate]=useState('classic')
   const [target,setTarget]=useState('en')
   const [voice,setVoice]=useState('')
   const [lip,setLip]=useState(false)
@@ -30,7 +32,7 @@ export function WorkflowPanel({assets,jobs,draft,onCreated}:{assets:SourceAsset[
   const [message,setMessage]=useState('')
   const [busy,setBusy]=useState(false)
   const [useClip,setUseClip]=useState(false)
-  useEffect(()=>{if(draft){setAsset(draft.source_asset_id);setUseClip(true)}},[draft])
+  useEffect(()=>{if(draft){setAsset(draft.source_asset_id);setTemplate(draft.subtitle_template??'classic');setUseClip(true)}},[draft])
   const refresh = useCallback(async ()=>{
     try {
       const [c,p,d] = await Promise.all([
@@ -44,7 +46,7 @@ export function WorkflowPanel({assets,jobs,draft,onCreated}:{assets:SourceAsset[
   async function act(action:()=>Promise<void>){setBusy(true);setMessage('');try{await action();await refresh();await onCreated()}catch(e){setMessage(e instanceof Error?e.message:'요청 실패')}finally{setBusy(false)}}
   async function create(event:React.FormEvent){event.preventDefault();await act(async()=>{
     const job = await request<Job>('/jobs',{method:'POST',body:JSON.stringify({source_asset_id:asset,target_language:target,
-      workflow:{audio_mode:audio,voice_id:voice||null,lipsync:audio==='dub'&&lip,budget_usd:budget,
+      workflow:{subtitle_template:template,audio_mode:audio,voice_id:voice||null,lipsync:audio==='dub'&&lip,budget_usd:budget,
         ...(useClip&&draft ? {clip:{start:draft.start,end:draft.end,mode:draft.mode,focus_x:draft.focus_x,title:draft.title},transcript:draft.cues} : {})}})})
     setSelected(job.id);setUrl('');setPlayed(false);setMessage('작업을 시작했습니다. 단계별 결과가 아래에 표시됩니다.')
   })}
@@ -56,6 +58,7 @@ export function WorkflowPanel({assets,jobs,draft,onCreated}:{assets:SourceAsset[
     <form onSubmit={create} className="editor-fields">
       <label>원본<select value={asset} onChange={e=>{setAsset(e.target.value);setUseClip(false)}} required><option value="">선택</option>{assets.filter(a=>a.upload_state==='verified').map(a=><option key={a.id} value={a.id}>{a.original_filename}</option>)}</select></label>
       <label>제작 방식<select value={audio} onChange={e=>{setAudio(e.target.value);if(e.target.value==='subtitles')setTarget('ko')}}><option value="original">원어 유지·자막 합성</option><option value="subtitles">자막만 번역·원래 음성 유지</option><option value="dub">번역·더빙</option></select></label>
+      <SubtitleTemplatePicker value={template} onChange={setTemplate} />
       <label>대상 언어<input value={target} onChange={e=>setTarget(e.target.value)} required /></label>
       {audio==='subtitles' && <p>선택 언어로 자막만 번역합니다. 원래 음성과 배경음을 유지하며 번역 비용만 발생합니다.</p>}
       {audio!=='original' && <label>작업 예산 상한 (USD)<input type="number" min="0" max="10000" step="0.0001" value={budget} onChange={e=>setBudget(e.target.value)} required /></label>}

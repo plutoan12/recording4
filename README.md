@@ -11,6 +11,7 @@
 | [프로젝트 범위](docs/PROJECT_BRIEF.md) | 목표, MVP, 가정, 미정 사항 |
 | [시스템 설계](docs/ARCHITECTURE.md) | 구성도, 데이터 모델, 작업 상태, 실패 처리 |
 | [롱폼 → 숏폼 편집](docs/SHORT_FORM_EDITING.md) | 하이라이트 추천, 구간·세로 화면·자막 편집, 숏폼별 승인 |
+| [자막 템플릿](docs/SUBTITLE_TEMPLATES.md) | 5개 스타일, 한국어 미리보기, 화자 색상, 원문·번역 병기 |
 | [기술 선택](docs/TECH_DECISIONS.md) | 추천 기술, 선택 이유, 공식 문서 |
 | [구현 계획](docs/IMPLEMENTATION_PLAN.md) | 단계별 작업과 완료 기준 |
 | [오픈소스 통합·실행](docs/OPEN_SOURCE_INTEGRATIONS.md) | 사용한 GitHub 프로젝트, 설치·실행, 검증 및 미구현 범위 |

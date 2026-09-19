@@ -6,12 +6,16 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+SubtitleTemplate = Literal["classic", "box", "shorts", "speaker", "bilingual"]
+
 
 class Cue(BaseModel):
     model_config = ConfigDict(allow_inf_nan=False, extra="forbid")
     start: float = Field(ge=0)
     end: float = Field(gt=0)
     text: str = Field(min_length=1, max_length=2000)
+    speaker: str | None = Field(default=None, max_length=64)
+    original_text: str | None = Field(default=None, max_length=2000)
 
     @model_validator(mode="after")
     def ordered(self):
@@ -30,6 +34,7 @@ class EditSpec(BaseModel):
     width: int = Field(default=1080, ge=180, le=2160, multiple_of=2)
     height: int = Field(default=1920, ge=320, le=3840, multiple_of=2)
     title: str = Field(default="", max_length=120)
+    subtitle_template: SubtitleTemplate = "classic"
     font_size: int = Field(default=64, ge=20, le=120)
     cues: list[Cue] = Field(default_factory=list, max_length=3000)
 
@@ -45,7 +50,7 @@ class EditSpec(BaseModel):
 def clip_cues(cues: list[Cue], start: float, end: float) -> list[Cue]:
     """Intersect source cues with clip bounds and rebase onto output timeline."""
     return [
-        Cue(start=max(c.start, start) - start, end=min(c.end, end) - start, text=c.text)
+        c.model_copy(update={"start": max(c.start, start) - start, "end": min(c.end, end) - start})
         for c in sorted(cues, key=lambda c: c.start)
         if c.end > start and c.start < end
     ]

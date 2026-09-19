@@ -8,10 +8,9 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-import pysubs2
-
-from pipeline.editing import EditSpec, clip_cues
-from pipeline.subtitles import DEFAULT_RULES, SubtitleRules, apply_rules
+from pipeline.editing import EditSpec
+from pipeline.subtitle_templates import build_ass, plain_ass  # noqa: F401 - public compatibility
+from pipeline.subtitles import DEFAULT_RULES, SubtitleRules
 
 
 class RenderError(RuntimeError):
@@ -25,45 +24,8 @@ def ffmpeg_binary() -> str:
     return binary
 
 
-def plain_ass(text: str) -> str:
-    # User subtitles are plain text, never ASS override instructions.
-    return text.replace("\\", "＼").replace("{", "｛").replace("}", "｝").replace("\n", r"\N")
-
-
 def write_subtitles(path: Path, spec: EditSpec, rules: SubtitleRules = DEFAULT_RULES) -> None:
-    subs = pysubs2.SSAFile()
-    subs.info.update(PlayResX=str(spec.width), PlayResY=str(spec.height), WrapStyle="0")
-    style = pysubs2.SSAStyle(
-        fontname="Noto Sans CJK KR",
-        fontsize=spec.font_size,
-        outline=3,
-        shadow=1,
-        marginl=50,
-        marginr=50,
-        marginv=int(spec.height * 0.13),
-    )
-    subs.styles["Default"] = style
-    # 줄바꿈과 분할을 여기서 확정합니다. libass 자동 줄바꿈에 맡기지 않습니다.
-    for cue in apply_rules(clip_cues(spec.cues, spec.start, spec.end), rules):
-        subs.append(
-            pysubs2.SSAEvent(
-                start=round(cue.start * 1000), end=round(cue.end * 1000), text=plain_ass(cue.text)
-            )
-        )
-    if spec.title:
-        title_style = style.copy()
-        title_style.alignment = pysubs2.Alignment.TOP_CENTER
-        title_style.marginv = int(spec.height * 0.08)
-        subs.styles["Title"] = title_style
-        subs.append(
-            pysubs2.SSAEvent(
-                start=0,
-                end=round((spec.end - spec.start) * 1000),
-                text=plain_ass(spec.title),
-                style="Title",
-            )
-        )
-    subs.save(str(path), encoding="utf-8")
+    path.write_text(build_ass(spec, rules), encoding="utf-8")
 
 
 def video_filter(spec: EditSpec) -> str:
