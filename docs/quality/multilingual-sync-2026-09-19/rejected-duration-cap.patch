@@ -1,0 +1,53 @@
+diff --git a/services/worker/worker/analysis.py b/services/worker/worker/analysis.py
+index afc783e..771bc4c 100644
+--- a/services/worker/worker/analysis.py
++++ b/services/worker/worker/analysis.py
+@@ -484,9 +484,20 @@ def sync_subtitles(
+         before, after = temp / "in.srt", temp / "out.srt"
+         before.write_text(dump_subtitles(cues), encoding="utf-8")
+         parser = make_parser()
++        # The parser truncates long cues before alignment unless this bound grows.
++        # Preserve their full speech mask as well as their final output duration.
+         report = _run_sync(
+             parser.parse_args(
+-                [str(source), "-i", str(before), "-o", str(after), *options.arguments()]
++                [
++                    str(source),
++                    "-i",
++                    str(before),
++                    "-o",
++                    str(after),
++                    "--max-subtitle-seconds",
++                    str(max(10, math.ceil(max(c.end - c.start for c in cues)))),
++                    *options.arguments(),
++                ]
+             )
+         )
+         if report.get("retval") or not report.get("sync_was_successful", True):
+diff --git a/tests/test_subtitle_sync.py b/tests/test_subtitle_sync.py
+index 96a86b3..be1a41b 100644
+--- a/tests/test_subtitle_sync.py
++++ b/tests/test_subtitle_sync.py
+@@ -132,3 +132,22 @@ def test_constant_sync_never_truncates_long_cue_duration(tmp_path, monkeypatch):
+     monkeypatch.setattr(analysis, "_run_sync", tool)
+     actual, _ = sync_subtitles(tmp_path / "audio.wav", original)
+     assert actual == [Cue(start=5, end=20, text=original[0].text)]
++
++
++def test_long_cues_reach_aligner_without_duration_cap(tmp_path, monkeypatch):
++    import worker.analysis as analysis
++
++    original = [Cue(start=3, end=24.125, text="long human utterance")]
++
++    def tool(args):
++        from ffsubsync.subtitle_parser import GenericSubtitleParser
++
++        parser = GenericSubtitleParser(fmt="srt", max_subtitle_seconds=args.max_subtitle_seconds)
++        parsed = parser.fit_transform(args.srtin[0])
++        assert list(parsed)[0].end.total_seconds() == pytest.approx(24.125)
++        Path(args.srtout).write_text(dump_subtitles(original))
++        return {"offset_seconds": 0, "sync_was_successful": True}
++
++    monkeypatch.setattr(analysis, "_run_sync", tool)
++    actual, _ = sync_subtitles(tmp_path / "audio.wav", original)
++    assert actual == original

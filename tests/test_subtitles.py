@@ -220,3 +220,18 @@ def test_a_setting_the_person_changed_wins_over_the_language_default() -> None:
 
     chosen = SubtitleRules(max_chars_per_line=10, max_cps=5.0)
     assert rules_for("en", chosen) == chosen
+
+
+def test_protect_numeric_units_and_japanese_endings():
+    for text, protected in [
+        ("明天凌晨2点，价格将从10美元变为12美元。", "12美元"),
+        ("明日の午前2時に、価格が10ドルから12ドルに変更されます。", "から"),
+        ("The price changes from $10 to $12 at 2 AM tomorrow.", "2 AM"),
+    ]:
+        assert protected in "\n".join(wrap_text(text))
+        assert "".join(wrap_text(text)).replace(" ", "") == text.replace(" ", "")
+
+
+def test_time_expression_survives_cue_splitting():
+    parts = split_text("The price will change tomorrow at 2 AM and remain unchanged afterwards", 3)
+    assert "2 AM" in "\n".join(parts)

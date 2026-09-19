@@ -1,0 +1,87 @@
+{
+  "samples": {
+    "en": [
+      "Do not turn off the power during the update.",
+      "Tomorrow at 2 a.m., the price changes from $10 to $12.",
+      "Click Save, then wait three seconds.",
+      "I thought the recording had stopped, but it was still running."
+    ],
+    "ko": [
+      "업데이트 중에는 전원을 끄지 마세요.",
+      "내일 새벽 2시에 가격이 10달러에서 12달러로 바뀝니다.",
+      "저장을 클릭한 다음 3초 동안 기다리세요.",
+      "녹화가 멈춘 줄 알았는데 계속 진행 중이었어요."
+    ],
+    "ja": [
+      "更新中は電源を切らないでください。",
+      "明日の午前2時に、価格が10ドルから12ドルに変わります。",
+      "保存をクリックしてから3秒待ってください。",
+      "録画が止まったと思っていましたが、まだ続いていました。"
+    ],
+    "zh": [
+      "更新期间请勿关闭电源。",
+      "明天凌晨2点，价格将从10美元变为12美元。",
+      "点击保存，然后等待3秒。",
+      "我以为录制已经停止了，但它仍在继续。"
+    ]
+  },
+  "estimated_usd": "0.0040",
+  "jobs": [
+    {
+      "source": "ko",
+      "target": "zh",
+      "state": "review_required",
+      "translations": [
+        {
+          "start": 0.0,
+          "end": 5.0,
+          "text": "更新过程中请勿断电。"
+        },
+        {
+          "start": 6.0,
+          "end": 11.0,
+          "text": "明天凌晨2点，价格将从10美元涨到12美元。"
+        },
+        {
+          "start": 12.0,
+          "end": 17.0,
+          "text": "点击“保存”并等待3秒钟。"
+        },
+        {
+          "start": 18.0,
+          "end": 23.0,
+          "text": "我以为录像已经停止了，但实际上还在继续。"
+        }
+      ],
+      "spent": "0.0021"
+    },
+    {
+      "source": "ja",
+      "target": "zh",
+      "state": "review_required",
+      "translations": [
+        {
+          "start": 0.0,
+          "end": 5.0,
+          "text": "更新过程中请勿断电。"
+        },
+        {
+          "start": 6.0,
+          "end": 11.0,
+          "text": "明天凌晨2点，价格将从10美元调整为12美元。"
+        },
+        {
+          "start": 12.0,
+          "end": 17.0,
+          "text": "点击“保存”后请等待3秒钟。"
+        },
+        {
+          "start": 18.0,
+          "end": 23.0,
+          "text": "我以为录像已经停止了，但它还在继续。"
+        }
+      ],
+      "spent": "0.0019"
+    }
+  ]
+}

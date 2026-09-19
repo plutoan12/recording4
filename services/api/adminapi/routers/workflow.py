@@ -27,8 +27,10 @@ from adminapi.models import (
 from adminapi.outbox import enqueue
 from adminapi.services.budget import held_total, release, settle
 from pipeline.states import JobState, PublicationState, StageRunState, assert_transition
+from pipeline.style_review import style_warnings
 from pipeline.subtitle_files import MEDIA_TYPES, SubtitleFormat
 from pipeline.time import as_utc
+from pipeline.workflow import WorkflowOptions, rendered_cues, rendered_language
 
 router = APIRouter(tags=["workflow"])
 
@@ -85,6 +87,12 @@ def detail(job_id: uuid.UUID, user: CurrentUser, session: SessionDep):
         "approval_id": str(approval.id) if approval else None,
         "cues": job.workflow_data.get("cues", []),
         "translated": job.workflow_data.get("translated", []),
+        "style_warnings": style_warnings(
+            rendered_cues(job.workflow_data),
+            rendered_language(
+                job.workflow_data, WorkflowOptions.model_validate(job.workflow_config)
+            ),
+        ),
         "stages": [
             {
                 "id": str(s.id),
