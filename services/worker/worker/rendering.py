@@ -42,7 +42,10 @@ def write_subtitles(path: Path, spec: EditSpec, rules: SubtitleRules = DEFAULT_R
     )
     subs.styles["Default"] = style
     # 줄바꿈과 분할을 여기서 확정합니다. libass 자동 줄바꿈에 맡기지 않습니다.
-    for cue in apply_rules(clip_cues(spec.cues, spec.start, spec.end), rules):
+    for cue in apply_rules(
+        clip_cues(spec.cues, spec.start, spec.end) if getattr(spec, "burn_subtitles", True) else [],
+        rules,
+    ):
         subs.append(
             pysubs2.SSAEvent(
                 start=round(cue.start * 1000), end=round(cue.end * 1000), text=plain_ass(cue.text)

@@ -395,7 +395,7 @@ def create_clip(payload: ClipRequest, user: CurrentUser, session: SessionDep):
     clip = ClipEdit(
         source_asset_id=asset.id,
         edit_version=version,
-        output_language=asset.source_language or "und",
+        output_language=payload.caption_language or asset.source_language or "und",
         created_by_id=user.id,
         output_width=spec.width,
         output_height=spec.height,

@@ -15,6 +15,7 @@
 | [구현 계획](docs/IMPLEMENTATION_PLAN.md) | 단계별 작업과 완료 기준 |
 | [오픈소스 통합·실행](docs/OPEN_SOURCE_INTEGRATIONS.md) | 사용한 GitHub 프로젝트, 설치·실행, 검증 및 미구현 범위 |
 | [단계별 연결·설정](docs/CONNECTED_WORKFLOW.md) | 화면 사용 순서, 서버 연결, 예산·재시도·게시 복구 |
+| [자막 표시 방식·실측](docs/CAPTION_DELIVERY.md) | 자막 굽기/YouTube 트랙 선택, 인코딩·싱크 실제 검증 |
 | [Mac 운영 자동화](docs/LOCAL_OPERATIONS.md) | 실제 서버 실행, 자동 시작·점검·백업·복원 검증 |
 | [개발 환경](docs/DEVELOPMENT.md) | 실행 방법, 저장소 구조, 검사 |
 | [협업 인수인계](docs/HANDOFF.md) | 현재 진행 상황, 다음 작업, 작업 기록 |

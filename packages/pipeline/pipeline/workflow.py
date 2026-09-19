@@ -14,6 +14,7 @@ from pipeline.editing import Cue, EditSpec
 class WorkflowOptions(BaseModel):
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
     audio_mode: Literal["original", "dub"] = "dub"
+    burn_subtitles: bool = True
     source_language: str | None = Field(default=None, pattern=r"^[a-z]{2,3}$")
     voice_id: str | None = Field(default=None, max_length=128)
     lipsync: bool = False

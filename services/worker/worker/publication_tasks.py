@@ -10,7 +10,7 @@ from pathlib import Path
 
 from sqlalchemy import or_, select, update
 
-from adminapi.artifact_subtitles import Missing, artifact_subtitles
+from adminapi.artifact_subtitles import Missing, artifact_burns_subtitles, artifact_subtitles
 from adminapi.config import get_settings
 from adminapi.db import get_session_factory
 from adminapi.models import Approval, Artifact, Publication, utcnow
@@ -46,27 +46,23 @@ def later(session, row, delay=30):
 
 
 def publish_captions(service, publication_id, video_id, artifact_id, save):
-    """선택 가능한 자막 트랙을 올립니다. 영상은 이미 올라가 있으므로 막지 않습니다.
+    """트랙 전용 결과물에만 업로드하고 실패하면 공개 예약을 멈춥니다.
 
-    영상에는 자막이 이미 구워져 있습니다. 트랙은 시청자가 켜고 끌 수 있는 별도
-    자막이며, 설정을 켠 경우에만 올립니다.
-
-    결과는 게시 기록(`checkpoint["captions"]`)에 남깁니다. 실패해도 게시를 실패로
-    만들지 않습니다. 이미 올라간 영상을 자막 때문에 되돌릴 수는 없습니다. 대신
-    무엇이 왜 안 됐는지 남겨 사람이 보고 판단하게 합니다.
-
-    기록은 지금 저장된 값을 다시 읽어 씁니다. 부르는 쪽이 들고 있는 사본에는
-    업로드 세션 값이 빠져 있어, 그대로 저장하면 영상 ID를 지웁니다.
+    구운 자막과 트랙을 중복 제공하지 않습니다. 기존 영상 ID·업로드 세션은
+    보존하므로 실패 후 재개해도 영상을 다시 올리지 않습니다.
     """
-    if not get_settings().youtube_captions_enabled:
-        return
     factory = get_session_factory()
     with factory() as session:
         row = session.get(Publication, publication_id)
         checkpoint = dict(row.checkpoint)
         if checkpoint.get("captions", {}).get("caption_id"):
             return
-        found = artifact_subtitles(session, session.get(Artifact, artifact_id), "srt")
+        artifact = session.get(Artifact, artifact_id)
+        if artifact_burns_subtitles(session, artifact):
+            return
+        if not get_settings().youtube_captions_enabled:
+            raise UploadNeedsReview("트랙 전용 결과물입니다. YouTube 자막 설정을 켜세요.")
+        found = artifact_subtitles(session, artifact, "srt")
     try:
         if isinstance(found, Missing):
             state = {"state": "skipped", "reason": found.reason}
@@ -93,6 +89,10 @@ def publish_captions(service, publication_id, video_id, artifact_id, save):
             "error": f"{type(exc).__name__}: 자막 트랙을 올리지 못했습니다.",
         }
     save({**checkpoint, "captions": state})
+    if not state.get("caption_id"):
+        raise UploadNeedsReview(
+            "자막 트랙을 확인하지 못해 공개 예약을 멈췄습니다. 게시 기록을 확인하세요."
+        )
 
 
 @celery_app.task(

@@ -99,3 +99,19 @@ def artifact_subtitles(
             return Missing("결과물의 작업을 찾을 수 없습니다.")
         return job_subtitles(job, subtitle_format)
     return Missing("결과물에 연결된 편집본이나 작업이 없습니다.")
+
+
+def artifact_burns_subtitles(session, artifact: Artifact) -> bool:
+    """Use the immutable render request; legacy artifacts have burned captions."""
+    if artifact.clip_edit_id:
+        task = session.scalar(
+            select(MediaTask)
+            .where(MediaTask.clip_edit_id == artifact.clip_edit_id, MediaTask.kind == "render")
+            .order_by(MediaTask.created_at.desc())
+            .limit(1)
+        )
+        return (task.settings or {}).get("burn_subtitles", True) if task else True
+    if artifact.job_id:
+        job = session.get(Job, artifact.job_id)
+        return (job.workflow_config or {}).get("burn_subtitles", True) if job else True
+    return True
