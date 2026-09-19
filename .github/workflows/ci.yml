@@ -259,6 +259,37 @@ jobs:
             --entrypoint python recording4-worker:ci \
             /work/verify_diarize.py --directory /audio --provider embedding --max-speakers 2
 
+      # 토큰이 없는 동안에도 "토큰이 잘못됐을 때" 경로는 확인할 수 있습니다.
+      # 사람이 실제로 막히는 지점이 여기입니다. 토큰을 넣어도 약관 동의가
+      # 빠지면 pyannote가 빈 모델을 돌려주고, 한참 뒤 엉뚱한 오류로 터집니다.
+      - name: 화자 분리 토큰 오류 안내 점검
+        if: |
+          env.HF_TOKEN == '' && (
+          contains(github.event.pull_request.labels.*.name, 'verify-align') ||
+          contains(github.event.head_commit.message, '[verify-align]'))
+        run: |
+          docker run --rm -v /tmp/two-speaker:/audio --entrypoint python \
+            recording4-worker:ci -c "
+          from pathlib import Path
+          from worker.analysis import MissingDependency, default_model_name, diarize
+          try:
+              from whisperx.diarize import DiarizationPipeline
+          except ImportError:
+              from whisperx import DiarizationPipeline
+          # 이 버전이 어떤 모델을 쓰는지 기록합니다. 약관 동의는 그 페이지에서 합니다.
+          print('이 버전이 쓰는 모델:', default_model_name(DiarizationPipeline))
+          try:
+              diarize(Path('/audio/sample.wav'), token='not-a-real-token', device='cpu')
+          except MissingDependency as exc:
+              text = str(exc)
+              assert 'speaker-diarization-3.1' in text, text
+              assert 'segmentation-3.0' in text, text
+              print('토큰이 잘못됐을 때 이렇게 안내합니다:')
+              print(text)
+          else:
+              raise SystemExit('잘못된 토큰으로 통과했습니다. 점검이 헛돕니다.')
+          "
+
       # pyannote는 게이트 모델이라 토큰이 있어야 돌아갑니다. 저장소 시크릿에
       # HF_TOKEN을 넣으면 이 단계가 켜집니다. 없으면 건너뜁니다.
       - name: 화자 분리 검증 (pyannote)
