@@ -7,7 +7,7 @@ type Cue = { start: number; end: number; text: string }
 type Suggestion = { start: number; end: number; title: string; reason: string }
 type Violation = { index: number; kind: string; detail: string }
 type Task = { id: string; source_asset_id: string; clip_edit_id: string | null; kind: string; state: string; error: string | null;
-  result: { artifact_id?: string; scenes?: {start: number; end: number}[]; sync?: {offset_seconds:number; framerate_scale:number; clamped:number} } }
+  result: { artifact_id?: string; scenes?: {start: number; end: number}[]; sync?: {offset_seconds:number; framerate_scale:number; vad:string; max_offset_seconds:number} } }
 
 export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWorkflow: (draft:WorkflowDraft)=>void }) {
   const [assetId, setAssetId] = useState('')
@@ -201,7 +201,7 @@ export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWo
       {t.kind} · {t.state} {t.error}
       {t.result.sync && <span> · {t.result.sync.offset_seconds >= 0 ? '뒤로' : '앞으로'} {Math.abs(t.result.sync.offset_seconds).toFixed(2)}초 옮김
         {t.result.sync.framerate_scale !== 1 && ` · 속도 ${t.result.sync.framerate_scale}배`}
-        {t.result.sync.clamped > 0 && ` · 0초로 잘린 자막 ${t.result.sync.clamped}개`}</span>}
+        {t.result.sync.vad && ` · 발화 검출 ${t.result.sync.vad}`}</span>}
       {t.result.scenes?.map((s,i) => <button key={i} onClick={() => {setStart(s.start);setEnd(Math.min(s.end,s.start+180))}}>{s.start.toFixed(1)}–{s.end.toFixed(1)}초</button>)}
       {t.state === 'failed' && <button disabled={busy} onClick={() => void act(async () => {
         await request(`/media-tasks/${t.id}/retry`, {method:'POST'}); await refresh()

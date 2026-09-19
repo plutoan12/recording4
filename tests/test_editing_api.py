@@ -379,9 +379,9 @@ def test_sync_saves_a_new_version_and_keeps_the_old_one(client, auth_headers, as
     monkeypatch.setattr(
         module,
         "sync_subtitles",
-        lambda source, cues: (
+        lambda source, cues, options=None: (
             [Cue(start=c.start + 2, end=c.end + 2, text=c.text) for c in cues],
-            {"offset_seconds": 2.0, "framerate_scale": 1.0, "clamped": 0},
+            {"offset_seconds": 2.0, "framerate_scale": 1.0, "vad": "", "max_offset_seconds": 10.0},
         ),
     )
     client.put(
@@ -393,7 +393,12 @@ def test_sync_saves_a_new_version_and_keeps_the_old_one(client, auth_headers, as
 
     result = module.run_media.run(created["id"])
     assert result["status"] == "succeeded"
-    assert result["sync"] == {"offset_seconds": 2.0, "framerate_scale": 1.0, "clamped": 0}
+    assert result["sync"] == {
+        "offset_seconds": 2.0,
+        "framerate_scale": 1.0,
+        "vad": "",
+        "max_offset_seconds": 10.0,
+    }
     assert result["transcript_version"] == 2
     assert client.get(f"/source-assets/{asset.id}/transcript", headers=auth_headers).json() == [
         {"start": 5.0, "end": 7.0, "text": "어긋난 자막"}

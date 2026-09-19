@@ -1061,3 +1061,34 @@ CI가 토큰 없이도 이 경로를 점검합니다(`화자 분리 토큰 오�
 ### 남은 작업
 
 - 싱크 보정 실측(`verify-align` 라벨 CI)과 자막 두 벌(구운 자막 + YouTube 트랙) 문제는 그대로입니다.
+
+
+## 자막 싱크 보정 설정 (2026-09-19)
+
+- 사용자 요청: 사람 목소리 싱크 실패(-23.25초)를 보고 **설정을 실제로 고쳐 보기**. 브랜치 `claude/subtitle-file-generation-38xjz4`(PR #19 병합 후 최신 main에서 재시작).
+- 담당 파일: `services/worker/worker/analysis.py`, `services/worker/worker/media_tasks.py`, `services/api/adminapi/config.py`, `scripts/verify_sync.py`, `apps/web/src/ClipEditor.tsx`, `.github/workflows/ci.yml`, `tests/{test_subtitle_sync,test_editing_api}.py`, `docs/{TECH_DECISIONS,HANDOFF}.md`.
+- 의존 작업: 없습니다. 새 의존성도 없습니다.
+
+### 구현한 것
+
+- `SyncOptions`(프레임률 맞추기·이동 상한·발화 검출기)를 만들고 설정(`R4_SYNC_*`)에서 받습니다. 지금까지는 ffsubsync 기본값을 그대로 썼습니다.
+- 기본값을 **프레임률 맞추기 끔 + 이동 상한 10초**로 바꿨습니다. 근거는 docs/TECH_DECISIONS.md의 측정표입니다.
+- **원본 시작 앞으로 밀어내는 보정을 거부합니다.** 전에는 그런 자막이 파일에서 사라져 "개수가 다르다"로만 보였습니다.
+- 쓰지 않는 코드를 지웠습니다. 음수 시각을 0초로 자르던 `clamped` 갈래는 **실행될 수 없었습니다.** `parse_subtitles`가 음수 시각 자막을 그 앞에서 이미 버립니다.
+- 모르는 발화 검출기 이름을 미리 막습니다. 그대로 넘기면 ffsubsync의 argparse가 워커 프로세스를 끝냅니다.
+- `verify_sync.py --sweep`: 설정별로 돌려 표로 찍습니다. 설정을 손으로 여러 번 돌려 고르지 않게 합니다. CI의 합성 음성 검증도 이 표를 함께 찍습니다.
+
+### 검증 결과
+
+- **실제 사람 목소리로 실패를 재현하고 고친 것을 확인했습니다.** 공개 음성(JFK 취임사 발췌)을 문장 3개, 8초 간격 37초로 만들어 +2.5초 밀었을 때: ffsubsync 기본값 **-25.030초**(거부), 프레임률만 끄고 60초 **-25.000초**(거부), 우리 새 기본값 **-2.500초 · 오차 0.000초**(통과). 보고된 -23.25초와 같은 실패입니다.
+- 말이 촘촘한 18초 음성에서 프레임률 맞추기가 **이미 맞는 자막을 0.013초 흔들었고** 끄면 0.000초였습니다.
+- **합성 음성(espeak)은 이 실패를 잡지 못합니다.** 같은 간격으로 벌려도 모든 설정이 통과합니다. CI의 합성 음성 검증은 회귀 감시일 뿐입니다.
+- `pytest -q`: **358 통과 / 2 skip**(SQLite). 거부 테스트는 막아 보고 실제로 실패하는 것을 확인했습니다(빈 테스트가 아닙니다).
+- `ruff check`·`ruff format --check`, `npm run typecheck`·`npm run build` 통과.
+
+### 남은 작업
+
+- **한국어 낭독 표본은 이 설정으로도 통과하지 못합니다.** 기록의 -3.91초(오차 1.41초)가 바로 이 설정에서 나온 값입니다. 여기서 한 일은 터무니없는 값을 막은 것이지 한국어 낭독에서 0.5초 안에 맞추게 만든 것이 아닙니다.
+- 다음 차례: 워커 이미지에서 `scripts/fetch_korean_speech.py --out /audio --count 3` 뒤 `scripts/verify_sync.py --directory /audio --offset 2.5 --sweep`. 표를 보고 발화 검출기를 정합니다(auditok가 오차 0.74초로 가장 가까웠다는 기록이 있으나 한 번 잰 값입니다).
+- 이 PR에 `verify-align` 라벨을 붙이면 CI가 합성 음성 표를 찍습니다. 사람 목소리 싱크는 아직 CI 단계가 없습니다. 지금 통과하지 못하므로 **통과 조건으로 걸지 않았습니다.**
+- **라벨 게이트가 지금까지 반쪽이었습니다.** 워크플로가 `on: pull_request`를 종류 없이 썼는데, 기본값은 `opened`·`synchronize`·`reopened`입니다. 즉 **라벨을 붙여도 CI가 돌지 않아** 라벨을 켜려면 의미 없는 커밋을 하나 더 밀어야 했습니다. `labeled`를 넣어 고쳤습니다.
