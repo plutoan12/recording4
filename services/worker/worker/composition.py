@@ -90,7 +90,9 @@ def mix_speech(paths: list[Path], cues: list[Cue], duration: float, output: Path
                 # atempo rounding at a boundary can leave <=20ms of trailing samples.
                 count = min(count, bound - start)
                 out.writeframes(speech.readframes(count))
-            aligned.append(Cue(start=start / RATE, end=(start + count) / RATE, text=cue.text))
+            aligned.append(
+                cue.model_copy(update={"start": start / RATE, "end": (start + count) / RATE})
+            )
             position = start + count
         silence(out, max(0, round(duration * RATE) - position))
 
@@ -139,6 +141,7 @@ def render_final(
     width: int = 1920,
     height: int = 1080,
     rules: SubtitleRules = DEFAULT_RULES,
+    subtitle_template: str = "classic",
 ) -> None:
     with tempfile.TemporaryDirectory(prefix="r4-final-") as directory:
         temp = Path(directory)
@@ -153,6 +156,7 @@ def render_final(
             start=0,
             end=duration,
             cues=cues,
+            subtitle_template=subtitle_template,
             title=clip.title if clip else "",
             font_size=clip.font_size if clip else max(20, height // 24),
         )

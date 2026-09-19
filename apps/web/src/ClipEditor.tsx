@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { request, type SourceAsset } from './api'
+import { SubtitleTemplatePicker } from './SubtitleTemplatePicker'
 import { PublicationForm } from './PublicationForm'
 import type { WorkflowDraft } from './WorkflowPanel'
 
-type Cue = { start: number; end: number; text: string }
+type Cue = { start: number; end: number; text: string; speaker?:string|null; original_text?:string|null }
 type Suggestion = { start: number; end: number; title: string; reason: string }
 type Violation = { index: number; kind: string; detail: string }
 type Task = { id: string; source_asset_id: string; kind: string; state: string; error: string | null;
@@ -16,6 +17,7 @@ export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWo
   const [end, setEnd] = useState(30)
   const [mode, setMode] = useState('pad')
   const [focus, setFocus] = useState(0.5)
+  const [template,setTemplate] = useState('classic')
   const [title, setTitle] = useState('')
   const [captions, setCaptions] = useState<Cue[]>([])
   const [suggestions, setSuggestions] = useState<Suggestion[]>([])
@@ -117,6 +119,7 @@ export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWo
       {captions.map((cue, index) => <div className="caption-row" key={index}>
         <label>시작(초)<input type="number" min="0" step="0.01" value={cue.start} onChange={e => updateCue(index,{start:Number(e.target.value)})} /></label>
         <label>종료(초)<input type="number" min="0" step="0.01" value={cue.end} onChange={e => updateCue(index,{end:Number(e.target.value)})} /></label>
+        <label>화자 ID<input maxLength={64} placeholder="예: A, B" value={cue.speaker??''} onChange={e=>updateCue(index,{speaker:e.target.value||null})} /></label>
         <label>자막 내용<textarea rows={2} maxLength={2000} value={cue.text} onChange={e => updateCue(index,{text:e.target.value})} /></label>
         <button onClick={() => setCaptions(current => current.filter((_,i) => i !== index))}>삭제</button>
       </div>)}
@@ -137,11 +140,12 @@ export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWo
           setMessage('저장된 대본의 문장 경계로 후보를 만들었습니다. AI 인기도 예측은 아닙니다.')
         })}>구간 후보 찾기</button>
         <button disabled={busy || end <= start || end-start > 180} onClick={() => void act(async () => {
-          await request('/clips', {method:'POST', body: JSON.stringify({source_asset_id:assetId, start, end, mode, focus_x:focus, title, cues:captions})})
+          await request('/clips', {method:'POST', body: JSON.stringify({source_asset_id:assetId, start, end, mode, focus_x:focus, title, subtitle_template:template, cues:captions})})
           setMessage('새 편집본의 렌더를 요청했습니다.'); await refresh()
         })}>숏폼 렌더</button>
       </div>
-      <button disabled={busy||end<=start||end-start>180} onClick={()=>{onWorkflow({source_asset_id:assetId,start,end,mode,focus_x:focus,title,cues:captions});setMessage('아래 단계별 제작 화면에 선택 구간을 전달했습니다.')}}>선택 구간을 번역·더빙 단계로 보내기</button>
+      <SubtitleTemplatePicker value={template} onChange={setTemplate} />
+      <button disabled={busy||end<=start||end-start>180} onClick={()=>{onWorkflow({source_asset_id:assetId,start,end,mode,focus_x:focus,title,subtitle_template:template,cues:captions});setMessage('아래 단계별 제작 화면에 선택 구간을 전달했습니다.')}}>선택 구간을 번역·더빙 단계로 보내기</button>
       {suggestions.map((s,i) => <button key={i} onClick={() => {setStart(s.start);setEnd(s.end);setTitle(s.title)}}>{s.start.toFixed(1)}–{s.end.toFixed(1)}초 · {s.title}</button>)}
     </>}
     {message && <p role="status">{message}</p>}

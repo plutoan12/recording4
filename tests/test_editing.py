@@ -9,7 +9,7 @@ from worker.rendering import plain_ass, write_subtitles
 
 def test_timeline_is_intersected_and_rebased():
     cues = [Cue(start=5, end=12, text="before"), Cue(start=18, end=25, text="after")]
-    assert [c.model_dump() for c in clip_cues(cues, 10, 20)] == [
+    assert [c.model_dump(exclude_none=True) for c in clip_cues(cues, 10, 20)] == [
         {"start": 0, "end": 2, "text": "before"},
         {"start": 8, "end": 10, "text": "after"},
     ]

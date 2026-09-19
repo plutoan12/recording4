@@ -111,7 +111,12 @@ class TranscriptRequest(BaseModel):
 def get_transcript(asset_id: uuid.UUID, user: CurrentUser, session: SessionDep):
     asset_for_edit(session, asset_id)
     return [
-        {"start": float(s.start_seconds), "end": float(s.end_seconds), "text": s.text}
+        {
+            "start": float(s.start_seconds),
+            "end": float(s.end_seconds),
+            "text": s.text,
+            **({"speaker": s.speaker} if s.speaker else {}),
+        }
         for s in transcript(session, asset_id)
     ]
 
@@ -132,6 +137,7 @@ def put_transcript(
                 start_seconds=c.start,
                 end_seconds=c.end,
                 text=c.text,
+                speaker=c.speaker,
                 transcript_version=version,
             )
             for c in payload.cues
