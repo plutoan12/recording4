@@ -178,3 +178,45 @@ def test_write_subtitles_applies_rules_to_the_ass_file(tmp_path) -> None:  # noq
     assert any(r"\N" in line for line in events)
     # libass 자동 줄바꿈에 맡기지 않으므로 원문이 통째로 들어가지 않습니다.
     assert "가나다 라마바 사아자 차카타 파하가 나다라 마바사 아자차" not in body
+
+
+def test_english_rules_use_the_measured_line_length() -> None:
+    """지침 줄당 42자는 가로 화면 기준입니다. 세로 숏폼에 들어가는지는 CI가
+    렌더해서 확인하고(scripts/measure_subtitles.py), 여기서는 그 값이 코드에
+    그대로 박혀 있는지만 봅니다.
+
+    한국어 숫자를 그대로 쓰면 영어 줄이 32자에서 잘리고 읽기 속도는 24자/초까지
+    봐줍니다. 그래서 언어별 값이 필요합니다."""
+    from pipeline.subtitles import rules_for, text_width
+
+    rules = rules_for("en")
+    assert text_width("M" * 38) == rules.max_chars_per_line
+    assert text_width("a" * 20) == rules.max_cps
+
+
+def test_korean_stays_on_the_korean_guideline() -> None:
+    from pipeline.subtitles import DEFAULT_RULES, rules_for
+
+    assert rules_for("ko") == DEFAULT_RULES
+    assert rules_for(None) == DEFAULT_RULES
+
+
+def test_a_region_tag_still_finds_the_language() -> None:
+    from pipeline.subtitles import rules_for
+
+    assert rules_for("en-US") == rules_for("en")
+
+
+def test_an_unknown_language_keeps_what_it_was_given() -> None:
+    """모르는 언어를 추측해서 바꾸지 않습니다."""
+    from pipeline.subtitles import DEFAULT_RULES, rules_for
+
+    assert rules_for("fr") == DEFAULT_RULES
+
+
+def test_a_setting_the_person_changed_wins_over_the_language_default() -> None:
+    """설정을 바꾼 것은 사람의 결정입니다. 언어가 덮어쓰지 않습니다."""
+    from pipeline.subtitles import SubtitleRules, rules_for
+
+    chosen = SubtitleRules(max_chars_per_line=10, max_cps=5.0)
+    assert rules_for("en", chosen) == chosen

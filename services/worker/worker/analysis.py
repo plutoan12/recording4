@@ -282,6 +282,12 @@ def default_model_name(factory) -> str | None:  # noqa: ANN001
     return None
 
 
+def repository_in(detail: str) -> str | None:
+    """실패한 이야기에 적힌 pyannote 저장소 이름. 없으면 None."""
+    found = re.search(r"pyannote/[A-Za-z0-9._-]+", detail)
+    return found.group(0) if found else None
+
+
 def gated_hint(detail: str, model: str | None = None) -> str:
     """모델을 못 불러왔을 때 사람이 고칠 수 있는 말로 바꿉니다.
 
@@ -289,8 +295,14 @@ def gated_hint(detail: str, model: str | None = None) -> str:
     한참 뒤에 엉뚱한 AttributeError로 터져서 무엇이 잘못됐는지 알 수 없습니다.
     토큰이 있어도 두 페이지 중 하나라도 동의가 빠지면 같은 증상이 나므로,
     둘 다 짚어 줍니다.
+
+    쓰는 모델 이름을 함수 서명에서 못 찾을 때가 있습니다(측정: 설치된
+    whisperx는 None입니다). 그럴 때는 실패한 이야기 자체에서 찾습니다.
+    거기에는 막힌 저장소 이름이 적혀 있습니다. 엉뚱한 페이지를 짚어 주면
+    사람이 동의를 다 해 놓고도 같은 오류를 다시 봅니다.
     """
     pages = list(GATED_PAGES)
+    model = model or repository_in(detail)
     if model and all(model not in page for page in pages):
         # 버전마다 기본 모델이 다릅니다. 쓰는 모델의 페이지에서 동의해야 합니다.
         pages.insert(0, f"https://huggingface.co/{model}")

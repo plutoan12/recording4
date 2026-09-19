@@ -57,6 +57,35 @@ class SubtitleRules:
 
 DEFAULT_RULES = SubtitleRules()
 
+# 언어별 기본값. 값은 모두 글자 폭 단위입니다(한글 1자, 라틴·공백 0.5자).
+#
+# 지침 숫자는 언어마다 다른데, 우리 기본값은 한국어 지침에서 왔습니다. 그대로
+# 영어 자막에 쓰면 줄당 16폭 = 영어 32자로 나와 지침(42자)보다 짧게 쪼개지고,
+# 초당 12폭 = 영어 24자로 나와 지침(20자)보다 느슨해집니다. 그래서 언어마다
+# 그 언어 지침을 폭 단위로 옮겨 둡니다.
+LANGUAGE_RULES: dict[str, SubtitleRules] = {
+    # Netflix 한국어 지침 I.2/I.15: 줄당 16자, 초당 12자.
+    "ko": DEFAULT_RULES,
+    # Netflix 영어 지침 줄당 42자는 가로 화면 기준입니다. 우리는 세로 숏폼
+    # (1080px)에 글자 크기 64를 쓰므로 CI가 렌더해서 확인합니다(한도만큼 채운
+    # 한 줄이 여백 980px 안에 들어가는지). 38자(폭 19)로 둡니다. 읽기 속도는
+    # 지침대로 초당 20자(폭 10.0)입니다.
+    "en": SubtitleRules(max_chars_per_line=19, max_cps=10.0),
+}
+
+
+def rules_for(language: str | None, base: SubtitleRules = DEFAULT_RULES) -> SubtitleRules:
+    """목표 언어에 맞는 규칙.
+
+    설정을 건드리지 않았으면 언어 기본값을 씁니다. 설정으로 바꿨다면 그
+    값이 사람의 결정이므로 언어와 무관하게 그대로 둡니다. 모르는 언어도
+    받은 값을 그대로 씁니다. 추측해서 바꾸지 않습니다.
+    """
+    if base != DEFAULT_RULES or not language:
+        return base
+    return LANGUAGE_RULES.get(language.split("-")[0].lower(), base)
+
+
 Kind = Literal["cps", "lines", "duration", "overlap"]
 
 

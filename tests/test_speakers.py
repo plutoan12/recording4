@@ -176,3 +176,19 @@ def test_gated_hint_names_the_model_this_version_uses() -> None:
     text = gated_hint("무엇", model)
     assert f"https://huggingface.co/{model}" in text
     assert "segmentation-3.0" in text
+
+
+def test_gated_hint_finds_the_model_in_the_failure_text() -> None:
+    """함수 서명에 모델 이름이 없을 때가 있습니다. 실패한 이야기에는 적혀 있습니다.
+
+    설치된 whisperx가 그렇습니다(측정: default_model_name이 None). 그때 엉뚱한
+    페이지를 짚어 주면 사람이 동의를 다 해 놓고도 같은 오류를 다시 봅니다.
+    """
+    from worker.analysis import gated_hint
+
+    detail = (
+        "GatedRepoError: 401. Cannot access gated repo for url "
+        "https://huggingface.co/pyannote/speaker-diarization-community-1/resolve/main/config.yaml."
+    )
+    text = gated_hint(detail)
+    assert "https://huggingface.co/pyannote/speaker-diarization-community-1" in text
