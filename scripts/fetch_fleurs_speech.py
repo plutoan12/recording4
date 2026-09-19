@@ -35,15 +35,19 @@ def main() -> int:
     parser.add_argument("--language", choices=CONFIGS, required=True)
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--count", type=int, default=3)
+    parser.add_argument("--skip", type=int, default=0, help="기존 평가와 겹치지 않게 앞 표본 제외")
     args = parser.parse_args()
     if not 2 <= args.count <= 20:
         parser.error("count는 2~20이어야 합니다.")
+    if not 0 <= args.skip <= 100:
+        parser.error("skip은 0~100이어야 합니다.")
     # 이전 실행의 표본과 섞이지 않게 새 디렉터리에만 생성합니다.
     args.out.mkdir(parents=True, exist_ok=False)
     base = f"https://huggingface.co/datasets/google/fleurs/resolve/{REVISION}/data/{CONFIGS[args.language]}"
     with urllib.request.urlopen(base + "/dev.tsv", timeout=60) as response:
         texts = transcripts(response.read().decode("utf-8"))
     pieces, records = [], []
+    skipped = 0
     with urllib.request.urlopen(base + "/audio/dev.tar.gz", timeout=120) as response:
         with tarfile.open(fileobj=response, mode="r|gz") as archive:
             for member in archive:
@@ -53,6 +57,9 @@ def main() -> int:
                     or name not in texts
                     or not 0 < member.size <= MAX_CLIP_BYTES
                 ):
+                    continue
+                if skipped < args.skip:
+                    skipped += 1
                     continue
                 stream = archive.extractfile(member)
                 if stream is None:
@@ -82,6 +89,7 @@ def main() -> int:
                 "config": CONFIGS[args.language],
                 "split": "validation",
                 "selection": "first matching regular files in dev.tar.gz",
+                "skipped_matching_files": args.skip,
                 "clips": records,
             },
             indent=2,

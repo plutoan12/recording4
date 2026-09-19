@@ -481,7 +481,7 @@ def _run_sync(args):  # noqa: ANN001 - ffsubsync의 argparse.Namespace입니다.
         return run(checked)
 
 
-def _normalize_sync_audio(source: Path, output: Path) -> None:
+def _normalize_sync_audio(source: Path, output: Path, *, recovery: bool = False) -> None:
     """싱크 분석용 사본만 보정합니다. 원음 파일에는 쓰지 않습니다."""
     try:
         subprocess.run(
@@ -500,7 +500,11 @@ def _normalize_sync_audio(source: Path, output: Path) -> None:
                 "-ar",
                 "16000",
                 "-af",
-                "dynaudnorm=f=500:g=31:p=0.5:m=10:r=0.05",
+                (
+                    "dynaudnorm=f=150:g=15:p=0.9:m=100"
+                    if recovery
+                    else "dynaudnorm=f=500:g=31:p=0.5:m=10:r=0.05"
+                ),
                 "-c:a",
                 "pcm_s16le",
                 str(output),
@@ -569,7 +573,7 @@ def sync_subtitles(
                 parser.parse_args([str(reference), "-i", str(before), "-o", str(after), *extra])
             )
         except InsufficientSpeech:
-            if options.profile != "long_cues":
+            if options.profile == "standard":
                 raise
             report = {"sync_was_successful": False}
         # Long captions may also contain quiet speech. Retry a rejected alignment,
@@ -580,15 +584,65 @@ def sync_subtitles(
             reference = temp / "normalized.wav"
             _normalize_sync_audio(source, reference)
             normalized = True
-            report = _run_sync(
-                parser.parse_args([str(reference), "-i", str(before), "-o", str(after), *extra])
-            )
+            try:
+                report = _run_sync(
+                    parser.parse_args([str(reference), "-i", str(before), "-o", str(after), *extra])
+                )
+            except InsufficientSpeech:
+                report = {"sync_was_successful": False}
+
+        earliest = min(cue.start for cue in cues)
+        shift = float(report.get("offset_seconds", 0.0))
+        enhanced = options.profile != "standard" and not options.fix_framerate
+        # A maximum at the search boundary can be a clipped, much larger wrong
+        # alignment. It is not evidence that the optimum is inside our range.
+        search_limit = options.max_offset_seconds - (0.01 if enhanced else 0)
+        usable = (
+            not report.get("retval")
+            and report.get("sync_was_successful", True)
+            and math.isfinite(shift)
+            and earliest + shift >= 0
+            and (abs(shift) < search_limit if enhanced else abs(shift) <= search_limit)
+        )
+        boundary_support = 0
+        recovery_used = False
+        if enhanced:
+            from worker.sync_evidence import refine_offset
+
+            if not usable:
+                # Strong gain is never a global default: it can amplify noise.
+                # A recovery needs both a valid VAD estimate and independent,
+                # distributed boundary evidence in the unmodified source.
+                reference = temp / "recovery.wav"
+                _normalize_sync_audio(source, reference, recovery=True)
+                normalized = True
+                report = _run_sync(
+                    parser.parse_args([str(reference), "-i", str(before), "-o", str(after), *extra])
+                )
+                shift = float(report.get("offset_seconds", 0.0))
+                recovery_used = True
+            if (
+                not report.get("retval")
+                and report.get("sync_was_successful", True)
+                and math.isfinite(shift)
+                and earliest + shift >= 0
+                and abs(shift) < search_limit
+            ):
+                evidence = refine_offset(source, cues, shift)
+                if evidence is not None:
+                    shift, boundary_support = evidence
+                elif recovery_used:
+                    raise ValueError(
+                        "저음량 재시도의 보정 근거가 부족합니다. 기존 대본을 유지합니다."
+                    )
         if report.get("retval") or not report.get("sync_was_successful", True):
             raise ValueError("자막을 음성에 맞추지 못했습니다. 원본과 자막이 맞는지 확인하세요.")
-        shift = float(report.get("offset_seconds", 0.0))
         if not math.isfinite(shift):
             raise ValueError("보정값이 유한한 시간이 아닙니다.")
-        earliest = min(cue.start for cue in cues)
+        if enhanced and abs(shift) >= search_limit:
+            raise ValueError(
+                "보정값이 탐색 경계에 걸려 신뢰할 수 없습니다. 기존 대본을 유지합니다."
+            )
         # 원본 앞으로 밀려난 자막은 파일에서 아예 사라집니다. 그러면 개수가 달라
         # "개수가 다르다"는 말만 남고 무엇이 잘못됐는지는 안 보입니다.
         if earliest + shift < 0:
@@ -618,4 +672,6 @@ def sync_subtitles(
         "max_offset_seconds": options.max_offset_seconds,
         "profile": options.profile,
         "audio_normalized": normalized,
+        "boundary_support": boundary_support,
+        "recovery_used": recovery_used,
     }
