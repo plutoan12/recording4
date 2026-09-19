@@ -178,10 +178,10 @@ python -m worker.cli suggest /path/to/transcript.json /path/to/candidates.json -
 - 기존 테스트 포함 Python 138개 통과, PostgreSQL 전용 경합 테스트 1개는 로컬에서 건너뜀.
 - 실제 FFmpeg 테스트 영상 생성·크롭/패딩·자막 합성·디코딩·음성 에너지 검사 통과.
 - PySceneDetect로 실제 합성 영상의 장면 구간 확인.
-- STT 및 Google SDK 설치·불러오기 확인. 실제 STT 모델 추론, 실제 공급자 응답, OAuth 및 업로드는 아직 미검증.
+- STT 실제 추론을 CI에서 잽니다(사람 목소리, whisper small): 전체 CER **9.7%**. 실제 공급자 응답, OAuth 및 업로드는 아직 미검증.
 - DB 마이그레이션 업그레이드·다운그레이드·재업그레이드 통과(SQLite).
 - 관리화면 타입 검사·빌드 및 브라우저 로그인·원본 미리보기·구간 입력·렌더 요청 확인. 브라우저 검증은 테스트 DB와 로컬 미디어 대역을 사용함.
-- Docker 데몬이 없어 Compose 전체 기동과 실제 S3/MinIO 연결은 미검증.
+- Compose 전체 기동과 실제 S3/MinIO 연결을 CI에서 확인합니다(`스택 기동 검증` 잡). 운영 구성(`compose.runtime.yml`) 9개 컨테이너를 띄우고 `scripts/smoke.py`로 전 경로를 한 번 돌립니다.
 
 ## 남은 제품 기능
 

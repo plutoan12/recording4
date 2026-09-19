@@ -14,6 +14,8 @@ speech_sample이 만든 음성은 문장마다 원문을 알고 있습니다. �
 팔 년") 모델은 아라비아 숫자로 적습니다("2018년"). 같은 말이라도 글자가 달라
 CER이 올라갑니다. 그래서 한계값은 품질 목표가 아니라 회귀 감시용 상한입니다.
 실제 값과 문장별 원문·전사를 항상 출력하니 수치보다 그쪽을 먼저 보세요.
+
+첫 실측(whisper small, zeroth-korean 3문장): 전체 CER 9.7%.
 """
 
 from __future__ import annotations
@@ -87,8 +89,11 @@ def main() -> int:
     # 운영 기본값(R4_WHISPER_MODEL)과 같은 모델로 재야 의미가 있습니다.
     parser.add_argument("--model", default="small")
     parser.add_argument("--language", default="ko")
-    # 품질 목표가 아니라 회귀 감시용 상한입니다. 숫자 표기 차이가 섞여 있습니다.
-    parser.add_argument("--max-cer", type=float, default=0.35)
+    # 품질 목표가 아니라 회귀 감시용 상한입니다. 첫 실측이 9.7%였습니다(whisper
+    # small, zeroth-korean 3문장). 표본이 세 문장뿐이고 데이터셋 행이 바뀌면
+    # 값도 움직이므로 실측의 두 배로 둡니다. 모델이나 언어 설정이 어긋나는
+    # 수준의 회귀는 이 선을 훌쩍 넘습니다.
+    parser.add_argument("--max-cer", type=float, default=0.20)
     args = parser.parse_args()
 
     expected = json.loads((args.directory / "expected.json").read_text(encoding="utf-8"))
