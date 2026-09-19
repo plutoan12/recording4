@@ -1,0 +1,249 @@
+{
+  "profile": "quiet",
+  "language": "en",
+  "limit": 0.5,
+  "offsets": [
+    0.0,
+    2.5
+  ],
+  "results": [
+    {
+      "variant": "short",
+      "cases": {
+        "0.0": {
+          "pass": false,
+          "rejected": "원문 대사 정렬의 근거가 부족합니다. 기존 대본을 유지합니다."
+        },
+        "2.5": {
+          "pass": false,
+          "rejected": "원문 대사 정렬의 근거가 부족합니다. 기존 대본을 유지합니다."
+        }
+      }
+    },
+    {
+      "variant": "long_repeated",
+      "cases": {
+        "0.0": {
+          "pass": true,
+          "max_error_seconds": 0.038,
+          "text_preserved": true,
+          "offset_seconds": 0.038,
+          "boundary_support": 18,
+          "recovery_used": false,
+          "verified_by": "source_boundaries",
+          "denoised": false
+        },
+        "2.5": {
+          "pass": true,
+          "max_error_seconds": 0.038,
+          "text_preserved": true,
+          "offset_seconds": -2.462,
+          "boundary_support": 18,
+          "recovery_used": false,
+          "verified_by": "source_boundaries",
+          "denoised": false
+        }
+      }
+    },
+    {
+      "variant": "dense",
+      "cases": {
+        "0.0": {
+          "pass": true,
+          "max_error_seconds": 0.036,
+          "text_preserved": true,
+          "offset_seconds": 0.036,
+          "boundary_support": 6,
+          "recovery_used": false,
+          "verified_by": "source_boundaries",
+          "denoised": false
+        },
+        "2.5": {
+          "pass": true,
+          "max_error_seconds": 0.036,
+          "text_preserved": true,
+          "offset_seconds": -2.464,
+          "boundary_support": 6,
+          "recovery_used": false,
+          "verified_by": "source_boundaries",
+          "denoised": false
+        }
+      }
+    },
+    {
+      "variant": "long_pauses",
+      "cases": {
+        "0.0": {
+          "pass": true,
+          "max_error_seconds": 0.051,
+          "text_preserved": true,
+          "offset_seconds": -0.051,
+          "boundary_support": 6,
+          "recovery_used": false,
+          "verified_by": "source_boundaries",
+          "denoised": false
+        },
+        "2.5": {
+          "pass": true,
+          "max_error_seconds": 0.051,
+          "text_preserved": true,
+          "offset_seconds": -2.551,
+          "boundary_support": 6,
+          "recovery_used": false,
+          "verified_by": "source_boundaries",
+          "denoised": false
+        }
+      }
+    },
+    {
+      "variant": "fast",
+      "cases": {
+        "0.0": {
+          "pass": true,
+          "max_error_seconds": 0.051,
+          "text_preserved": true,
+          "offset_seconds": 0.051,
+          "boundary_support": 6,
+          "recovery_used": false,
+          "verified_by": "source_boundaries",
+          "denoised": false
+        },
+        "2.5": {
+          "pass": true,
+          "max_error_seconds": 0.051,
+          "text_preserved": true,
+          "offset_seconds": -2.449,
+          "boundary_support": 6,
+          "recovery_used": false,
+          "verified_by": "source_boundaries",
+          "denoised": false
+        }
+      }
+    },
+    {
+      "variant": "slow",
+      "cases": {
+        "0.0": {
+          "pass": true,
+          "max_error_seconds": 0.034,
+          "text_preserved": true,
+          "offset_seconds": 0.034,
+          "boundary_support": 6,
+          "recovery_used": false,
+          "verified_by": "source_boundaries",
+          "denoised": false
+        },
+        "2.5": {
+          "pass": true,
+          "max_error_seconds": 0.034,
+          "text_preserved": true,
+          "offset_seconds": -2.466,
+          "boundary_support": 6,
+          "recovery_used": false,
+          "verified_by": "source_boundaries",
+          "denoised": false
+        }
+      }
+    },
+    {
+      "variant": "quiet_voice",
+      "cases": {
+        "0.0": {
+          "pass": true,
+          "max_error_seconds": 0.038,
+          "text_preserved": true,
+          "offset_seconds": 0.038,
+          "boundary_support": 6,
+          "recovery_used": true,
+          "verified_by": "source_boundaries",
+          "denoised": false
+        },
+        "2.5": {
+          "pass": true,
+          "max_error_seconds": 0.038,
+          "text_preserved": true,
+          "offset_seconds": -2.462,
+          "boundary_support": 6,
+          "recovery_used": true,
+          "verified_by": "source_boundaries",
+          "denoised": false
+        }
+      }
+    },
+    {
+      "variant": "noise_15db",
+      "cases": {
+        "0.0": {
+          "pass": true,
+          "max_error_seconds": 0.038,
+          "text_preserved": true,
+          "offset_seconds": 0.038,
+          "boundary_support": 3,
+          "recovery_used": false,
+          "verified_by": "source_boundaries",
+          "denoised": false
+        },
+        "2.5": {
+          "pass": true,
+          "max_error_seconds": 0.038,
+          "text_preserved": true,
+          "offset_seconds": -2.462,
+          "boundary_support": 3,
+          "recovery_used": false,
+          "verified_by": "source_boundaries",
+          "denoised": false
+        }
+      }
+    },
+    {
+      "variant": "noise_5db",
+      "cases": {
+        "0.0": {
+          "pass": true,
+          "max_error_seconds": 0.033,
+          "text_preserved": true,
+          "offset_seconds": 0.033,
+          "boundary_support": 3,
+          "recovery_used": false,
+          "verified_by": "source_boundaries",
+          "denoised": false
+        },
+        "2.5": {
+          "pass": true,
+          "max_error_seconds": 0.033,
+          "text_preserved": true,
+          "offset_seconds": -2.467,
+          "boundary_support": 3,
+          "recovery_used": false,
+          "verified_by": "source_boundaries",
+          "denoised": false
+        }
+      }
+    },
+    {
+      "variant": "music_intro",
+      "cases": {
+        "0.0": {
+          "pass": true,
+          "max_error_seconds": 0.033,
+          "text_preserved": true,
+          "offset_seconds": 0.033,
+          "boundary_support": 3,
+          "recovery_used": false,
+          "verified_by": "source_boundaries",
+          "denoised": false
+        },
+        "2.5": {
+          "pass": true,
+          "max_error_seconds": 0.033,
+          "text_preserved": true,
+          "offset_seconds": -2.467,
+          "boundary_support": 3,
+          "recovery_used": false,
+          "verified_by": "source_boundaries",
+          "denoised": false
+        }
+      }
+    }
+  ]
+}

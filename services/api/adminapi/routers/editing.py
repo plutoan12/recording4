@@ -316,6 +316,7 @@ def sync_transcript(
     user: CurrentUser,
     session: SessionDep,
     profile: Literal["standard", "quiet", "long_cues"] = Query(default="standard"),
+    language: Literal["ko", "en", "ja", "zh"] | None = Query(default=None),
 ):
     """최신 대본의 시각을 원본 음성에 맞춰 통째로 옮긴 새 버전을 만듭니다.
 
@@ -325,7 +326,7 @@ def sync_transcript(
     기존 대본 버전은 그대로 남습니다. 보정이 마음에 들지 않으면 그 버전을 다시
     쓰면 됩니다. 유료 호출이 아니며 `[subtitles]` 설치가 필요합니다.
     """
-    asset_for_edit(session, asset_id)
+    asset = asset_for_edit(session, asset_id)
     if not transcript(session, asset_id):
         raise HTTPException(409, "보정할 대본이 없습니다. 먼저 대본을 만들거나 들이세요.")
     existing = session.scalar(
@@ -336,14 +337,28 @@ def sync_transcript(
         )
     )
     if existing:
-        if existing.settings.get("sync_profile", "standard") != profile:
+        if existing.settings.get("sync_profile", "standard") != profile or existing.settings.get(
+            "source_language"
+        ) != (language or asset.source_language):
             raise HTTPException(
                 409, "다른 방식의 싱크 보정이 진행 중입니다. 완료 후 다시 요청하세요."
             )
         return task_response(existing)
     return schedule(
         session,
-        MediaTask(source_asset_id=asset_id, kind="sync", settings={"sync_profile": profile}),
+        MediaTask(
+            source_asset_id=asset_id,
+            kind="sync",
+            settings={
+                "sync_profile": profile,
+                "source_language": language or asset.source_language,
+                "transcript_version": session.scalar(
+                    select(func.max(TranscriptSegment.transcript_version)).where(
+                        TranscriptSegment.source_asset_id == asset_id
+                    )
+                ),
+            },
+        ),
     )
 
 

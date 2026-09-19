@@ -28,7 +28,7 @@ from pathlib import Path
 sys.path[:0] = ["/app/packages/pipeline", "/app/services/api", "/app/services/worker"]
 
 from pipeline.editing import Cue  # noqa: E402
-from worker.analysis import sync_subtitles  # noqa: E402
+from worker.analysis import SyncOptions, sync_subtitles  # noqa: E402
 
 
 def load(directory: Path) -> tuple[Path, list[Cue]]:
@@ -62,13 +62,17 @@ def main() -> int:
     parser.add_argument("--directory", type=Path, required=True)
     parser.add_argument("--offset", type=float, default=2.5, help="일부러 미는 초")
     parser.add_argument("--limit", type=float, default=0.5, help="허용 오차(초)")
+    parser.add_argument(
+        "--language", choices=["en", "ja", "ko", "zh"], help="번역 언어가 아닌 원문 언어"
+    )
     args = parser.parse_args()
 
     audio, truth = load(args.directory)
     problems: list[str] = []
 
     pushed = [Cue(start=c.start + args.offset, end=c.end + args.offset, text=c.text) for c in truth]
-    moved, found = sync_subtitles(audio, pushed)
+    options = SyncOptions(source_language=args.language)
+    moved, found = sync_subtitles(audio, pushed, options)
     problems += report(f"{args.offset:+.1f}초 밀어 둔 자막", truth, moved, found, args.limit)
     if abs(found["offset_seconds"] + args.offset) > args.limit:
         problems.append(
@@ -77,7 +81,7 @@ def main() -> int:
         )
 
     # 이미 맞는 자막을 흔들지 않는지 봅니다. 여기서 흔들리면 기능 자체가 위험합니다.
-    kept, found_zero = sync_subtitles(audio, list(truth))
+    kept, found_zero = sync_subtitles(audio, list(truth), options)
     problems += report("이미 맞는 자막", truth, kept, found_zero, args.limit)
 
     if problems:

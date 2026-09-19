@@ -148,6 +148,8 @@ def evaluate(
             "offset_seconds": meta["offset_seconds"],
             "boundary_support": meta.get("boundary_support", 0),
             "recovery_used": meta.get("recovery_used", False),
+            "verified_by": meta.get("verified_by"),
+            "denoised": meta.get("denoised", False),
         }
     except (ValueError, RuntimeError) as exc:
         return {"pass": False, "rejected": str(exc)}
@@ -160,6 +162,7 @@ def main() -> int:
     parser.add_argument("--limit", type=float, default=0.5)
     parser.add_argument("--profile", choices=["standard", "quiet", "long_cues"], default="standard")
     parser.add_argument("--offsets", type=float, nargs="+", default=[0.0, 2.5])
+    parser.add_argument("--language", choices=["en", "ja", "ko", "zh"])
     args = parser.parse_args()
     if any(not math.isfinite(value) for value in args.offsets):
         parser.error("offsets는 유한한 초 단위 값이어야 합니다.")
@@ -183,7 +186,11 @@ def main() -> int:
             ):
                 logging.disable(logging.CRITICAL)
                 entry["cases"][str(offset)] = evaluate(
-                    source, truth, offset, args.limit, SyncOptions(profile=args.profile)
+                    source,
+                    truth,
+                    offset,
+                    args.limit,
+                    SyncOptions(profile=args.profile, source_language=args.language),
                 )
                 logging.disable(logging.NOTSET)
         results.append(entry)

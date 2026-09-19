@@ -1,0 +1,56 @@
+{
+  "cases": [
+    {
+      "source": "silence",
+      "profile": "standard",
+      "rejected": true
+    },
+    {
+      "source": "silence",
+      "profile": "quiet",
+      "rejected": true
+    },
+    {
+      "source": "silence",
+      "profile": "long_cues",
+      "rejected": true
+    },
+    {
+      "source": "tone",
+      "profile": "standard",
+      "rejected": true
+    },
+    {
+      "source": "tone",
+      "profile": "quiet",
+      "rejected": true
+    },
+    {
+      "source": "tone",
+      "profile": "long_cues",
+      "rejected": true
+    },
+    {
+      "source": "noise",
+      "profile": "standard",
+      "rejected": true
+    },
+    {
+      "source": "noise",
+      "profile": "quiet",
+      "rejected": true
+    },
+    {
+      "source": "noise",
+      "profile": "long_cues",
+      "rejected": true
+    }
+  ],
+  "source_unchanged": true,
+  "decoded_source_frames": 1263616,
+  "denoised_frames": 1263616,
+  "source_hashes": {
+    "analysis.py": "9b7a6c1e448136fe304351dca6e350464fc0f28138e8ae5e8e4e81a272738ea6",
+    "sync_verification.py": "2bdfe66df52d9ade14532e9b86476c0a9ab37c8545013aabf8a7e96a0bfe0ada"
+  }
+}

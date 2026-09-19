@@ -28,12 +28,13 @@ from worker.analysis import (
 from worker.celery_app import celery_app
 from worker.rendering import render_clip
 from worker.subtitle_rules import rules_from_settings
+from worker.sync_verification import UnverifiedSync
 
 
 def latest_transcript(session, task_uuid) -> list[Cue]:  # noqa: ANN001
     """그 원본의 최신 대본 자막. 없으면 빈 목록입니다."""
     task = session.get(MediaTask, task_uuid)
-    version = session.scalar(
+    version = task.settings.get("transcript_version") or session.scalar(
         select(func.max(TranscriptSegment.transcript_version)).where(
             TranscriptSegment.source_asset_id == task.source_asset_id
         )
@@ -67,6 +68,20 @@ def run_media(task_id: str) -> dict:
         task = session.get(MediaTask, task_uuid)
         asset = session.get(SourceAsset, task.source_asset_id)
         source_key, spec, kind, attempt = asset.storage_key, task.settings, task.kind, task.attempt
+        if kind == "sync" and not spec.get("transcript_version"):
+            # Jobs queued by an older API must also pin their input before slow
+            # model inference, not read a different transcript at completion.
+            spec = {
+                **spec,
+                "transcript_version": session.scalar(
+                    select(func.max(TranscriptSegment.transcript_version)).where(
+                        TranscriptSegment.source_asset_id == asset.id
+                    )
+                ),
+                "source_language": spec.get("source_language", asset.source_language),
+            }
+            task.settings = spec
+            session.commit()
 
     try:
         storage = get_storage()
@@ -117,6 +132,9 @@ def run_media(task_id: str) -> dict:
                         max_offset_seconds=settings.sync_max_offset_seconds,
                         vad=settings.sync_vad,
                         profile=spec.get("sync_profile", "standard"),
+                        source_language=spec.get("source_language"),
+                        model=settings.whisper_model,
+                        device=settings.whisper_device,
                     ),
                 )
                 result = {"sync": report}
@@ -223,6 +241,10 @@ def run_media(task_id: str) -> dict:
                         )
                         or 0
                     ) + 1
+                    if kind == "sync" and spec.get("transcript_version") not in (None, version - 1):
+                        raise UnverifiedSync(
+                            "검사 중 원문 대본이 바뀌었습니다. 새 대본으로 다시 요청하세요."
+                        )
                     for cue in cues:
                         session.add(
                             TranscriptSegment(
@@ -246,7 +268,7 @@ def run_media(task_id: str) -> dict:
                 # 설치 안내는 저희가 쓴 고정 문구라 그대로 보여 줍니다.
                 task.error = (
                     str(exc)
-                    if isinstance(exc, MissingDependency)
+                    if isinstance(exc, MissingDependency | UnverifiedSync)
                     else f"{type(exc).__name__}: 처리 실패. 워커 설정과 입력을 확인하세요."
                 )
                 task.finished_at = utcnow()

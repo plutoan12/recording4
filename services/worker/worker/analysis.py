@@ -60,6 +60,7 @@ def align_text(
     model: str = "small",
     language: str | None = None,
     device: str = "cpu",
+    strict: bool = False,
 ) -> list[Cue]:
     """이미 있는 대본을 오디오에 맞춰 시각을 붙입니다.
 
@@ -82,8 +83,18 @@ def align_text(
     engine = stable_whisper.load_faster_whisper(
         model, device=device, compute_type="int8" if device == "cpu" else "float16"
     )
-    result = engine.align(str(source), text, language=language)
-    cues = cues_for_lines(text.splitlines(), word_timings(result)) or [
+    result = engine.align(
+        str(source),
+        text,
+        language=language,
+        **({"failure_threshold": 0.1, "verbose": None} if strict else {}),
+    )
+    if result is None:
+        raise ValueError("원문 대사를 음성과 대응시키지 못했습니다.")
+    matched = cues_for_lines(text.splitlines(), word_timings(result))
+    if strict and not matched:
+        raise ValueError("원문과 정렬된 단어가 일치하지 않습니다. 기존 대본을 유지합니다.")
+    cues = matched or [
         Cue(start=s.start, end=s.end, text=s.text.strip())
         for s in result.segments
         if s.text.strip() and s.end > s.start
@@ -425,6 +436,9 @@ class SyncOptions:
     max_offset_seconds: float = 10.0
     vad: str | None = None
     profile: str = "standard"
+    source_language: str | None = None
+    model: str = "small"
+    device: str = "cpu"
 
     def arguments(self) -> list[str]:
         if self.profile not in {"standard", "quiet", "long_cues"}:
@@ -519,7 +533,7 @@ def _normalize_sync_audio(source: Path, output: Path, *, recovery: bool = False)
         ) from exc
 
 
-def sync_subtitles(
+def _sync_acoustic(
     source: Path, cues: list[Cue], options: SyncOptions | None = None
 ) -> tuple[list[Cue], dict]:
     """이미 있는 자막의 시각을 원본 음성에 맞춰 통째로 옮깁니다(ffsubsync).
@@ -675,3 +689,13 @@ def sync_subtitles(
         "boundary_support": boundary_support,
         "recovery_used": recovery_used,
     }
+
+
+def sync_subtitles(
+    source: Path,
+    cues: list[Cue],
+    options: SyncOptions | None = None,
+) -> tuple[list[Cue], dict]:
+    from worker.sync_verification import verify_sync
+
+    return verify_sync(source, cues, options or SyncOptions(), _sync_acoustic, align_text)

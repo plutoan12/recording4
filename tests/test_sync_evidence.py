@@ -6,7 +6,8 @@ import pytest
 
 from pipeline.editing import Cue
 from pipeline.subtitle_files import dump_subtitles
-from worker.analysis import SyncOptions, sync_subtitles
+from worker.analysis import SyncOptions
+from worker.analysis import _sync_acoustic as sync_subtitles
 from worker.sync_evidence import boundary_consensus, refine_offset
 
 
