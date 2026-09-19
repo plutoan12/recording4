@@ -310,14 +310,46 @@ def diarize(asset_id: uuid.UUID, payload: DiarizeRequest, user: CurrentUser, ses
     )
 
 
+class SyncRequest(BaseModel):
+    """싱크를 다시 잡는 방법. 기본값은 설정(`R4_SYNC_METHOD`)이 정합니다."""
+
+    method: Literal["align", "shift"] | None = None
+    # 정렬에 쓰는 언어. 모르면 정렬기가 음성에서 찾습니다. shift에는 쓰지 않습니다.
+    language: str | None = Field(default=None, pattern=r"^[a-z]{2,3}$")
+
+
 @router.post("/source-assets/{asset_id}/transcript/sync", status_code=202)
-def sync_transcript(asset_id: uuid.UUID, user: CurrentUser, session: SessionDep):
-    """최신 대본의 시각을 원본 음성에 맞춰 통째로 옮긴 새 버전을 만듭니다.
+def sync_transcript(
+    asset_id: uuid.UUID,
+    user: CurrentUser,
+    session: SessionDep,
+    payload: SyncRequest | None = None,
+):
+    """최신 대본의 시각을 원본 음성에 다시 맞춘 새 버전을 만듭니다.
 
     밖에서 들인 자막이 원본과 어긋날 때 씁니다. **글자는 건드리지 않고** 시각만
-    옮기며, 얼마나 옮겼는지(`result.sync.offset_seconds`)를 작업 결과에 남깁니다.
+    바꿉니다. 방법이 둘입니다.
 
-    기존 대본 버전은 그대로 남습니다. 보정이 마음에 들지 않으면 그 버전을 다시
+    - `align`: 대본 글자를 원본 음성에 **단어 단위로** 맞춥니다. 자막마다
+      시각을 따로 받습니다. 음성 인식 모델을 돌려 느립니다. 움직인 폭은
+      `result.sync.max_shift_seconds`에 남습니다.
+    - `shift`(기본): 전체를 통째로 옮깁니다(ffsubsync). 빠르지만 이동값이 하나뿐입니다.
+      **대본 글자가 실제 발화와 다른 번역 자막에는 이쪽만 쓸 수 있습니다.**
+      옮긴 값은 `result.sync.offset_seconds`에 남습니다.
+
+    어느 쪽이 나은지는 **어긋난 모양**에 달렸습니다. 한국어 낭독으로 잰 값입니다.
+
+    - 자막이 통째로 밀린 경우: 열 가지 조건에서 `shift` 0.00~0.50초,
+      `align` 0.75~2.63초. `shift`가 열 번 다 이깁니다.
+    - 자막마다 어긋남이 쌓이는 경우: **자막당 0.3초부터** `align`이 낫습니다
+      (자막 9개에서 1.22초 대 1.02초). 서로 다른 두 표본에서 같은 지점이
+      나왔습니다.
+    - 다만 그 자리에서도 **둘 다 0.5초 안에 못 들어옵니다.** `align`이 덜 틀릴
+      뿐이고 사람이 손봐야 합니다.
+
+    측정은 docs/TECH_DECISIONS.md에 있습니다. 표본 id까지 적혀 있습니다.
+
+    기존 대본 버전은 그대로 남습니다. 결과가 마음에 들지 않으면 그 버전을 다시
     쓰면 됩니다. 유료 호출이 아니며 `[subtitles]` 설치가 필요합니다.
     """
     asset_for_edit(session, asset_id)
@@ -332,7 +364,11 @@ def sync_transcript(asset_id: uuid.UUID, user: CurrentUser, session: SessionDep)
     )
     if existing:
         return task_response(existing)
-    return schedule(session, MediaTask(source_asset_id=asset_id, kind="sync", settings={}))
+    wanted = payload or SyncRequest()
+    spec = {"language": wanted.language}
+    if wanted.method:
+        spec["method"] = wanted.method
+    return schedule(session, MediaTask(source_asset_id=asset_id, kind="sync", settings=spec))
 
 
 @router.get("/source-assets/{asset_id}/speakers")

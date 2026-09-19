@@ -60,6 +60,7 @@ def align_text(
     model: str = "small",
     language: str | None = None,
     device: str = "cpu",
+    snap: bool = True,
 ) -> list[Cue]:
     """이미 있는 대본을 오디오에 맞춰 시각을 붙입니다.
 
@@ -90,7 +91,13 @@ def align_text(
     ]
     # 단어 시각이 무음 안쪽으로 당겨지거나 발화 중간으로 밀리는 경우가 있어
     # 자막 시작을 그 자막이 걸친 발화의 시작에 맞춥니다.
-    cues = snap_starts(cues, speech_spans(source))
+    #
+    # 다만 이 맞춤은 시작 시각의 정의를 **VAD 쪽으로** 옮깁니다. VAD가 보는
+    # 발화 시작과 에너지 문턱이 보는 발화 시작은 다릅니다(측정: 같은 음성에서
+    # 1.86초 대 1.08초). `snap=False`로 끄고 재면 그 차이가 얼마나 되는지
+    # 보입니다. 끄는 것은 재기 위해서지 기본값을 바꾸려는 것이 아닙니다.
+    if snap:
+        cues = snap_starts(cues, speech_spans(source))
     if not cues:
         raise RuntimeError("대본을 오디오에 맞추지 못했습니다. 언어와 음성을 확인하세요.")
     return cues
@@ -439,6 +446,78 @@ class SyncOptions:
         if self.vad:
             extra += ["--vad", self.vad]
         return extra
+
+
+def realign_subtitles(
+    source: Path,
+    cues: list[Cue],
+    *,
+    model: str = "small",
+    language: str | None = None,
+    device: str = "cpu",
+    keep_duration: bool = True,
+    snap: bool = True,
+) -> tuple[list[Cue], dict]:
+    """자막을 **단어 단위로** 원본 음성에 다시 맞춥니다(강제 정렬).
+
+    `sync_subtitles`와 목적은 같지만 쓰는 정보가 다릅니다. 싱크 보정은 글자를
+    버리고 말/침묵 신호만 견주어 **전체에 하나뿐인 이동값**을 찾습니다. 그래서
+    문장마다 다르게 어긋난 자막이나 말 속도가 달라진 자막은 원리상 맞출 수
+    없습니다(측정: 1.25배 빠른 말에서 0.50초, 짧은 영상에서 0.40초).
+
+    여기서는 대본 글자를 그대로 정렬기에 넘겨 **자막마다 시각을 따로** 받습니다.
+    자막 파일을 들여오는 경우 우리는 글자를 갖고 있으므로 쓸 수 있는 정보가 더
+    많습니다.
+
+    **글자는 건드리지 않습니다.** 정렬 결과에서 시각만 가져옵니다. 자막 하나가
+    줄 하나이므로 개수가 그대로여야 하며, 정렬기가 줄을 못 맞추면 실패로 봅니다.
+    대본 글자가 실제 발화와 다르면(번역 자막) 여기서 걸립니다. 그런 자막은
+    `sync_subtitles`로 옮겨야 합니다.
+
+    `keep_duration`이면 정렬기에서 **시작만** 가져오고 자막 길이는 원래 것을
+    지킵니다. 정렬기의 끝 시각은 말이 끝나는 지점이라 숨소리·잔향이 남은
+    구간을 잘라 자막이 이르게 사라집니다(측정: 1.21~1.74초, docs/HANDOFF.md).
+    """
+    if not cues:
+        raise ValueError("정렬할 자막이 없습니다.")
+    # 정렬기는 줄 하나를 자막 하나로 봅니다. 자막 안의 줄바꿈은 공백으로 만듭니다.
+    lines = [" ".join(cue.text.split()) for cue in cues]
+    if any(not line for line in lines):
+        raise ValueError("글자가 없는 자막이 있어 정렬할 수 없습니다.")
+    aligned = align_text(
+        source, "\n".join(lines), model=model, language=language, device=device, snap=snap
+    )
+    # align_text는 줄을 못 맞추면 정렬기가 나눈 구간으로 돌아갑니다. 그 결과는
+    # 우리 자막과 짝이 지어지지 않으므로 여기서는 실패로 봅니다.
+    if len(aligned) != len(cues) or [cue.text for cue in aligned] != lines:
+        raise ValueError(
+            "정렬 결과를 원래 자막에 맞출 수 없습니다. 대본 글자가 실제 발화와 "
+            "같은지 확인하세요(번역 자막은 싱크 보정을 쓰세요)."
+        )
+    moved: list[Cue] = []
+    for index, (old, new) in enumerate(zip(cues, aligned, strict=True)):
+        end = new.end
+        if keep_duration:
+            # 정렬기의 끝 시각은 말이 끝나는 지점을 짚습니다. 그대로 쓰면 숨소리와
+            # 잔향이 남은 구간이 잘려 자막이 이르게 사라집니다(측정: 1.21~1.74초).
+            # 원래 자막 길이를 지키는 편이 낫습니다. 통째로 옮기기도 같은 이유로
+            # 길이를 보존합니다.
+            end = new.start + (old.end - old.start)
+            # 다음 자막을 침범하면 거기서 끊습니다. 겹친 자막은 화면에서 겹칩니다.
+            if index + 1 < len(aligned):
+                end = min(end, aligned[index + 1].start)
+            end = max(end, new.start + 0.001)
+        moved.append(Cue(start=new.start, end=end, text=old.text))
+    shifts = sorted(new.start - old.start for old, new in zip(cues, aligned, strict=True))
+    return moved, {
+        "method": "align",
+        "count": len(moved),
+        "keep_duration": keep_duration,
+        "snap": snap,
+        # 자막마다 이동이 다릅니다. 하나의 오프셋으로 요약할 수 없으므로 폭을 남깁니다.
+        "max_shift_seconds": round(max(shifts, key=abs), 3),
+        "median_shift_seconds": round(shifts[len(shifts) // 2], 3),
+    }
 
 
 def _run_sync(args):  # noqa: ANN001 - ffsubsync의 argparse.Namespace입니다.

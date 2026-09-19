@@ -389,7 +389,11 @@ def test_sync_saves_a_new_version_and_keeps_the_old_one(client, auth_headers, as
         headers=auth_headers,
         json={"cues": [{"start": 3, "end": 5, "text": "어긋난 자막"}]},
     )
-    created = client.post(f"/source-assets/{asset.id}/transcript/sync", headers=auth_headers).json()
+    created = client.post(
+        f"/source-assets/{asset.id}/transcript/sync",
+        headers=auth_headers,
+        json={"method": "shift"},
+    ).json()
 
     result = module.run_media.run(created["id"])
     assert result["status"] == "succeeded"
@@ -397,4 +401,63 @@ def test_sync_saves_a_new_version_and_keeps_the_old_one(client, auth_headers, as
     assert result["transcript_version"] == 2
     assert client.get(f"/source-assets/{asset.id}/transcript", headers=auth_headers).json() == [
         {"start": 5.0, "end": 7.0, "text": "어긋난 자막"}
+    ]
+
+
+def test_sync_can_align_each_cue_instead_of_shifting_them_together(
+    client, auth_headers, asset, monkeypatch
+):
+    """단어 정렬은 자막마다 시각을 따로 잡습니다. 이동값 하나로는 못 하는 일입니다.
+
+    기본값은 아직 통째로 옮기기(shift)입니다. 한국어 낭독에서 어느 쪽이 나은지
+    같은 조건으로 재기 전에는 바꾸지 않습니다.
+    """
+    import worker.media_tasks as module
+    from pipeline.editing import Cue
+
+    class Storage:
+        def download_file(self, key, path):
+            path.write_bytes(b"media")
+
+    monkeypatch.setattr(module, "get_storage", lambda: Storage())
+
+    def never(*args, **kwargs):
+        raise AssertionError("align을 고른 요청이 통째로 옮기는 보정을 부르면 안 됩니다.")
+
+    monkeypatch.setattr(module, "sync_subtitles", never)
+    # 정렬기는 대역입니다. 실제 정렬 품질은 CI의 사람 목소리 검증이 봅니다.
+    # 자막마다 다르게 옮기는 것이 이 방법의 요점이라 대역도 그렇게 만듭니다.
+    monkeypatch.setattr(
+        module,
+        "realign_subtitles",
+        lambda source, cues, **kwargs: (
+            [
+                Cue(start=c.start + 1 + index, end=c.end + 1 + index, text=c.text)
+                for index, c in enumerate(cues)
+            ],
+            {"method": "align", "count": len(cues), "max_shift_seconds": 2.0},
+        ),
+    )
+    client.put(
+        f"/source-assets/{asset.id}/transcript",
+        headers=auth_headers,
+        json={
+            "cues": [
+                {"start": 3, "end": 5, "text": "첫 자막"},
+                {"start": 8, "end": 10, "text": "둘째 자막"},
+            ]
+        },
+    )
+    created = client.post(
+        f"/source-assets/{asset.id}/transcript/sync",
+        headers=auth_headers,
+        json={"method": "align", "language": "ko"},
+    ).json()
+
+    result = module.run_media.run(created["id"])
+    assert result["status"] == "succeeded"
+    assert result["sync"]["method"] == "align"
+    assert client.get(f"/source-assets/{asset.id}/transcript", headers=auth_headers).json() == [
+        {"start": 4.0, "end": 6.0, "text": "첫 자막"},
+        {"start": 10.0, "end": 12.0, "text": "둘째 자막"},
     ]
