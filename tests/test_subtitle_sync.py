@@ -118,3 +118,17 @@ def test_sync_refuses_a_correction_that_pushes_subtitles_before_the_start(tmp_pa
 def test_options_reject_nonfinite_bounds(limit):
     with pytest.raises(ValueError):
         SyncOptions(max_offset_seconds=limit).arguments()
+
+
+def test_constant_sync_never_truncates_long_cue_duration(tmp_path, monkeypatch):
+    import worker.analysis as analysis
+
+    original = [Cue(start=3, end=18, text="긴 발화입니다")]
+
+    def tool(args):
+        Path(args.srtout).write_text(dump_subtitles([Cue(start=5, end=15, text="tool text")]))
+        return {"offset_seconds": 2, "framerate_scale_factor": 1, "sync_was_successful": True}
+
+    monkeypatch.setattr(analysis, "_run_sync", tool)
+    actual, _ = sync_subtitles(tmp_path / "audio.wav", original)
+    assert actual == [Cue(start=5, end=20, text=original[0].text)]

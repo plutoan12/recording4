@@ -878,3 +878,23 @@ def test_subtitles_empty_transcript_does_not_render(setup_flow):
     create, _ = setup_flow
     jid = create(audio_mode="subtitles", transcript=[])
     assert wf.run_job(jid)["status"] == "blocked_or_failed"
+
+
+def test_style_review_is_read_only_and_available_for_existing_jobs(
+    setup_flow, client, auth_headers, session
+):
+    create, _ = setup_flow
+    jid = create(
+        source_language="ko",
+        transcript=[
+            {"start": 0, "end": 2, "text": "준비했습니다."},
+            {"start": 3, "end": 5, "text": "녹화 중이었다."},
+        ],
+    )
+    wf.run_job(jid)
+    before = session.get(Job, uuid.UUID(jid)).workflow_data.copy()
+    result = client.get(f"/jobs/{jid}/workflow", headers=auth_headers).json()
+    assert result["style_warnings"][0]["kind"] == "mixed_register"
+    assert result["cues"] == before["cues"]
+    session.expire_all()
+    assert session.get(Job, uuid.UUID(jid)).workflow_data == before

@@ -507,8 +507,14 @@ def sync_subtitles(
 
     if len(moved) != len(cues):
         raise ValueError("보정 결과의 자막 개수가 달라 시각을 맞출 수 없습니다.")
+    # ffsubsync can truncate long cues while estimating speech. For a constant
+    # shift, its rewritten end times are not authoritative: preserve our durations.
     shifted = [
-        Cue(start=new.start, end=new.end, text=old.text)
+        Cue(
+            start=new.start if options.fix_framerate else old.start + shift,
+            end=new.end if options.fix_framerate else old.end + shift,
+            text=old.text,
+        )
         for old, new in zip(cues, moved, strict=True)
     ]
     return shifted, {

@@ -54,11 +54,11 @@ def pick_split(dataset: str) -> tuple[str, str] | None:
     return first["config"], first["split"]
 
 
-def rows(dataset: str, config: str, split: str, count: int) -> list[dict]:
+def rows(dataset: str, config: str, split: str, count: int, offset: int = 0) -> list[dict]:
     url = (
         f"{SERVER}/rows?dataset={urllib.parse.quote(dataset)}"
         f"&config={urllib.parse.quote(config)}&split={urllib.parse.quote(split)}"
-        f"&offset=0&length={count}"
+        f"&offset={offset}&length={count}"
     )
     try:
         return fetch_json(url).get("rows", [])
@@ -96,6 +96,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--count", type=int, default=3)
+    parser.add_argument("--offset", type=int, default=0, help="서로 다른 표본을 가져올 시작 행")
     parser.add_argument("--dataset", default=None, help="지정하면 이 데이터셋만 씁니다.")
     args = parser.parse_args()
     args.out.mkdir(parents=True, exist_ok=True)
@@ -107,7 +108,7 @@ def main() -> int:
             continue
         config, split = chosen
         print(f"  config={config} split={split}")
-        found = rows(dataset, config, split, args.count * 2)
+        found = rows(dataset, config, split, args.count * 2, args.offset)
         pieces: list[tuple[Path, str]] = []
         for index, row in enumerate(found):
             pair = audio_and_text(row)

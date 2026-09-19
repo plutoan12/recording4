@@ -1,3 +1,12 @@
+## 2026-09-19: 원문 말투 유지·조건별 싱크 검증 (Codex)
+
+- 사용자 선택: 문체를 자동으로 바꾸지 않고 혼용 가능성만 검수 표시.
+- 브랜치 `codex/subtitle-style-sync-matrix`, PR #26 위 후속. 담당: pipeline/style_review, API/workflow, WorkflowPanel, worker/analysis, fetch_korean_speech, verify_sync_matrix, 관련 테스트·문서.
+- 작업 상세에 문체 종류/자막 번호 안내. 조회는 기존 자막·승인을 변경하지 않음. 인용문 제외 및 제한된 언어별 단서 검사.
+- 신규 한국어 사람 목소리 9개로 10종 통제 영상 구성, 이동 0/+2.5초 20검사. 긴 자막 끝이 10초로 잘리는 버그를 발견해 기본 일정 이동 모드에서 길이 보존으로 수정. 같은 기준으로 20/20 통과, 최대 0.50초.
+- 399개 테스트 통과, 5개 조건부 skip. TypeScript/Vite/Ruff 통과. 실제 HTTP 확인 완료. 브라우저는 Mac 잠금으로 미확인.
+- [상세 범위·결과·재현](quality/style-sync-matrix-2026-09-19/REPORT.md). 통제 영상 검증이며 현장 영상·네 언어 발화 전체를 검증한 것은 아닙니다.
+
 ## 2026-09-19: 품질 문제 수정 (Codex)
 
 - [PR #26](https://github.com/plutoan12/recording4/pull/26)에 저장. 최종 API·워커 이미지를 운영 서버에 반영했고 모든 서비스 healthy. 운영 워커에서 숫자/시각·녹화 용어 규칙과 실제 사람 목소리 verify_sync.py(0.5초 기준)를 다시 통과했습니다.
