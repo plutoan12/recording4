@@ -52,6 +52,24 @@ def sample(pieces, overlap):
     return stems.sum(axis=0), truth, active
 
 
+def render_case(pieces, overlap, snr=None, seed=0):
+    """Single reproducible mixing recipe, shared by generation and verification."""
+    x, truth, active = sample(pieces, overlap)
+    if not len(x) or not np.isfinite(x).all():
+        raise ValueError("Invalid source audio")
+    if snr is not None and not active.any():
+        raise ValueError("Cannot measure noise power without reference speech")
+    if snr is not None:
+        rng = np.random.default_rng(seed)
+        noise = rng.normal(size=len(x)).astype(np.float32)
+        power = np.mean(x[: active.shape[1] * 320].reshape(-1, 320)[active.any(0)] ** 2)
+        noise *= np.sqrt(power / (10 ** (snr / 10) * np.mean(noise**2)))
+        x += noise
+    peak = float(np.max(np.abs(x)))
+    x *= min(1, 0.95 / max(peak, 1e-9))
+    return x, truth, active
+
+
 def score(turns, truth, active):
     labs = sorted(set(t.speaker for t in turns))
     n = active.shape[1]
@@ -130,15 +148,7 @@ def main():
     )
     results = []
     for name, ov, snr, seed in cases:
-        x, truth, active = sample(pieces, ov)
-        if snr is not None:
-            rng = np.random.default_rng(seed)
-            noise = rng.normal(size=len(x)).astype(np.float32)
-            power = np.mean(x[: active.shape[1] * 320].reshape(-1, 320)[active.any(0)] ** 2)
-            noise *= np.sqrt(power / (10 ** (snr / 10) * np.mean(noise**2)))
-            x += noise
-        peak = float(np.max(np.abs(x)))
-        x *= min(1, 0.95 / max(peak, 1e-9))
+        x, truth, active = render_case(pieces, ov, snr, seed)
         path = out / (name + ".wav")
         sf.write(path, x, sr, subtype="PCM_16")
         try:

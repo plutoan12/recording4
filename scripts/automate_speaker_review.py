@@ -23,14 +23,22 @@ def run(baseline, candidate, reviews_dir, predictions, manifest, output):
     for row in predictions:
         name = row["id"].rsplit("-", 1)[0]
         if name not in expected:
-            continue
+            raise ValueError(f"Unknown evaluation case: {name}")
         if row["sha256"] != expected[name]["sha256"]:
             raise ValueError(f"Audio changed: {name}")
+        if row.get("generation_possibly_truncated") is not False:
+            raise ValueError(f"Incomplete or unverified decode: {row['id']}")
         item = inputs[row["id"]]
         group = groups.setdefault(name, [])
         if any(p["target"] == item["target"] for p in group):
             raise ValueError(f"Duplicate target: {name}")
         group.append(dict(target=item["target"], hypothesis=row["hypothesis"]))
+    for name, group in groups.items():
+        required_targets = {
+            item["target"] for key, item in inputs.items() if key.rsplit("-", 1)[0] == name
+        }
+        if {item["target"] for item in group} != required_targets:
+            raise ValueError(f"Incomplete target evidence: {name}")
     # Validate all input files before producing a batch; no partial success marker.
     prepared = []
     for name, group in groups.items():
@@ -39,6 +47,12 @@ def run(baseline, candidate, reviews_dir, predictions, manifest, output):
             raise ValueError("Invalid case name")
         original = json.loads((reviews_dir / (name + "-words.json")).read_text())
         reviewed = propose_target_reviews(original, group)
+        for old_cue, new_cue in zip(original, reviewed, strict=True):
+            for old_word, new_word in zip(old_cue["words"], new_cue["words"], strict=True):
+                if any(
+                    old_word.get(k) != new_word.get(k) for k in ("speaker", "text", "start", "end")
+                ):
+                    raise ValueError("Review generation attempted to change source assignments")
         prepared.append((name, reviewed))
     output.mkdir(parents=True, exist_ok=True)
     cases = []

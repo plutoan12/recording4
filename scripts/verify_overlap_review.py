@@ -16,7 +16,7 @@ from dataclasses import asdict
 from pathlib import Path
 
 import numpy as np
-from measure_diarization_stress import sample, score
+from measure_diarization_stress import render_case, score
 
 from pipeline.alignment import WordTiming, squeeze
 from pipeline.editing import Cue
@@ -24,16 +24,10 @@ from pipeline.speakers import MULTIPLE_SPEAKERS, SpeakerTurn, assign_speakers, r
 from worker.analysis import align_speaker_words, diarize
 
 
-def verify_fixture(path, mixture, active, case):
+def verify_fixture(path, rendered, case):
     import soundfile as sf
 
-    x = mixture.copy()
-    if case["snr_db"] is not None:
-        noise = np.random.default_rng(case["seed"]).normal(size=len(x)).astype(np.float32)
-        power = np.mean(x[: active.shape[1] * 320].reshape(-1, 320)[active.any(0)] ** 2)
-        noise *= np.sqrt(power / (10 ** (case["snr_db"] / 10) * np.mean(noise**2)))
-        x += noise
-    x *= min(1, 0.95 / max(float(np.max(np.abs(x))), 1e-9))
+    x = rendered
     with io.BytesIO() as buffer:
         sf.write(buffer, x, 16000, format="WAV", subtype="PCM_16")
         buffer.seek(0)
@@ -70,8 +64,10 @@ def main():
     for case in cases:
         path = args.fixtures / (case["case"] + ".wav")
         before = hashlib.sha256(path.read_bytes()).hexdigest()
-        mixture, truth, active = sample(pieces, case["overlap_fraction_of_shorter_clip"])
-        verify_fixture(path, mixture, active, case)
+        mixture, truth, active = render_case(
+            pieces, case["overlap_fraction_of_shorter_clip"], case["snr_db"], case["seed"]
+        )
+        verify_fixture(path, mixture, case)
         cues = [
             Cue(start=t["start"], end=t["end"], text=text)
             for t, text in zip(truth, texts, strict=True)

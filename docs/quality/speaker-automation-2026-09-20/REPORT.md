@@ -47,12 +47,18 @@ PYTHONPATH=services/worker:services/api:packages/pipeline python scripts/automat
   --baseline docs/quality/speaker-diagnostics-2026-09-20/regression.json \
   --candidate .runtime/speaker-reconsider-approved/comparison.json \
   --reviews-dir .runtime/speaker-reconsider-approved \
-  --predictions .runtime/dicow-results/results.json \
-  --manifest .runtime/dicow-full-manifest.json \
+  --predictions .runtime/dicow-overlap-checked/results.json \
+  --manifest .runtime/dicow-overlap-manifest.json \
   --output .runtime/target-review-automation
 ```
 
 현재 자료에서 종료 코드 2가 정상적인 채택 거부 결과입니다. 이 명령은 이미 생성된 모델 결과를 평가·연결합니다. 새 음원의 모델 추론, 관리화면 검수 버튼, 자동 배포·게시까지 실행하는 명령은 아닙니다. 기존 manifest/예측 결과의 화자 대응을 유지해야 하며 검수 후보를 자동 수정 근거로 승격하면 안 됩니다.
+
+## 재검토 후 추가 차단
+
+Claude 후속 검토에서 지적한 누락/잘린 대상 화자 결과를 막았습니다. 모든 예상 화자의 결과와 정상 종료 메타데이터가 있어야 후보를 만들며, 알 수 없는 조건 ID는 무시하지 않고 거부합니다. 기존 결과 덮어쓰기 가능성은 추론 전에 전체 입력을 점검해 차단합니다. 단어별 화자·문구·시각의 전후 일치도 실제 비교합니다. 음원 생성과 검증은 동일한 `render_case` 함수를 사용합니다.
+
+종료 정보가 없던 기존 결과는 그대로 재사용하지 않고 겹말 4건을 새로 추론했습니다. 모두 정상 종료했고 CER은 25% 6/399, 50% 126/399로 같았습니다. 갱신된 후보도 48단어, 변경 0, 품질 판정은 정답 미증가로 거부입니다. 공개 수치는 `dicow-checked.json`에 있습니다. 전체 Python **486통과/5skip**, 변경 파일 Ruff 통과.
 
 ## 다음 순서
 

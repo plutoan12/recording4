@@ -33,8 +33,8 @@ def propose_target_reviews(reviews, predictions, *, minimum_phrase=12):
                 phrase = source[block.a : block.a + block.size]
                 if (
                     block.size < minimum_phrase
-                    or source.count(phrase) != 1
-                    or hypothesis.count(phrase) != 1
+                    or source.find(phrase) != source.rfind(phrase)
+                    or hypothesis.find(phrase) != hypothesis.rfind(phrase)
                 ):
                     continue
                 for i in range(block.a, block.a + block.size):

@@ -91,7 +91,19 @@ def main():
         model.set_tokenizer(tokenizer)
     rows = json.loads(args.output.read_text()) if args.output.exists() else []
     revision = (args.model / "revision.txt").read_text().strip()
-    for item in json.loads(args.manifest.read_text()):
+    items = json.loads(args.manifest.read_text())
+    if len({row["id"] for row in rows}) != len(rows):
+        raise ValueError("Duplicate prior evidence ID")
+    # Validate the whole batch before generating or replacing any row.
+    for item in items:
+        prior = next((r for r in rows if r["id"] == item["id"]), None)
+        if prior and (
+            prior.get("run_fingerprint")
+            != run_fingerprint(item, revision, args.quantize, args.ctc_weight)
+            or prior.get("sha256") != hashlib.sha256(Path(item["audio"]).read_bytes()).hexdigest()
+        ):
+            raise ValueError("Existing evidence differs; use a new output file to preserve it")
+    for item in items:
         fingerprint = run_fingerprint(item, revision, args.quantize, args.ctc_weight)
         path = Path(item["audio"])
         previous = next((r for r in rows if r["id"] == item["id"]), None)
@@ -149,9 +161,7 @@ def main():
             model_revision=revision,
             run_fingerprint=fingerprint,
             target=item["target"],
-            generation_possibly_truncated=(
-                int(tokens.shape[-1]) >= 200 and int(tokens[0, -1]) != tokenizer.eos_token_id
-            ),
+            generation_possibly_truncated=int(tokens[0, -1]) != tokenizer.eos_token_id,
         )
         rows = [r for r in rows if r["id"] != item["id"]]
         rows.append(row)

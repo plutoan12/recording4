@@ -69,8 +69,68 @@ def test_batch_rejects_audio_mismatch_and_invalidates_old_completion(tmp_path, m
             [row()],
             [row()],
             tmp_path,
-            [dict(id="clean-0", sha256="b" * 64, hypothesis="hello")],
+            [
+                dict(
+                    id="clean-0",
+                    sha256="b" * 64,
+                    hypothesis="hello",
+                    generation_possibly_truncated=False,
+                )
+            ],
             [dict(id="clean-0", target="A")],
             tmp_path,
         )
     assert json.loads((tmp_path / "summary.json").read_text())["status"] == "running"
+
+
+def test_batch_waits_for_all_target_transcripts(tmp_path, monkeypatch):
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[1] / "scripts"))
+    from automate_speaker_review import run
+
+    with pytest.raises(ValueError, match="Incomplete target"):
+        run(
+            [row()],
+            [row()],
+            tmp_path,
+            [
+                dict(
+                    id="clean-0",
+                    sha256="a" * 64,
+                    hypothesis="hello",
+                    generation_possibly_truncated=False,
+                )
+            ],
+            [dict(id="clean-0", target="A"), dict(id="clean-1", target="B")],
+            tmp_path,
+        )
+
+
+@pytest.mark.parametrize("flag", [None, True])
+def test_batch_blocks_missing_end_metadata_or_truncated_decode(tmp_path, monkeypatch, flag):
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[1] / "scripts"))
+    from automate_speaker_review import run
+
+    with pytest.raises(ValueError, match="Incomplete or unverified decode"):
+        run(
+            [row()],
+            [row()],
+            tmp_path,
+            [
+                dict(
+                    id="clean-0",
+                    sha256="a" * 64,
+                    hypothesis="hello",
+                    generation_possibly_truncated=flag,
+                )
+            ],
+            [dict(id="clean-0", target="A")],
+            tmp_path,
+        )
+
+
+def test_batch_rejects_unknown_case_instead_of_silent_empty_success(tmp_path, monkeypatch):
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[1] / "scripts"))
+    from automate_speaker_review import run
+
+    with pytest.raises(ValueError, match="Unknown evaluation case"):
+        run([row()], [row()], tmp_path, [dict(id="missing-0")], [], tmp_path)
