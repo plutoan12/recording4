@@ -177,6 +177,12 @@ def evaluate(
             # 두 방법을 끝 시각으로 견주면 안 되는 이유입니다.
             "max_start_error_seconds": round(max(starts), 3),
             "max_end_error_seconds": round(max(ends), 3),
+            # 첫 자막을 뺀 값도 남깁니다. 사람 목소리 세 문장 검사에서 강제
+            # 정렬의 오차가 첫 자막에만 몰려 있었습니다(0.77 / 0.08 / 0.07초).
+            # 그것이 이 조건들에서도 그런지는 최댓값 하나로는 알 수 없습니다.
+            "max_start_error_after_first_seconds": (
+                round(max(starts[1:]), 3) if len(starts) > 1 else None
+            ),
             "text_preserved": same,
         }
         if method.startswith("align"):
@@ -240,9 +246,10 @@ def summarize(
     어긋남 값을 여러 개 재면 값마다 줄을 나눕니다. 한 줄로 묶어 가장 나쁜 값만
     보이면, 어느 지점에서 뒤집히는지가 사라집니다.
     """
-    print("\n조건별 최대 오차(초) — 시작 / 끝. 작을수록 좋습니다")
-    print("끝 시각의 정답은 에너지 문턱이라 말끝 숨소리·잔향만큼 늦습니다.")
-    print("길이를 그대로 옮기는 방법은 그 정답과 저절로 맞으므로, 끝으로는 견주지 마세요.")
+    print("\n조건별 최대 시작 오차(초) — 전체 / 첫 자막 뺀 값. 작을수록 좋습니다")
+    print("끝 시각으로는 견주지 않습니다. 정답이 에너지 문턱이라 말끝 숨소리만큼")
+    print("늦고, 길이를 그대로 옮기는 방법은 그 정답과 저절로 맞기 때문입니다.")
+    print("첫 자막을 뺀 값은 오차가 첫 자막에만 몰렸는지 보려는 것입니다.")
     head = "  ".join(f"{m:>17}" for m in methods)
     print(f"\n{'조건':22} {'길이(초)':>9} {'어긋남':>8}  {head}")
     for entry in results:
@@ -260,8 +267,13 @@ def summarize(
                     cells.append(f"{'거부':>17}")
                 else:
                     begin = max(c["max_start_error_seconds"] for c in worst)
-                    finish = max(c["max_end_error_seconds"] for c in worst)
-                    cells.append(f"{begin:7.3f} /{finish:8.3f}")
+                    rest = [
+                        c["max_start_error_after_first_seconds"]
+                        for c in worst
+                        if c.get("max_start_error_after_first_seconds") is not None
+                    ]
+                    tail = f"{max(rest):8.3f}" if rest else f"{'—':>8}"
+                    cells.append(f"{begin:7.3f} /{tail}")
             print(
                 f"{entry['variant']:22} {entry['duration_seconds']:9.1f} {drift:8.2f}  "
                 + "  ".join(cells)

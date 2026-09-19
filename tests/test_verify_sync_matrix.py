@@ -235,3 +235,36 @@ def test_matrix_says_so_when_the_sample_id_is_missing(matrix, tmp_path):
     (tmp_path / "expected.json").write_text(json.dumps({"gap": 1.0, "sentences": []}))
     # 없는 것을 있는 척하면 안 됩니다. 옛 폴더에는 id가 없습니다.
     assert matrix.sample_name(tmp_path) == "알 수 없음"
+
+
+def test_matrix_separates_the_first_cue_error(matrix, monkeypatch):
+    """오차가 첫 자막에만 몰렸는지 보이려면 첫 자막을 뺀 값도 있어야 합니다."""
+    truth = [Cue(start=1, end=3, text="하나"), Cue(start=5, end=7, text="둘")]
+    monkeypatch.setattr(
+        matrix,
+        "realign_subtitles",
+        lambda *a, **k: (
+            [Cue(start=1.8, end=3.8, text="하나"), Cue(start=5.05, end=7.05, text="둘")],
+            {"max_shift_seconds": 0.8},
+        ),
+    )
+    found = matrix.evaluate(Path("unused"), truth, 0.0, 0.5, "align")
+    assert found["max_start_error_seconds"] == 0.8
+    # 첫 자막만 0.8초 늦고 둘째는 0.05초입니다. 최댓값 하나로는 안 보입니다.
+    assert found["max_start_error_after_first_seconds"] == 0.05
+
+
+def test_matrix_leaves_the_first_cue_column_empty_for_one_cue(matrix, monkeypatch):
+    truth = [Cue(start=1, end=3, text="하나")]
+    monkeypatch.setattr(
+        matrix,
+        "realign_subtitles",
+        lambda *a, **k: ([Cue(start=1.8, end=3.8, text="하나")], {"max_shift_seconds": 0.8}),
+    )
+    # 자막이 하나면 뺄 것이 없습니다. 0으로 적으면 잘 맞은 것처럼 보입니다.
+    assert (
+        matrix.evaluate(Path("unused"), truth, 0.0, 0.5, "align")[
+            "max_start_error_after_first_seconds"
+        ]
+        is None
+    )
