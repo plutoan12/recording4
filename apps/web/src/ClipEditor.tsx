@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { request, type SourceAsset } from './api'
+import { downloadFile, request, type SourceAsset } from './api'
 import { PublicationForm } from './PublicationForm'
 import type { WorkflowDraft } from './WorkflowPanel'
 
 type Cue = { start: number; end: number; text: string }
 type Suggestion = { start: number; end: number; title: string; reason: string }
 type Violation = { index: number; kind: string; detail: string }
-type Task = { id: string; source_asset_id: string; kind: string; state: string; error: string | null;
+type Task = { id: string; source_asset_id: string; clip_edit_id: string | null; kind: string; state: string; error: string | null;
   result: { artifact_id?: string; scenes?: {start: number; end: number}[] } }
 
 export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWorkflow: (draft:WorkflowDraft)=>void }) {
@@ -152,6 +152,10 @@ export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWo
       {t.state === 'failed' && <button disabled={busy} onClick={() => void act(async () => {
         await request(`/media-tasks/${t.id}/retry`, {method:'POST'}); await refresh()
       })}>재시도</button>}
+      {t.kind === 'render' && t.clip_edit_id && (['srt','vtt'] as const).map(fmt => <button key={fmt} disabled={busy} onClick={() => void act(async () => {
+        await downloadFile(`/clips/${t.clip_edit_id}/subtitles?format=${fmt}`, `clip-${t.clip_edit_id}.${fmt}`)
+        setMessage(`자막 ${fmt.toUpperCase()} 파일을 내려받았습니다. 시각은 클립 시작이 0초입니다.`)
+      })}>자막 {fmt.toUpperCase()} 내려받기</button>)}
       {t.result.artifact_id && <>
         <button disabled={busy} onClick={() => void act(async () => {
           const p = await request<{url:string}>(`/artifacts/${t.result.artifact_id}/preview`)

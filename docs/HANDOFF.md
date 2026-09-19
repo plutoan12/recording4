@@ -1,6 +1,6 @@
 # 협업 인수인계
 
-최종 갱신: 2026-09-18
+최종 갱신: 2026-09-19
 
 ## 현재 상태
 
@@ -724,3 +724,42 @@ CI가 토큰 없이도 이 경로를 점검합니다(`화자 분리 토큰 오�
 - 표본은 네 문장뿐입니다. 긴 대본·구어체·고유명사·존댓말 어조는 알 수 없습니다.
 - 더빙 길이 맞춤(번역문이 길어져 음성이 원본 길이에 안 맞는 경우)은 별도 단계이고 여기서 재지 않습니다.
 - `LANGUAGE_RULES`에는 한국어와 영어만 있습니다.
+
+## 클립 편집본 자막 파일(SRT·VTT) 내보내기 (2026-09-19)
+
+- 사용자 요청: 깃허브나 다른 사이트에 자막 파일 생성 코드가 있는지 확인하고, 클립 편집본 기준으로 SRT·VTT만 내보내도록 구현. 브랜치 `claude/subtitle-file-generation-38xjz4`.
+- 담당 파일: `packages/pipeline/pipeline/subtitle_files.py`(신규), `services/worker/worker/rendering.py`, `services/api/adminapi/routers/editing.py`, `apps/web/src/{api.ts,ClipEditor.tsx}`, `tests/test_subtitle_files.py`(신규), `tests/test_editing_api.py`, `README.md`, `docs/{SHORT_FORM_EDITING,OPEN_SOURCE_INTEGRATIONS,TECH_DECISIONS,HANDOFF}.md`.
+- 의존 작업: 없습니다. 새 런타임 의존성도 추가하지 않았습니다(pysubs2는 이미 있습니다).
+- **Codex 작업과 겹칠 수 있는 파일**: `routers/editing.py`, `rendering.py`, `ClipEditor.tsx`.
+
+### 조사 결과
+
+자막을 만드는 코드는 이미 있었고 **파일로 내보내는 경로만** 없었습니다. `pipeline/subtitles.py`가 표시 규칙을, `pipeline/alignment.py`가 시각을 만들고, `worker/rendering.py:write_subtitles()`가 pysubs2로 ASS를 씁니다. 그런데 그 ASS는 임시 폴더에 썼다가 FFmpeg로 영상에 구운 뒤 지워집니다. 외부 라이브러리를 더 찾을 필요는 없었습니다. `docs/OPEN_SOURCE_INTEGRATIONS.md`에 이미 `srt`·`webvtt-py`는 pysubs2와 중복이라고 적혀 있습니다.
+
+### 구현한 것
+
+- `pipeline/subtitle_files.py`: `subtitle_file(spec, "srt"|"vtt", rules)`가 편집본 자막을 문자열로 만듭니다. 파일 입출력은 하지 않습니다. ASS 표기 차단(`plain_ass`)을 여기로 옮기고 `rendering.py`가 같은 함수를 씁니다.
+- `GET /clips/{id}/subtitles?format=srt|vtt`: 편집본 자막을 파일로 내려줍니다. 기본값은 SRT입니다.
+- 관리화면 렌더 결과 줄에 **자막 SRT·VTT 내려받기** 버튼. 자막 파일은 토큰이 필요해 `<a href>`로 바로 받을 수 없어 `api.ts:downloadFile()`이 받아서 저장합니다.
+
+### 설계 판단
+
+- 자막의 출처는 **렌더 요청에 저장된 설정 사본**입니다. 최신 대본을 읽으면 그 뒤에 대본을 고친 경우 영상과 다른 자막을 내보내게 됩니다. 테스트로 고정했습니다.
+- 시각은 클립 시작이 0초입니다. 영상에 굽는 경로와 같은 `clip_cues()`·`apply_rules()`를 거치므로 줄바꿈·분할도 화면과 같습니다.
+- 화면 제목은 넣지 않습니다. SRT·WebVTT에는 위치 지정이 없어 넣으면 클립 내내 첫 자막과 겹칩니다.
+- 저장하지 않고 요청할 때 만듭니다. 저장하면 승인·체크섬 대상 결과물이 하나 더 생기고 편집본과 어긋난 사본이 남을 수 있습니다.
+- 자막이 하나도 없는 편집본은 빈 파일을 주지 않고 409로 막습니다. 빈 SRT는 빈 파일이라 실패와 구분되지 않습니다.
+
+### 검증 결과
+
+- `pytest -q`: **287 통과 / 6 skip**(SQLite). 새 테스트 10개(`test_subtitle_files.py` 8, `test_editing_api.py` 2).
+- 내보낸 SRT의 시각·줄바꿈이 `write_subtitles()`가 만든 ASS와 자막 단위로 일치함을 테스트로 확인했습니다(제목 이벤트 제외).
+- ASS 표기(`{\pos(0,0)}`)를 넣어도 글자가 사라지지 않음을 확인했습니다. 막지 않으면 pysubs2가 SRT로 옮길 때 그 부분을 통째로 지웁니다.
+- `ruff check`·`ruff format --check` 통과. `npm run typecheck`·`npm run build` 통과.
+- **미검증**: PostgreSQL에서의 실행(CI 대상), 실제 재생기(YouTube·VLC 등)에서의 자막 표시, 브라우저에서의 실제 내려받기 동작.
+
+### 남은 작업
+
+- 표시 규칙(`R4_SUBTITLE_*`)을 렌더 뒤에 바꾸면 파일 자막이 그 편집본의 화면 자막과 달라집니다. 규칙을 바꾼 편집본은 다시 렌더해야 합니다. 렌더 시점 규칙을 함께 저장하면 없앨 수 있는 차이입니다.
+- 외부 SRT를 **가져오는** 경로는 없습니다. 생기면 ffsubsync 도입 시점입니다(`docs/OPEN_SOURCE_INTEGRATIONS.md`).
+- 단어별 강조(ASS 전용)와 게시 시 YouTube 자막 트랙 업로드는 이번 범위가 아닙니다.

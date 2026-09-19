@@ -32,6 +32,7 @@
   - **Hugging Face 토큰이 필요합니다.** pyannote 화자 분리 모델은 게이트 모델이라 약관 동의 후 발급한 토큰을 `R4_HF_TOKEN`에 넣어야 합니다. 토큰이 없으면 모델을 내려받기 전에 막고 안내를 보여 줍니다. 모델 자체의 이용 조건은 whisperx의 BSD 라이선스와 별개입니다.
   - 검증 범위: 화자 배정 규칙과 작업 연결은 대역으로 테스트했고, 워커 이미지 안에서 `DiarizationPipeline` 진입점이 실제로 있는지 CI가 확인합니다. **실제 pyannote 추론 품질은 토큰이 필요해 아직 검증하지 못했습니다.**
 - kss → `pipeline/subtitles.py:sentences()`. 자막을 나눌 때 문장 경계를 먼저 찾습니다. kss가 없으면 구두점 기준으로 내려갑니다.
+- pysubs2 → `worker/rendering.py:write_subtitles()`(영상에 굽는 ASS)와 `pipeline/subtitle_files.py:subtitle_file()`(내려받는 SRT·WebVTT). 두 경로가 같은 `clip_cues()`·`apply_rules()`를 거치므로 파일 자막과 화면 자막의 시각·줄바꿈이 같습니다.
 
 검토한 뒤 채택하지 않은 후보도 남깁니다. [aeneas](https://github.com/readbeyond/aeneas)는 **AGPL v3**이라 네트워크 서비스 제공 시 서버 소스 공개 의무가 생깁니다. [ctc-forced-aligner](https://github.com/MahmoudAshraf97/ctc-forced-aligner)는 코드가 BSD이나 **기본 모델이 CC-BY-NC 4.0(비상업)** 입니다. 두 경우 모두 이 저장소의 사용 형태와 맞지 않아 제외했습니다.
 
@@ -100,7 +101,7 @@
 - [ffsubsync](https://github.com/smacke/ffsubsync) (MIT): 이미 있는 자막 파일의 싱크를 오디오로 보정합니다. 지금은 자막을 우리가 만들어 쓸 자리가 없습니다. 외부 SRT 반입 경로가 생기면 그때가 적기입니다.
 - silero-vad (MIT): 별도로 설치하지 않았습니다. faster-whisper가 Silero VAD를 내장하고 있고 `analysis.py:transcribe()`가 `vad_filter=True`로 이미 사용합니다.
 - [subaligner](https://github.com/baxtree/subaligner), NeMo Forced Aligner: 정렬 품질은 좋으나 TensorFlow/NeMo를 통째로 끌어옵니다. 이미 CPU 전용 휠로 설치량을 줄인 결정과 어긋납니다.
-- `srt`, `webvtt-py`: pysubs2가 SRT·WebVTT·ASS를 모두 처리하므로 중복입니다.
+- `srt`, `webvtt-py`: pysubs2가 SRT·WebVTT·ASS를 모두 처리하므로 중복입니다. 내보내기도 pysubs2로 구현했습니다(`pipeline/subtitle_files.py`).
 - [Subtitle Edit](https://github.com/SubtitleEdit/subtitleedit) (GPL, C#): 의존성으로 쓸 수 없습니다. CPS 계산과 줄 분배 규칙은 참고 자료로만 봅니다.
 
 조회한 주요 라이선스 사본은 [third_party/licenses](../third_party/licenses)에 보관합니다. 설치 패키지의 라이선스·NOTICE도 그대로 유지합니다. FFmpeg는 빌드 옵션에 따라 조건이 달라지므로 실제 배포 바이너리와 소스 제공 조건을 확인해야 합니다. Python 라이브러리의 라이선스가 모델 가중치·API 서비스 약관까지 대체하지는 않습니다.
@@ -110,6 +111,7 @@
 - `/clips`: 구간·화면·자막·제목을 검증하고 불변 편집본 및 렌더 요청 생성.
 - `media.run` → Celery 워커: S3 다운로드 → 로컬 처리 → 결과 업로드 → DB 결과물 등록.
 - `/source-assets/{id}/analyze`: 로컬 STT 또는 장면 감지. 분석 의존성 설치가 필요하며 STT 첫 실행은 모델을 다운로드할 수 있습니다.
+- `/clips/{id}/subtitles?format=srt|vtt`: 편집본 자막을 SRT·WebVTT 파일로 내려받습니다. 생성은 `pipeline/subtitle_files.py:subtitle_file()`이며 pysubs2가 형식을 씁니다. 저장하지 않고 요청할 때 만듭니다.
 
 ## `[subtitles]` 설치 방법
 

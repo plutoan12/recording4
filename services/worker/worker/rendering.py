@@ -11,7 +11,10 @@ from pathlib import Path
 import pysubs2
 
 from pipeline.editing import EditSpec, clip_cues
+from pipeline.subtitle_files import plain_ass
 from pipeline.subtitles import DEFAULT_RULES, SubtitleRules, apply_rules
+
+__all__ = ["RenderError", "ffmpeg_binary", "plain_ass", "render_clip", "write_subtitles"]
 
 
 class RenderError(RuntimeError):
@@ -23,11 +26,6 @@ def ffmpeg_binary() -> str:
     if not binary:
         raise RenderError("FFmpeg가 없습니다. 워커 이미지를 사용하거나 FFmpeg를 설치하세요.")
     return binary
-
-
-def plain_ass(text: str) -> str:
-    # User subtitles are plain text, never ASS override instructions.
-    return text.replace("\\", "＼").replace("{", "｛").replace("}", "｝").replace("\n", r"\N")
 
 
 def write_subtitles(path: Path, spec: EditSpec, rules: SubtitleRules = DEFAULT_RULES) -> None:

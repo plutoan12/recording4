@@ -75,6 +75,29 @@ export async function request<T>(path: string, init: RequestInit = {}): Promise<
   return response.status === 204 ? (undefined as T) : ((await response.json()) as T)
 }
 
+export async function downloadFile(path: string, filename: string): Promise<void> {
+  // 자막 파일은 토큰이 필요해 <a href>로 바로 받을 수 없습니다. 받아서 저장만 합니다.
+  const token = getToken()
+  const response = await fetch(`${BASE}${path}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  })
+  if (!response.ok) {
+    const detail = await response
+      .json()
+      .then((body: { detail?: string }) => body.detail)
+      .catch(() => undefined)
+    throw new ApiError(response.status, typeof detail === 'string' ? detail : `내려받기에 실패했습니다 (${response.status})`)
+  }
+  const url = URL.createObjectURL(await response.blob())
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  URL.revokeObjectURL(url)
+}
+
 export async function login(email: string, password: string): Promise<void> {
   const body = await request<{ access_token: string }>('/auth/login', {
     method: 'POST',

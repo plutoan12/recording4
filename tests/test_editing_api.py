@@ -121,3 +121,51 @@ def test_failed_worker_can_retry(client, auth_headers, asset, monkeypatch):
     assert "secret-token" not in str(tasks)
     retry = client.post(f"/media-tasks/{created['id']}/retry", headers=auth_headers)
     assert retry.status_code == 202 and retry.json()["state"] == "pending"
+
+
+def test_subtitle_export_uses_the_clip_edit_snapshot(client, auth_headers, asset):
+    """대본이 뒤에 바뀌어도 편집본에 저장된 자막을 그대로 내보냅니다."""
+    cues = [{"start": 12, "end": 16, "text": "편집본에 저장한 자막"}]
+    created = client.post(
+        "/clips",
+        headers=auth_headers,
+        json={"source_asset_id": str(asset.id), "start": 10, "end": 20, "cues": cues},
+    ).json()
+    clip_id = created["clip_edit_id"]
+    client.put(
+        f"/source-assets/{asset.id}/transcript",
+        headers=auth_headers,
+        json={"cues": [{"start": 12, "end": 16, "text": "나중에 바꾼 대본"}]},
+    )
+
+    srt = client.get(f"/clips/{clip_id}/subtitles", headers=auth_headers)
+    assert srt.status_code == 200
+    assert srt.headers["content-type"] == "application/x-subrip; charset=utf-8"
+    assert srt.headers["content-disposition"] == f'attachment; filename="clip-{clip_id}.srt"'
+    assert srt.text.startswith("1\n00:00:02,000 --> 00:00:06,000\n편집본에 저장한 자막")
+    assert "나중에 바꾼 대본" not in srt.text
+
+    vtt = client.get(f"/clips/{clip_id}/subtitles?format=vtt", headers=auth_headers)
+    assert vtt.status_code == 200
+    assert vtt.headers["content-type"] == "text/vtt; charset=utf-8"
+    assert vtt.text.startswith("WEBVTT\n\n1\n00:00:02.000 --> 00:00:06.000\n")
+
+
+def test_subtitle_export_rejects_unknown_clip_format_and_empty_captions(
+    client, auth_headers, asset
+):
+    assert client.get(f"/clips/{uuid.uuid4()}/subtitles").status_code == 401
+    missing = client.get(f"/clips/{uuid.uuid4()}/subtitles", headers=auth_headers)
+    assert missing.status_code == 404
+    created = client.post(
+        "/clips",
+        headers=auth_headers,
+        json={"source_asset_id": str(asset.id), "start": 0, "end": 10},
+    ).json()
+    clip_id = created["clip_edit_id"]
+    assert (
+        client.get(f"/clips/{clip_id}/subtitles?format=ass", headers=auth_headers).status_code
+        == 422
+    )
+    empty = client.get(f"/clips/{clip_id}/subtitles", headers=auth_headers)
+    assert empty.status_code == 409 and "자막이 없습니다" in empty.json()["detail"]
