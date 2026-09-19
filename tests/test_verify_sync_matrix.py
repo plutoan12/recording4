@@ -159,3 +159,61 @@ def test_matrix_gate_none_judges_nothing(matrix):
     assert matrix.pick("none", parser) == ()
     # 빈 값은 기본값(shift)으로 떨어집니다. 판정을 끄려면 none을 써야 합니다.
     assert matrix.pick("", parser) == ("shift",)
+
+
+def test_matrix_reads_several_drift_values(matrix):
+    """어긋남을 여러 값으로 재야 어디서 뒤집히는지 보입니다."""
+    import argparse
+
+    parser = argparse.ArgumentParser()
+    assert matrix.drifts("0,0.15,0.3", parser) == (0.0, 0.15, 0.3)
+    # 비우면 어긋남 없음입니다. 예전처럼 한 덩어리 어긋남만 재는 자리입니다.
+    assert matrix.drifts("", parser) == (0.0,)
+
+
+def test_matrix_refuses_a_drift_that_is_not_a_number(matrix):
+    import argparse
+
+    parser = argparse.ArgumentParser()
+    for bad in ("0.1,여보세요", "-0.2"):
+        with pytest.raises(SystemExit):
+            matrix.drifts(bad, parser)
+
+
+def test_matrix_table_keeps_each_drift_on_its_own_row(matrix, capsys):
+    """값마다 줄을 나눠야 합니다. 묶으면 가장 나쁜 값만 남아 뒤집힘이 사라집니다."""
+    results = [
+        {
+            "variant": "music_intro",
+            "duration_seconds": 100.0,
+            "cue_count": 9,
+            "cases": {
+                matrix.case_key("shift", 0.0, 0.0): {
+                    "pass": True,
+                    "max_start_error_seconds": 0.04,
+                    "max_end_error_seconds": 0.04,
+                },
+                matrix.case_key("shift", 0.0, 0.6): {
+                    "pass": False,
+                    "max_start_error_seconds": 2.4,
+                    "max_end_error_seconds": 2.4,
+                },
+                matrix.case_key("align", 0.0, 0.0): {
+                    "pass": False,
+                    "max_start_error_seconds": 1.0,
+                    "max_end_error_seconds": 1.0,
+                },
+                matrix.case_key("align", 0.0, 0.6): {
+                    "pass": False,
+                    "max_start_error_seconds": 1.0,
+                    "max_end_error_seconds": 1.0,
+                },
+            },
+        }
+    ]
+    matrix.summarize(results, ("shift", "align"), (0.0, 0.6))
+    rows = [line for line in capsys.readouterr().out.splitlines() if "music_intro" in line]
+    assert len(rows) == 2
+    # 어긋남이 없으면 shift가 낫고, 크면 뒤집힙니다. 그게 줄마다 보여야 합니다.
+    assert "0.040" in rows[0] and "1.000" in rows[0]
+    assert "2.400" in rows[1] and "1.000" in rows[1]

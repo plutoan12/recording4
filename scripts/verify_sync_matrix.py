@@ -200,28 +200,71 @@ def pick(value: str, parser: argparse.ArgumentParser) -> tuple[str, ...]:
     return chosen or ("shift",)
 
 
-def summarize(results: list[dict], methods: tuple[str, ...]) -> None:
-    """조건마다 방법별 최대 오차를 한 표로 찍습니다. 눈으로 견줄 수 있어야 합니다."""
+def drifts(value: str, parser: argparse.ArgumentParser) -> tuple[float, ...]:
+    """쉼표로 준 어긋남 값들. 한 번 만든 소리로 여러 값을 잽니다.
+
+    align이 이기는 지점이 있는지 보려면 한 값만으로는 모자랍니다. 값마다 따로
+    돌리면 소리를 매번 새로 만들어 느리고, 같은 소리로 잰 값인지도 흐려집니다.
+    """
+    chosen = []
+    for item in value.split(","):
+        item = item.strip()
+        if not item:
+            continue
+        try:
+            number = float(item)
+        except ValueError:
+            parser.error(f"어긋남은 숫자여야 합니다: {item}")
+        if number < 0:
+            parser.error(f"어긋남은 0 이상이어야 합니다: {item}")
+        chosen.append(number)
+    return tuple(chosen) or (0.0,)
+
+
+def summarize(
+    results: list[dict], methods: tuple[str, ...], drift_values: tuple[float, ...] = (0.0,)
+) -> None:
+    """조건마다 방법별 최대 오차를 한 표로 찍습니다. 눈으로 견줄 수 있어야 합니다.
+
+    어긋남 값을 여러 개 재면 값마다 줄을 나눕니다. 한 줄로 묶어 가장 나쁜 값만
+    보이면, 어느 지점에서 뒤집히는지가 사라집니다.
+    """
     print("\n조건별 최대 오차(초) — 시작 / 끝. 작을수록 좋습니다")
     print("끝 시각의 정답은 에너지 문턱이라 말끝 숨소리·잔향만큼 늦습니다.")
     print("길이를 그대로 옮기는 방법은 그 정답과 저절로 맞으므로, 끝으로는 견주지 마세요.")
     head = "  ".join(f"{m:>17}" for m in methods)
-    print(f"\n{'조건':22} {'길이(초)':>9}  {head}")
+    print(f"\n{'조건':22} {'길이(초)':>9} {'어긋남':>8}  {head}")
     for entry in results:
-        cells = []
-        for method in methods:
-            worst = [
-                case
-                for key, case in entry["cases"].items()
-                if key.split(":")[0] == method or len(methods) == 1
-            ]
-            if any("rejected" in case for case in worst):
-                cells.append(f"{'거부':>17}")
-            else:
-                begin = max(c["max_start_error_seconds"] for c in worst)
-                finish = max(c["max_end_error_seconds"] for c in worst)
-                cells.append(f"{begin:7.3f} /{finish:8.3f}")
-        print(f"{entry['variant']:22} {entry['duration_seconds']:9.1f}  " + "  ".join(cells))
+        for drift in drift_values:
+            cells = []
+            for method in methods:
+                worst = [
+                    case
+                    for key, case in entry["cases"].items()
+                    if case_key_matches(key, method, drift)
+                ]
+                if not worst:
+                    cells.append(f"{'—':>17}")
+                elif any("rejected" in case for case in worst):
+                    cells.append(f"{'거부':>17}")
+                else:
+                    begin = max(c["max_start_error_seconds"] for c in worst)
+                    finish = max(c["max_end_error_seconds"] for c in worst)
+                    cells.append(f"{begin:7.3f} /{finish:8.3f}")
+            print(
+                f"{entry['variant']:22} {entry['duration_seconds']:9.1f} {drift:8.2f}  "
+                + "  ".join(cells)
+            )
+
+
+def case_key(method: str, offset: float, drift: float) -> str:
+    """한 칸의 이름. 방법·오프셋·어긋남을 모두 담아야 나중에 되짚을 수 있습니다."""
+    return f"{method}:{offset}:{drift}"
+
+
+def case_key_matches(key: str, method: str, drift: float) -> bool:
+    parts = key.split(":")
+    return len(parts) == 3 and parts[0] == method and float(parts[2]) == drift
 
 
 def main() -> int:
@@ -239,10 +282,13 @@ def main() -> int:
     # 조건이 10가지라 둘 다 재면 오래 걸립니다. 필요한 조건만 고를 수 있게 합니다.
     parser.add_argument("--variants", default="", help="쉼표로 구분한 조건 이름")
     # 자막마다 어긋남을 점점 키웁니다. 이동값 하나로는 못 고치는 모양입니다.
-    parser.add_argument("--drift", type=float, default=0.0, help="자막 하나당 더할 초")
+    parser.add_argument(
+        "--drift", default="0", help="자막 하나당 더할 초. 쉼표로 여러 값을 줄 수 있습니다"
+    )
     args = parser.parse_args()
     methods = pick(args.method, parser)
     gated = methods if args.gate is None else pick(args.gate, parser)
+    drift_values = drifts(args.drift, parser)
     wanted = [name.strip() for name in args.variants.split(",") if name.strip()]
     known = {spec[0] for spec in VARIANTS}
     if unknown := set(wanted) - known:
@@ -262,17 +308,19 @@ def main() -> int:
         }
         for method in methods:
             for offset in (0.0, 2.5):
-                key = f"{method}:{offset}" if len(methods) > 1 else str(offset)
-                with (
-                    (args.out / spec[0] / f"{method}-{offset}.log").open("w") as log,
-                    contextlib.redirect_stdout(log),
-                    contextlib.redirect_stderr(log),
-                ):
-                    logging.disable(logging.CRITICAL)
-                    entry["cases"][key] = evaluate(
-                        source, truth, offset, args.limit, method, args.drift
-                    )
-                    logging.disable(logging.NOTSET)
+                for drift in drift_values:
+                    key = case_key(method, offset, drift)
+                    log_name = f"{method}-{offset}-{drift}.log"
+                    with (
+                        (args.out / spec[0] / log_name).open("w") as log,
+                        contextlib.redirect_stdout(log),
+                        contextlib.redirect_stderr(log),
+                    ):
+                        logging.disable(logging.CRITICAL)
+                        entry["cases"][key] = evaluate(
+                            source, truth, offset, args.limit, method, drift
+                        )
+                        logging.disable(logging.NOTSET)
         results.append(entry)
         (args.out / "results.json").write_text(
             json.dumps(
@@ -280,6 +328,7 @@ def main() -> int:
                     "limit": args.limit,
                     "methods": list(methods),
                     "gated": list(gated),
+                    "drifts": list(drift_values),
                     "results": results,
                 },
                 ensure_ascii=False,
@@ -287,7 +336,7 @@ def main() -> int:
             )
         )
         print(json.dumps(entry, ensure_ascii=False), flush=True)
-    summarize(results, methods)
+    summarize(results, methods, drift_values)
     failed = [
         key
         for entry in results
