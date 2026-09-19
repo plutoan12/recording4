@@ -18,6 +18,9 @@ from pipeline.editing import Cue
 from pipeline.speakers import SpeakerTurn, cluster, turns_from_labels, windows
 from worker.rendering import ffmpeg_binary
 
+# getattr 기본값. 속성 이름이 버전마다 달라도 "없음"과 "None"을 구분합니다.
+_PRESENT = object()
+
 
 class MissingDependency(RuntimeError):
     """선택 의존성이 없습니다. 설치 안내는 외부 입력이 아니므로 그대로 보여줍니다."""
@@ -234,6 +237,29 @@ def diarize_by_embedding(
     return turns
 
 
+# 약관 동의가 필요한 페이지. 토큰만 있고 동의가 빠지면 같은 증상이 납니다.
+GATED_PAGES = (
+    "https://huggingface.co/pyannote/speaker-diarization-3.1",
+    "https://huggingface.co/pyannote/segmentation-3.0",
+)
+
+
+def gated_hint(detail: str) -> str:
+    """모델을 못 불러왔을 때 사람이 고칠 수 있는 말로 바꿉니다.
+
+    pyannote는 접근이 막히면 예외 대신 빈 모델을 돌려주기도 합니다. 그러면
+    한참 뒤에 엉뚱한 AttributeError로 터져서 무엇이 잘못됐는지 알 수 없습니다.
+    토큰이 있어도 두 페이지 중 하나라도 동의가 빠지면 같은 증상이 나므로,
+    둘 다 짚어 줍니다.
+    """
+    pages = "\n".join(f"  {page}" for page in GATED_PAGES)
+    return (
+        "pyannote 모델을 불러오지 못했습니다. 토큰이 있어도 약관 동의가 빠지면 같은 "
+        f"증상이 납니다. 아래 페이지 모두에서 동의했는지 확인하세요:\n{pages}\n"
+        f"원래 증상: {detail}"
+    )
+
+
 def diarize(
     source: Path,
     *,
@@ -263,7 +289,15 @@ def diarize(
         raise MissingDependency(
             "화자 분리 의존성이 없습니다. pip install '.[subtitles]'를 실행하세요."
         ) from exc
-    pipeline = DiarizationPipeline(use_auth_token=token, device=device)
+    try:
+        pipeline = DiarizationPipeline(use_auth_token=token, device=device)
+    except Exception as exc:  # noqa: BLE001 - 어떤 실패든 고칠 수 있는 말로 바꿉니다.
+        raise MissingDependency(gated_hint(f"{type(exc).__name__}: {exc}")) from exc
+    # 접근이 막히면 예외 없이 빈 모델이 돌아오기도 합니다. 여기서 잡지 않으면
+    # 다음 줄에서 AttributeError로 터지고 원인이 보이지 않습니다.
+    inner = getattr(pipeline, "model", _PRESENT)
+    if pipeline is None or inner is None:
+        raise MissingDependency(gated_hint("모델이 비어 있습니다(pyannote가 None을 돌려줬습니다)."))
     frame = pipeline(str(source), min_speakers=min_speakers, max_speakers=max_speakers)
     turns = [
         SpeakerTurn(start=float(row.start), end=float(row.end), speaker=str(row.speaker))

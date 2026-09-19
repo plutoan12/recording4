@@ -67,6 +67,28 @@ python3 scripts/ops.py status
 채널 ID가 틀리면 워커가 업로드 전에 멈춥니다. 설정 채널과 게시 요청 당시
 채널이 다르면 거부합니다.
 
+## 2.5. 올리기 전 점검 (먼저 이것부터)
+
+```bash
+R4_YOUTUBE_UPLOAD_ENABLED=true \
+R4_YOUTUBE_CREDENTIALS_FILE=~/.runtime/youtube-token.json \
+R4_YOUTUBE_CHANNEL_ID=<채널 ID> \
+  python3 scripts/preflight_publish.py
+```
+
+업로드 직전까지 필요한 것을 모두 확인하고 **영상은 올리지 않습니다**
+(`videos.insert`를 부르지 않습니다). 읽기 호출 한 번만 씁니다.
+
+걸러 내는 것:
+
+- 실행 설정이 꺼져 있음 → 워커가 업로드 직전에 막습니다.
+- 갱신 토큰 없음 → 처음 한 번만 되고 다음부터 막힙니다.
+- 업로드 권한 없음 → 업로드 때 거절당합니다.
+- 인증 파일을 남이 읽을 수 있음 → 그 파일로 계정 영상을 올리고 지울 수 있습니다.
+- **설정한 채널과 계정의 채널이 다름** → 이대로 올리면 승인한 것과 다른 채널에 영상이 남습니다. 되돌릴 수 없습니다.
+
+여기서 다 통과한 뒤에 3단계로 갑니다.
+
 ## 3. 게시 요청
 
 ```bash
