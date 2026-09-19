@@ -185,6 +185,10 @@ jobs:
       # 설치 결과가 실제로 쓸 수 있는 상태인지 확인합니다. 모델은 내려받지 않습니다.
       - name: 워커 의존성 임포트 확인
         run: |
+          set -eo pipefail
+          mkdir -p "$RUNNER_TEMP/verify"
+          # 이 출력도 마지막 요약에 모읍니다. 빌드 출력이 길어 로그를 뒤에서
+          # 읽는 도구의 창 밖으로 밀려납니다(CI 실측: 세 번 못 읽었습니다).
           docker run --rm --entrypoint python recording4-worker:ci -c "
           import torch, stable_whisper, whisperx, kss, pysubs2, faster_whisper, speechbrain
           from worker.analysis import align_text, diarize, diarize_by_embedding
@@ -224,7 +228,7 @@ jobs:
           place = getattr(getattr(cv2, 'data', None), 'haarcascades', None)
           names = sorted(os.listdir(place)) if place and os.path.isdir(place) else []
           print('cv2.data 자리', place, '/ 파일', len(names), names[:3])
-          "
+          " 2>&1 | tee -a "$RUNNER_TEMP/verify/deps.log"
 
       - name: API 이미지 빌드
         run: docker build -f infra/Dockerfile.api -t recording4-api:ci .

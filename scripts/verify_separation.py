@@ -90,8 +90,22 @@ def mix(voice: Path, music: Path, path: Path) -> Path:
 
 
 def samples(path: Path):  # noqa: ANN201 - numpy를 여기서만 들입니다.
-    """WAV를 -1~1 사이 한 갈래 소리로 읽습니다."""
+    """WAV를 -1~1 사이 한 갈래 소리로 읽습니다.
+
+    표준 `wave`는 정수 WAV만 읽습니다. 분리 결과는 torchaudio가 **32비트
+    실수**로 씁니다(CI 실측: `wave.Error: unknown format: 3`). 그래서
+    soundfile이 있으면 그쪽으로 읽고, 없으면 정수 WAV만 읽습니다. 표본을
+    만드는 쪽(러너)에는 soundfile이 없지만 거기서는 읽지 않습니다.
+    """
     import numpy as np
+
+    try:
+        import soundfile
+    except ImportError:
+        soundfile = None
+    if soundfile is not None:
+        data, _ = soundfile.read(str(path), dtype="float64", always_2d=True)
+        return data.mean(axis=1)
 
     with wave.open(str(path), "rb") as handle:
         raw = handle.readframes(handle.getnframes())
