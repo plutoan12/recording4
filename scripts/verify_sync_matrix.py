@@ -18,7 +18,7 @@ from pathlib import Path
 import numpy as np
 
 from pipeline.editing import Cue
-from worker.analysis import sync_subtitles
+from worker.analysis import SyncOptions, sync_subtitles
 
 RATE = 16000
 VARIANTS = [
@@ -121,10 +121,18 @@ def make_variant(directory: Path, out: Path, spec: tuple) -> tuple[Path, list[Cu
     return video, truth, cursor / speed
 
 
-def evaluate(source: Path, truth: list[Cue], offset: float, limit: float) -> dict:
+def evaluate(
+    source: Path,
+    truth: list[Cue],
+    offset: float,
+    limit: float,
+    options: SyncOptions | None = None,
+) -> dict:
     pushed = [Cue(start=c.start + offset, end=c.end + offset, text=c.text) for c in truth]
     try:
-        moved, meta = sync_subtitles(source, pushed)
+        moved, meta = (
+            sync_subtitles(source, pushed, options) if options else sync_subtitles(source, pushed)
+        )
         errors = [
             max(abs(a.start - b.start), abs(a.end - b.end))
             for a, b in zip(moved, truth, strict=True)
@@ -147,6 +155,7 @@ def main() -> int:
     parser.add_argument("--directory", type=Path, required=True)
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--limit", type=float, default=0.5)
+    parser.add_argument("--profile", choices=["standard", "quiet", "long_cues"], default="standard")
     args = parser.parse_args()
     args.out.mkdir(parents=True, exist_ok=True)
     results = []
@@ -165,11 +174,17 @@ def main() -> int:
                 contextlib.redirect_stderr(log),
             ):
                 logging.disable(logging.CRITICAL)
-                entry["cases"][str(offset)] = evaluate(source, truth, offset, args.limit)
+                entry["cases"][str(offset)] = evaluate(
+                    source, truth, offset, args.limit, SyncOptions(profile=args.profile)
+                )
                 logging.disable(logging.NOTSET)
         results.append(entry)
         (args.out / "results.json").write_text(
-            json.dumps({"limit": args.limit, "results": results}, ensure_ascii=False, indent=2)
+            json.dumps(
+                {"limit": args.limit, "profile": args.profile, "results": results},
+                ensure_ascii=False,
+                indent=2,
+            )
         )
         print(json.dumps(entry, ensure_ascii=False), flush=True)
     return 0 if all(c["pass"] for r in results for c in r["cases"].values()) else 1

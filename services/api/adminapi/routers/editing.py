@@ -311,7 +311,12 @@ def diarize(asset_id: uuid.UUID, payload: DiarizeRequest, user: CurrentUser, ses
 
 
 @router.post("/source-assets/{asset_id}/transcript/sync", status_code=202)
-def sync_transcript(asset_id: uuid.UUID, user: CurrentUser, session: SessionDep):
+def sync_transcript(
+    asset_id: uuid.UUID,
+    user: CurrentUser,
+    session: SessionDep,
+    profile: Literal["standard", "quiet", "long_cues"] = Query(default="standard"),
+):
     """최신 대본의 시각을 원본 음성에 맞춰 통째로 옮긴 새 버전을 만듭니다.
 
     밖에서 들인 자막이 원본과 어긋날 때 씁니다. **글자는 건드리지 않고** 시각만
@@ -331,8 +336,15 @@ def sync_transcript(asset_id: uuid.UUID, user: CurrentUser, session: SessionDep)
         )
     )
     if existing:
+        if existing.settings.get("sync_profile", "standard") != profile:
+            raise HTTPException(
+                409, "다른 방식의 싱크 보정이 진행 중입니다. 완료 후 다시 요청하세요."
+            )
         return task_response(existing)
-    return schedule(session, MediaTask(source_asset_id=asset_id, kind="sync", settings={}))
+    return schedule(
+        session,
+        MediaTask(source_asset_id=asset_id, kind="sync", settings={"sync_profile": profile}),
+    )
 
 
 @router.get("/source-assets/{asset_id}/speakers")

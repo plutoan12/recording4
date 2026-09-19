@@ -116,6 +116,7 @@ def run_media(task_id: str) -> dict:
                         fix_framerate=settings.sync_fix_framerate,
                         max_offset_seconds=settings.sync_max_offset_seconds,
                         vad=settings.sync_vad,
+                        profile=spec.get("sync_profile", "standard"),
                     ),
                 )
                 result = {"sync": report}

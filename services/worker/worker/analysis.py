@@ -424,8 +424,11 @@ class SyncOptions:
     fix_framerate: bool = False
     max_offset_seconds: float = 10.0
     vad: str | None = None
+    profile: str = "standard"
 
     def arguments(self) -> list[str]:
+        if self.profile not in {"standard", "quiet", "long_cues"}:
+            raise ValueError("알 수 없는 싱크 보정 방식입니다.")
         if not math.isfinite(self.max_offset_seconds) or self.max_offset_seconds <= 0:
             raise ValueError("이동 상한은 0보다 커야 합니다.")
         if self.vad and self.vad not in SYNC_VADS:
@@ -441,11 +444,75 @@ class SyncOptions:
         return extra
 
 
+class InsufficientSpeech(ValueError):
+    """보정 이동을 판단할 발화/무음 증거가 부족합니다."""
+
+
 def _run_sync(args):  # noqa: ANN001 - ffsubsync의 argparse.Namespace입니다.
     """보정기를 실제로 돌립니다. 시험에서 이 자리를 갈아끼워 응답을 꾸밉니다."""
-    from ffsubsync.ffsubsync import run
+    import copy
 
-    return run(args)
+    import numpy as np
+    from ffsubsync.ffsubsync import (
+        SAMPLE_RATE,
+        make_reference_pipe,
+        run,
+        validate_and_transform_args,
+    )
+
+    checked = validate_and_transform_args(copy.copy(args))
+    if checked is None:
+        return {"retval": 1, "sync_was_successful": False}
+    mask = make_reference_pipe(checked).fit_transform(checked.reference)
+    if not np.isfinite(mask).all():
+        raise ValueError("발화 감지 결과를 확인할 수 없습니다.")
+    speech = np.asarray(mask) > 0.5
+    # Empty/constant masks can get a positive correlation score. They provide no
+    # temporal evidence for a shift, even when ffsubsync reports success.
+    if speech.sum() < SAMPLE_RATE * 0.5 or (~speech).sum() < SAMPLE_RATE * 0.5:
+        raise InsufficientSpeech(
+            "싱크를 비교할 발화·무음 구간이 부족합니다. 기존 대본을 유지합니다."
+        )
+    with tempfile.TemporaryDirectory(prefix="r4-sync-mask-") as directory:
+        reference = Path(directory) / "speech.npz"
+        np.savez_compressed(reference, speech=mask)
+        checked.reference = str(reference)
+        checked.vad = None
+        return run(checked)
+
+
+def _normalize_sync_audio(source: Path, output: Path) -> None:
+    """싱크 분석용 사본만 보정합니다. 원음 파일에는 쓰지 않습니다."""
+    try:
+        subprocess.run(
+            [
+                ffmpeg_binary(),
+                "-v",
+                "error",
+                "-nostdin",
+                "-i",
+                str(source),
+                "-map",
+                "0:a:0",
+                "-vn",
+                "-ac",
+                "1",
+                "-ar",
+                "16000",
+                "-af",
+                "dynaudnorm=f=500:g=31:p=0.5:m=10:r=0.05",
+                "-c:a",
+                "pcm_s16le",
+                str(output),
+            ],
+            check=True,
+            capture_output=True,
+            timeout=600,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise RuntimeError(
+            "싱크 분석용 오디오를 준비하지 못했습니다. 원본 음성을 확인하세요."
+        ) from exc
 
 
 def sync_subtitles(
@@ -484,11 +551,38 @@ def sync_subtitles(
         before, after = temp / "in.srt", temp / "out.srt"
         before.write_text(dump_subtitles(cues), encoding="utf-8")
         parser = make_parser()
-        report = _run_sync(
-            parser.parse_args(
-                [str(source), "-i", str(before), "-o", str(after), *options.arguments()]
+        extra = options.arguments()
+        if options.profile == "long_cues":
+            # This is explicitly selected: a larger speech mask is not better for every cue.
+            extra += [
+                "--max-subtitle-seconds",
+                str(max(10, math.ceil(max(c.end - c.start for c in cues)))),
+            ]
+        normalized = False
+        reference = source
+        if options.profile == "quiet":
+            reference = temp / "normalized.wav"
+            _normalize_sync_audio(source, reference)
+            normalized = True
+        try:
+            report = _run_sync(
+                parser.parse_args([str(reference), "-i", str(before), "-o", str(after), *extra])
             )
-        )
+        except InsufficientSpeech:
+            if options.profile != "long_cues":
+                raise
+            report = {"sync_was_successful": False}
+        # Long captions may also contain quiet speech. Retry a rejected alignment,
+        # never replace a successful result just because another offset looks smaller.
+        if options.profile == "long_cues" and (
+            report.get("retval") or not report.get("sync_was_successful", True)
+        ):
+            reference = temp / "normalized.wav"
+            _normalize_sync_audio(source, reference)
+            normalized = True
+            report = _run_sync(
+                parser.parse_args([str(reference), "-i", str(before), "-o", str(after), *extra])
+            )
         if report.get("retval") or not report.get("sync_was_successful", True):
             raise ValueError("자막을 음성에 맞추지 못했습니다. 원본과 자막이 맞는지 확인하세요.")
         shift = float(report.get("offset_seconds", 0.0))
@@ -522,4 +616,6 @@ def sync_subtitles(
         "framerate_scale": round(float(report.get("framerate_scale_factor", 1.0)), 6),
         "vad": options.vad or "",
         "max_offset_seconds": options.max_offset_seconds,
+        "profile": options.profile,
+        "audio_normalized": normalized,
     }
