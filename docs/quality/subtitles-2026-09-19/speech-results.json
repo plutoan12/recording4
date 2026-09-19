@@ -1,0 +1,21 @@
+{
+  "sync_2.5": {
+    "pass": false,
+    "error": "보정 결과의 자막 개수가 달라 시각을 맞출 수 없습니다."
+  },
+  "sync_0": {
+    "pass": false,
+    "error": "보정 결과의 자막 개수가 달라 시각을 맞출 수 없습니다."
+  },
+  "align": {
+    "pass": true,
+    "same_text": true,
+    "overlap": false,
+    "start_errors": [
+      0.7730000000000001,
+      0.07699999999999996,
+      0.06500000000000128
+    ],
+    "max_start_error": 0.7730000000000001
+  }
+}

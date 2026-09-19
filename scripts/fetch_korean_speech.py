@@ -69,11 +69,11 @@ def pick_split(dataset: str) -> tuple[str, str] | None:
     return first["config"], first["split"]
 
 
-def rows(dataset: str, config: str, split: str, count: int) -> list[dict]:
+def rows(dataset: str, config: str, split: str, count: int, offset: int = 0) -> list[dict]:
     url = (
         f"{SERVER}/rows?dataset={urllib.parse.quote(dataset)}"
         f"&config={urllib.parse.quote(config)}&split={urllib.parse.quote(split)}"
-        f"&offset=0&length={count}"
+        f"&offset={offset}&length={count}"
     )
     try:
         return fetch_json(url).get("rows", [])
@@ -117,6 +117,7 @@ def main() -> int:
         default=0,
         help="겹말 검증용으로 **다른 문장** 몇 개를 더 받아 interference.wav로 잇습니다.",
     )
+    parser.add_argument("--offset", type=int, default=0, help="서로 다른 표본을 가져올 시작 행")
     parser.add_argument("--dataset", default=None, help="지정하면 이 데이터셋만 씁니다.")
     args = parser.parse_args()
     args.out.mkdir(parents=True, exist_ok=True)
@@ -131,7 +132,7 @@ def main() -> int:
         # 겹말용 조각은 표본에 들어가지 않는 **뒤쪽 문장**에서 가져옵니다.
         # 같은 문장을 겹치면 끼어든 말이 원문에 있어서 오류로 세어지지 않습니다.
         wanted = args.count + args.interference
-        found = rows(dataset, config, split, wanted * 2)
+        found = rows(dataset, config, split, wanted * 2, args.offset)
         pieces: list[tuple[Path, str]] = []
         extra: list[Path] = []
         for index, row in enumerate(found):

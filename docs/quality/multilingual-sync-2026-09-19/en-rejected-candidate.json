@@ -1,0 +1,155 @@
+{
+  "limit": 0.5,
+  "results": [
+    {
+      "variant": "short",
+      "duration_seconds": 34.84,
+      "cue_count": 3,
+      "cases": {
+        "0.0": {
+          "pass": false,
+          "rejected": "자막을 음성에 맞추지 못했습니다. 원본과 자막이 맞는지 확인하세요."
+        },
+        "2.5": {
+          "pass": false,
+          "rejected": "자막을 음성에 맞추지 못했습니다. 원본과 자막이 맞는지 확인하세요."
+        }
+      }
+    },
+    {
+      "variant": "long_repeated",
+      "duration_seconds": 305.56,
+      "cue_count": 27,
+      "cases": {
+        "0.0": {
+          "pass": false,
+          "rejected": "자막을 음성에 맞추지 못했습니다. 원본과 자막이 맞는지 확인하세요."
+        },
+        "2.5": {
+          "pass": false,
+          "rejected": "자막을 음성에 맞추지 못했습니다. 원본과 자막이 맞는지 확인하세요."
+        }
+      }
+    },
+    {
+      "variant": "dense",
+      "duration_seconds": 94.87,
+      "cue_count": 9,
+      "cases": {
+        "0.0": {
+          "pass": false,
+          "rejected": "자막을 음성에 맞추지 못했습니다. 원본과 자막이 맞는지 확인하세요."
+        },
+        "2.5": {
+          "pass": false,
+          "rejected": "자막을 음성에 맞추지 못했습니다. 원본과 자막이 맞는지 확인하세요."
+        }
+      }
+    },
+    {
+      "variant": "long_pauses",
+      "duration_seconds": 138.52,
+      "cue_count": 9,
+      "cases": {
+        "0.0": {
+          "pass": false,
+          "rejected": "자막을 음성에 맞추지 못했습니다. 원본과 자막이 맞는지 확인하세요."
+        },
+        "2.5": {
+          "pass": false,
+          "rejected": "자막을 음성에 맞추지 못했습니다. 원본과 자막이 맞는지 확인하세요."
+        }
+      }
+    },
+    {
+      "variant": "fast",
+      "duration_seconds": 82.016,
+      "cue_count": 9,
+      "cases": {
+        "0.0": {
+          "pass": false,
+          "rejected": "자막을 음성에 맞추지 못했습니다. 원본과 자막이 맞는지 확인하세요."
+        },
+        "2.5": {
+          "pass": false,
+          "rejected": "자막을 음성에 맞추지 못했습니다. 원본과 자막이 맞는지 확인하세요."
+        }
+      }
+    },
+    {
+      "variant": "slow",
+      "duration_seconds": 128.15,
+      "cue_count": 9,
+      "cases": {
+        "0.0": {
+          "pass": false,
+          "rejected": "자막을 음성에 맞추지 못했습니다. 원본과 자막이 맞는지 확인하세요."
+        },
+        "2.5": {
+          "pass": false,
+          "rejected": "자막을 음성에 맞추지 못했습니다. 원본과 자막이 맞는지 확인하세요."
+        }
+      }
+    },
+    {
+      "variant": "quiet_voice",
+      "duration_seconds": 102.52,
+      "cue_count": 9,
+      "cases": {
+        "0.0": {
+          "pass": false,
+          "rejected": "자막을 음성에 맞추지 못했습니다. 원본과 자막이 맞는지 확인하세요."
+        },
+        "2.5": {
+          "pass": false,
+          "rejected": "자막을 음성에 맞추지 못했습니다. 원본과 자막이 맞는지 확인하세요."
+        }
+      }
+    },
+    {
+      "variant": "noise_15db",
+      "duration_seconds": 102.52,
+      "cue_count": 9,
+      "cases": {
+        "0.0": {
+          "pass": false,
+          "rejected": "자막을 음성에 맞추지 못했습니다. 원본과 자막이 맞는지 확인하세요."
+        },
+        "2.5": {
+          "pass": false,
+          "rejected": "자막을 음성에 맞추지 못했습니다. 원본과 자막이 맞는지 확인하세요."
+        }
+      }
+    },
+    {
+      "variant": "noise_5db",
+      "duration_seconds": 102.52,
+      "cue_count": 9,
+      "cases": {
+        "0.0": {
+          "pass": false,
+          "rejected": "자막을 음성에 맞추지 못했습니다. 원본과 자막이 맞는지 확인하세요."
+        },
+        "2.5": {
+          "pass": false,
+          "rejected": "자막을 음성에 맞추지 못했습니다. 원본과 자막이 맞는지 확인하세요."
+        }
+      }
+    },
+    {
+      "variant": "music_intro",
+      "duration_seconds": 110.52,
+      "cue_count": 9,
+      "cases": {
+        "0.0": {
+          "pass": false,
+          "rejected": "자막을 음성에 맞추지 못했습니다. 원본과 자막이 맞는지 확인하세요."
+        },
+        "2.5": {
+          "pass": false,
+          "rejected": "자막을 음성에 맞추지 못했습니다. 원본과 자막이 맞는지 확인하세요."
+        }
+      }
+    }
+  ]
+}

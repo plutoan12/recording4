@@ -77,3 +77,31 @@ def test_youtube_ambiguous_upload_is_not_recreated():
             made_for_kids=False,
             allow_upload=True,
         )
+
+
+@pytest.mark.parametrize(
+    "source,text,expected",
+    [
+        ("ko", "녹화가 멈췄습니다.", "录像停止了。"),
+        ("ja", "録画が止まった。", "录像停止了。"),
+        ("ko", "녹음이 멈췄습니다.", "录音停止了。"),
+        ("ko", "녹화와 녹음을 비교합니다.", "录音停止了。"),
+        ("en", "The recording stopped.", "录音停止了。"),
+        (None, "녹화가 멈췄습니다.", "录音停止了。"),
+    ],
+)
+def test_explicit_video_terms_do_not_rewrite_audio_or_ambiguous_cues(source, text, expected):
+    from worker.providers import video_terms
+
+    assert video_terms(text, "录音停止了。", source, "zh") == expected
+
+
+def test_google_translation_applies_explicit_video_terminology():
+    class Client:
+        def translate_text(self, request, retry, timeout):
+            return SimpleNamespace(translations=[SimpleNamespace(translated_text="录音仍在继续。")])
+
+    translated = GoogleTranslator("p", client=Client(), allow_paid=True).translate(
+        ["녹화 중입니다."], "zh", "ko"
+    )
+    assert translated == ["录像仍在继续。"]

@@ -112,6 +112,21 @@ def text_width(text: str) -> float:
     return sum(char_width(c) for c in text)
 
 
+# Keep numeric values/units and short Japanese endings together at line and cue cuts.
+_PROTECTED = re.compile(
+    r"[$€£¥]?[+-]?\d+(?:[.,:]\d+)*(?:\s?(?:AM|PM|a\.m\.|p\.m\.|美元|ドル|달러|초|秒|時|点|%))?"
+    r"|から|ください|でした|です|ます",
+    re.IGNORECASE,
+)
+
+
+def _safe_cut(text: str, index: int, limit: float) -> int:
+    for match in _PROTECTED.finditer(text):
+        if match.start() < index < match.end() and text_width(match.group()) <= limit:
+            return match.start() or match.end()
+    return index
+
+
 def _cut(token: str, limit: float) -> tuple[str, str]:
     """폭 제한을 넘지 않는 앞부분과 남은 부분으로 자릅니다."""
     used = 0.0
@@ -119,7 +134,7 @@ def _cut(token: str, limit: float) -> tuple[str, str]:
         width = char_width(char)
         if used + width > limit:
             # 첫 글자부터 넘치면 한 글자는 넣습니다. 무한 반복을 막습니다.
-            index = index or 1
+            index = _safe_cut(token, index or 1, limit)
             return token[:index], token[index:]
         used += width
     return token, ""
@@ -147,6 +162,10 @@ def sentences(text: str) -> list[str]:
     return [s.strip() for s in _SENTENCE_END.split(text) if s.strip()] or [text]
 
 
+def _words(text: str) -> list[str]:
+    return re.split(r" (?!(?:AM|PM|a\.m\.|p\.m\.)(?:\s|$|[.,]))", text, flags=re.I)
+
+
 def wrap_text(text: str, rules: SubtitleRules = DEFAULT_RULES) -> list[str]:
     """줄 길이에 맞춰 줄바꿈합니다. 공백이 없으면 글자 단위로 자릅니다.
 
@@ -155,7 +174,7 @@ def wrap_text(text: str, rules: SubtitleRules = DEFAULT_RULES) -> list[str]:
     limit = float(rules.max_chars_per_line)
     lines: list[str] = []
     current = ""
-    for token in normalize(text).split(" "):
+    for token in _words(normalize(text)):
         while text_width(token) > limit:
             if current:
                 lines.append(current)
@@ -180,7 +199,7 @@ def split_text(text: str, parts: int) -> list[str]:
     text = normalize(text)
     if parts <= 1 or not text:
         return [text]
-    for tokens, joiner in ((sentences(text), " "), (text.split(" "), " ")):
+    for tokens, joiner in ((sentences(text), " "), (_words(text), " ")):
         if len(tokens) >= parts:
             return _group(tokens, parts, joiner)
     return _cut_evenly(text, parts)

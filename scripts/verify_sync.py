@@ -85,7 +85,7 @@ def main() -> int:
         for problem in problems:
             print(f"  - {problem}")
         return 1
-    print("\n통과: 민 자막은 돌아왔고 맞는 자막은 그대로입니다.")
+    print(f"\n통과: 이동 복구와 기존 자막의 흔들림이 모두 허용 오차 {args.limit}초 이내입니다.")
     return 0
 
 

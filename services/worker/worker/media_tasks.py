@@ -18,6 +18,7 @@ from pipeline.editing import Cue, EditSpec
 from pipeline.speakers import SpeakerTurn, assign_speakers, speaker_totals
 from worker.analysis import (
     MissingDependency,
+    SyncOptions,
     align_text,
     detect_scenes,
     diarize,
@@ -114,7 +115,15 @@ def run_media(task_id: str) -> dict:
                     rows = latest_transcript(session, task_uuid)
                 if not rows:
                     raise ValueError("보정할 대본이 없습니다.")
-                cues, report = sync_subtitles(source, rows)
+                cues, report = sync_subtitles(
+                    source,
+                    rows,
+                    SyncOptions(
+                        fix_framerate=settings.sync_fix_framerate,
+                        max_offset_seconds=settings.sync_max_offset_seconds,
+                        vad=settings.sync_vad,
+                    ),
+                )
                 result = {"sync": report}
             elif kind == "align":
                 # 전사가 아니라 정렬입니다. 대본 글자는 그대로 두고 시각만 찾습니다.

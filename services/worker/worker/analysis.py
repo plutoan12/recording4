@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import inspect
+import math
 import re
 import subprocess
 import tempfile
+from dataclasses import dataclass
 from pathlib import Path
 
 from pipeline.alignment import (
@@ -419,23 +421,75 @@ def detect_scenes(source: Path, *, threshold: float = 27.0) -> list[dict]:
     ]
 
 
-def sync_subtitles(source: Path, cues: list[Cue]) -> tuple[list[Cue], dict]:
+# ffsubsync가 받는 발화 검출기 이름. 목록에 없는 값을 넘기면 argparse가 그
+# 자리에서 프로세스를 끝냅니다(워커가 죽습니다). 그래서 넘기기 전에 봅니다.
+SYNC_VADS = (
+    "webrtc",
+    "auditok",
+    "silero",
+    "subs_then_webrtc",
+    "subs_then_auditok",
+    "subs_then_silero",
+)
+
+
+@dataclass(frozen=True, slots=True)
+class SyncOptions:
+    """싱크 보정기에 넘기는 설정. 기본값의 근거는 docs/TECH_DECISIONS.md입니다."""
+
+    fix_framerate: bool = False
+    max_offset_seconds: float = 10.0
+    vad: str | None = None
+
+    def arguments(self) -> list[str]:
+        if not math.isfinite(self.max_offset_seconds) or self.max_offset_seconds <= 0:
+            raise ValueError("이동 상한은 0보다 커야 합니다.")
+        if self.vad and self.vad not in SYNC_VADS:
+            raise ValueError(
+                f"모르는 발화 검출기입니다: {self.vad}. 쓸 수 있는 값: {', '.join(SYNC_VADS)}"
+            )
+        extra: list[str] = []
+        if not self.fix_framerate:
+            extra.append("--no-fix-framerate")
+        extra += ["--max-offset-seconds", str(self.max_offset_seconds)]
+        if self.vad:
+            extra += ["--vad", self.vad]
+        return extra
+
+
+def _run_sync(args):  # noqa: ANN001 - ffsubsync의 argparse.Namespace입니다.
+    """보정기를 실제로 돌립니다. 시험에서 이 자리를 갈아끼워 응답을 꾸밉니다."""
+    from ffsubsync.ffsubsync import run
+
+    return run(args)
+
+
+def sync_subtitles(
+    source: Path, cues: list[Cue], options: SyncOptions | None = None
+) -> tuple[list[Cue], dict]:
     """이미 있는 자막의 시각을 원본 음성에 맞춰 통째로 옮깁니다(ffsubsync).
 
     **글자는 건드리지 않습니다.** 돌아온 파일에서 시각만 가져와 원래 자막에
     붙입니다. 보정기는 자막을 다시 쓸 수 있지만 대본은 사람이 정한 것입니다.
 
-    자막 개수가 달라지면 시각을 원래 자막에 도로 맞출 수 없으므로 실패로 봅니다.
-    보정기가 맞추지 못했다고 하면(`sync_was_successful=False`) 그 결과를 쓰지
-    않습니다. 엉뚱한 값으로 맞는 자막을 흔드는 것보다 안 하는 편이 낫습니다.
+    **보정기의 성공 표시는 믿을 게 못 됩니다.** ffsubsync는 정렬 점수가 음수일
+    때만 `sync_was_successful=False`로 표시합니다(`ffsubsync.py`의 `best_score < 0`).
+    즉 터무니없는 값을 자신 있게 돌려줘도 성공이라고 합니다. 실제로 사람 목소리
+    34초 표본에서 -23.25초를 성공으로 내놓은 적이 있습니다. 그래서 여기서 따로
+    봅니다.
+
+    - 자막을 원본 시작 앞으로 밀어내는 보정은 받지 않습니다. 대본은 이 원본에서
+      나왔으므로 그런 이동은 맞을 수 없습니다.
+    - 자막 개수가 달라지면 시각을 원래 자막에 도로 맞출 수 없으므로 실패입니다.
 
     얼마나 옮겼는지(`offset_seconds`)를 함께 돌려줍니다. 사람이 그 값을 보고
     쓸지 말지 정합니다.
     """
     if not cues:
         raise ValueError("보정할 자막이 없습니다.")
+    options = options or SyncOptions()
     try:
-        from ffsubsync.ffsubsync import make_parser, run
+        from ffsubsync.ffsubsync import make_parser
     except ImportError as exc:
         raise MissingDependency(
             "자막 싱크 보정 의존성이 없습니다. pip install '.[subtitles]'를 실행하세요."
@@ -446,24 +500,42 @@ def sync_subtitles(source: Path, cues: list[Cue]) -> tuple[list[Cue], dict]:
         before, after = temp / "in.srt", temp / "out.srt"
         before.write_text(dump_subtitles(cues), encoding="utf-8")
         parser = make_parser()
-        report = run(parser.parse_args([str(source), "-i", str(before), "-o", str(after)]))
+        report = _run_sync(
+            parser.parse_args(
+                [str(source), "-i", str(before), "-o", str(after), *options.arguments()]
+            )
+        )
         if report.get("retval") or not report.get("sync_was_successful", True):
             raise ValueError("자막을 음성에 맞추지 못했습니다. 원본과 자막이 맞는지 확인하세요.")
+        shift = float(report.get("offset_seconds", 0.0))
+        if not math.isfinite(shift):
+            raise ValueError("보정값이 유한한 시간이 아닙니다.")
+        earliest = min(cue.start for cue in cues)
+        # 원본 앞으로 밀려난 자막은 파일에서 아예 사라집니다. 그러면 개수가 달라
+        # "개수가 다르다"는 말만 남고 무엇이 잘못됐는지는 안 보입니다.
+        if earliest + shift < 0:
+            raise ValueError(
+                f"보정값 {shift:+.3f}초는 자막을 원본 시작 앞으로 밀어냅니다. 쓰지 않습니다."
+            )
+        if abs(shift) > options.max_offset_seconds:
+            raise ValueError("보정값이 이동 상한을 넘습니다.")
         moved, _ = parse_subtitles(after.read_text(encoding="utf-8"))
 
     if len(moved) != len(cues):
         raise ValueError("보정 결과의 자막 개수가 달라 시각을 맞출 수 없습니다.")
-    shifted: list[Cue] = []
-    clamped = 0
-    for old, new in zip(cues, moved, strict=True):
-        start, end = new.start, new.end
-        if start < 0:
-            # 앞으로 당겨져 0초보다 이르면 잘립니다. 길이를 늘리지 않습니다.
-            clamped += 1
-            start, end = 0.0, max(end - start, end, 0.001)
-        shifted.append(Cue(start=start, end=end, text=old.text))
+    # ffsubsync can truncate long cues while estimating speech. For a constant
+    # shift, its rewritten end times are not authoritative: preserve our durations.
+    shifted = [
+        Cue(
+            start=new.start if options.fix_framerate else old.start + shift,
+            end=new.end if options.fix_framerate else old.end + shift,
+            text=old.text,
+        )
+        for old, new in zip(cues, moved, strict=True)
+    ]
     return shifted, {
-        "offset_seconds": round(float(report.get("offset_seconds", 0.0)), 3),
+        "offset_seconds": round(shift, 3),
         "framerate_scale": round(float(report.get("framerate_scale_factor", 1.0)), 6),
-        "clamped": clamped,
+        "vad": options.vad or "",
+        "max_offset_seconds": options.max_offset_seconds,
     }

@@ -7,6 +7,7 @@ export type WorkflowDraft = {source_asset_id:string; start:number; end:number; m
 type Cue = {start:number;end:number;text:string}
 type Detail = {id:string;state:string;stage:string|null;reason:string|null;artifact_id:string|null;approval_id:string|null;
   options:Record<string,unknown>;cues:Cue[];translated:Cue[];
+  style_warnings?:{kind:string;message:string;registers:{label:string;cue_numbers:number[]}[]}[];
   stages:{id:string;name:string;state:string;attempt:number;uncertain:boolean;estimated_cost:string|null}[]}
 type Publication = {id:string;state:string;title:string;video_id:string|null;publish_at:string;error:string|null}
 type Configuration = {paid_enabled:boolean;translation_configured:boolean;speech_configured:boolean;
@@ -99,15 +100,20 @@ export function WorkflowPanel({assets,jobs,draft,onCreated}:{assets:SourceAsset[
         `/jobs/${detail.id}/subtitles?format=${fmt}`, `job-${detail.id}.${fmt}`,
         `자막 ${fmt.toUpperCase()} 파일을 내려받았습니다. 시각은 출력 영상 시작이 0초입니다.`,
       )}>자막 {fmt.toUpperCase()} 내려받기</button>)}
+      {(detail.style_warnings?.length??0)>0 && <aside role="note" aria-label="문체 검수 안내">
+        <strong>문체 혼용 확인 · 원문 말투 유지</strong>
+        <p>문장은 자동으로 고치지 않습니다. 원문과 비교해 의도된 차이인지 확인해 주세요.</p>
+        {detail.style_warnings?.map(w=><div key={w.kind}><p>{w.message}</p><ul>{w.registers.map(r=><li key={r.label}>{r.label}: 자막 {r.cue_numbers.join(', ')}번</li>)}</ul></div>)}
+      </aside>}
       {detail.translated.length>0 && <details><summary>번역 검수·새 버전 만들기</summary>
         <button onClick={()=>setTranslated(detail.translated)}>번역 불러오기</button>
-        {translated.map((c,i)=><label key={i}>{c.start.toFixed(1)}~{c.end.toFixed(1)}초<textarea value={c.text} onChange={e=>setTranslated(rows=>rows.map((r,j)=>j===i?{...r,text:e.target.value}:r))} /></label>)}
+        {translated.map((c,i)=><label key={i}>자막 {i+1} · {c.start.toFixed(1)}~{c.end.toFixed(1)}초<textarea value={c.text} onChange={e=>setTranslated(rows=>rows.map((r,j)=>j===i?{...r,text:e.target.value}:r))} /></label>)}
         <button disabled={busy||translated.length!==detail.cues.length} onClick={()=>void act(async()=>{
           const job=jobs.find(j=>j.id===detail.id);if(!job)throw new Error('작업을 다시 조회하세요.')
           const result=await request<Job>('/jobs',{method:'POST',body:JSON.stringify({source_asset_id:job.source_asset_id,target_language:job.target_language,
             workflow:{...detail.options,reuse_from_job_id:detail.id,translated_cues:translated,transcript:detail.cues.map(c=>{const start=(detail.options.clip as {start:number}|null)?.start??0;return {...c,start:c.start+start,end:c.end+start}})}})})
           choose(result.id);setMessage('수정한 번역으로 새 작업을 만들었습니다. 새 결과물은 다시 승인해야 합니다.')
-        })}>수정 문장만 다시 더빙해 새 버전 제작</button>
+        })}>{detail.options.audio_mode==='dub'?'수정 문장으로 더빙·새 버전 제작':'수정 자막으로 새 버전 제작'}</button>
       </details>}
       {detail.artifact_id && <>
         <button disabled={busy} onClick={()=>void act(async()=>{const p=await request<{url:string}>(`/artifacts/${detail.artifact_id}/preview`);setUrl(p.url);setPlayed(false)})}>최종 영상 검수</button>

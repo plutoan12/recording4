@@ -1,3 +1,38 @@
+## 2026-09-19: 브라우저 확인·다국어 싱크 실패 조건 추가 (Codex)
+
+- PR #27 후속. 문체 안내/자막 번호/원문 불변을 Chrome 실제 화면에서 확인했습니다. 격리된 테스트 작업이며 영상 재생은 범위 밖입니다.
+- 공식 FLEURS 언어별 사람 발화 3개로 en/ja/zh 각각 20개 조건 검사: **영어 0/20, 일본어 0/20, 중국어 20/20**. 기존 한국어 동일 코드 결과는 20/20. 전체 언어 통과로 보고하지 마세요.
+- 긴 자막 제한을 늘린 후보는 일본어를 개선했지만 한국어·중국어 회귀로 폐기했습니다. 후보 배포 없이 기존 코드와 이미지 태그를 유지/복구했습니다.
+- 최종 Python 399 통과·5 조건부 skip, Ruff 통과. 운영 워커/이미지의 싱크 소스 해시가 저장소와 일치하고 서비스 healthy 확인.
+- 신규 `scripts/fetch_fleurs_speech.py`, 출처/해시/현재 결과/폐기 후보 비교를 [보고서](quality/multilingual-sync-2026-09-19/REPORT.md)에 저장했습니다. 실제 현장 영상과 사람 검증 경계, 저음량 대응·신뢰도 판정은 다음 개선 항목입니다.
+
+## 2026-09-19: 원문 말투 유지·조건별 싱크 검증 (Codex)
+
+- [PR #27](https://github.com/plutoan12/recording4/pull/27)에 저장하고 운영 반영 완료. API·워커·관리화면 재빌드/재시작, 전체 서비스 healthy. 기존 18작업 조회에서 3작업에 문체 힌트를 표시했고 데이터 불변 확인. 운영 워커의 새 9문장 WAV 표본 재검증은 원본/2.5초 이동 모두 최대 0.01초, 길이 보존 통과.
+
+- 사용자 선택: 문체를 자동으로 바꾸지 않고 혼용 가능성만 검수 표시.
+- 브랜치 `codex/subtitle-style-sync-matrix`, PR #26 위 후속. 담당: pipeline/style_review, API/workflow, WorkflowPanel, worker/analysis, fetch_korean_speech, verify_sync_matrix, 관련 테스트·문서.
+- 작업 상세에 문체 종류/자막 번호 안내. 조회는 기존 자막·승인을 변경하지 않음. 인용문 제외 및 제한된 언어별 단서 검사.
+- 신규 한국어 사람 목소리 9개로 10종 통제 영상 구성, 이동 0/+2.5초 20검사. 긴 자막 끝이 10초로 잘리는 버그를 발견해 기본 일정 이동 모드에서 길이 보존으로 수정. 같은 기준으로 20/20 통과, 최대 0.50초.
+- 399개 테스트 통과, 5개 조건부 skip. TypeScript/Vite/Ruff 통과. 실제 HTTP 확인 완료. 브라우저는 Mac 잠금으로 미확인.
+- [상세 범위·결과·재현](quality/style-sync-matrix-2026-09-19/REPORT.md). 통제 영상 검증이며 현장 영상·네 언어 발화 전체를 검증한 것은 아닙니다.
+
+## 2026-09-19: 품질 문제 수정 (Codex)
+
+- [PR #26](https://github.com/plutoan12/recording4/pull/26)에 저장. 최종 API·워커 이미지를 운영 서버에 반영했고 모든 서비스 healthy. 운영 워커에서 숫자/시각·녹화 용어 규칙과 실제 사람 목소리 verify_sync.py(0.5초 기준)를 다시 통과했습니다.
+
+- 브랜치 `codex/subtitle-quality-fixes`. 담당: pipeline/subtitles, worker/providers·analysis·media_tasks, api/config, 관련 테스트와 보고서.
+- 숫자/금액/시각 분할 방지, ko/ja의 명시적 녹화 표현→zh 용어 보정. PR #23의 SyncOptions 관련 코드/테스트를 가져와 탐색 제한·입력 검사를 보강했습니다.
+- 382개 테스트 통과, 5개 조건부 skip. 실제 음성 보정 최대 오차 0.30초로 기존 0.5초 기준 통과. 실제 번역 두 방향 추가 비용 $0.0040, 녹화 용어 개선 확인.
+- [화면 증거·변경 범위·한계](quality/subtitles-2026-09-19/FIXES.md). 전체 문체 통일과 언어별 완전한 의미 단위 분할은 이번 수정 범위 밖입니다.
+
+## 2026-09-19: 실제 다국어 품질 검사 (Codex)
+
+- PR #24 병합 확인, 운영 체크아웃을 main c1c8827로 fast-forward. 이번 변경은 보고서뿐이며 애플리케이션 코드 수정 없음.
+- 실제 번역 12방향/48문장, 원음·시각 보존, SRT/VTT, 12개 영상 디코딩 확인. 내부 예산 정산 $0.0279. 결과물은 검수 대기이며 게시하지 않음.
+- 발견: 중국어 숫자 중간 줄바꿈, ko/ja→zh 녹화→녹음 용어 오역, 문체 불일치. ffsubsync 실제 음성 보정은 계속 실패; stable-ts는 시작 최대 오차 0.773초로 기존 1초 기준 통과.
+- [상세 보고서와 증거](quality/subtitles-2026-09-19/REPORT.md). 무검수 게시 품질 통과로 해석하지 말 것.
+
 ## 2026-09-19: 다국어 자막 전용 번역 (Codex)
 
 - PR: https://github.com/plutoan12/recording4/pull/24 . 로컬 운영 서버에 반영 완료(같은 영구 체크아웃). API·worker·dispatcher·monitor·web 재빌드/재시작, 모든 서비스 healthy. 네 언어 실제 FFmpeg 자막 렌더 및 오디오/비디오 디코딩 통과. GitHub Python/Web 검사 통과, 이미지/스택 CI는 기록 시점 진행 중으로 PR은 아직 미병합.

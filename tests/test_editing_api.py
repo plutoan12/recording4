@@ -422,7 +422,7 @@ def test_sync_saves_a_new_version_and_keeps_the_old_one(client, auth_headers, as
     monkeypatch.setattr(
         module,
         "sync_subtitles",
-        lambda source, cues: (
+        lambda source, cues, options=None, **kwargs: (
             [Cue(start=c.start + 2, end=c.end + 2, text=c.text) for c in cues],
             {"offset_seconds": 2.0, "framerate_scale": 1.0, "clamped": 0},
         ),

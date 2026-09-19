@@ -50,6 +50,21 @@ class Settings(BaseSettings):
     background_audio_enabled: bool = False
     background_gain_db: float = Field(default=-9.0, le=0)
 
+    # 자막 싱크 보정(ffsubsync). 기본값의 근거는 docs/TECH_DECISIONS.md에 있습니다.
+    # 프레임률 맞추기는 **끕니다.** 우리 대본은 이 원본에서 나왔으므로 원본과
+    # 자막의 프레임률이 다를 수 없습니다. 켜 두면 보정기가 자막을 늘였다 줄이며
+    # 없는 차이를 맞추려 듭니다(측정: 합성 음성에서 배율 0.999로 이미 맞는 자막을
+    # 0.013초 흔들었고, 끄면 오차 0.000초).
+    sync_fix_framerate: bool = False
+    # 찾을 이동의 상한. 넓게 열어 두면 엉뚱한 최고점을 고릅니다. ffsubsync 기본값
+    # 60초는 다른 판본에서 받은 자막을 위한 값이라 우리 쓰임에 맞지 않습니다.
+    # 이 10초는 잰 값이 아니라 정한 값입니다. scripts/verify_sync.py --sweep으로
+    # 실제 음성에서 다시 재세요.
+    sync_max_offset_seconds: float = 10.0
+    # 발화 검출기. None이면 ffsubsync 기본값입니다. 사람 목소리에서 어느 쪽이
+    # 나은지는 아직 정하지 못했습니다(아래 문서의 측정 기록을 보세요).
+    sync_vad: str | None = None
+
     # Explicit deployment switches: tests and default installs never call paid APIs.
     paid_processing_enabled: bool = False
     max_job_budget_usd: Decimal | None = Field(default=None, ge=0)
