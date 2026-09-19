@@ -181,8 +181,9 @@ def test_write_subtitles_applies_rules_to_the_ass_file(tmp_path) -> None:  # noq
 
 
 def test_english_rules_use_the_measured_line_length() -> None:
-    """지침은 줄당 42자지만 이 세로 화면에서는 안 들어갑니다(측정: M 42자가
-    1068px, 여백 980px). 실측으로 들어가는 38자를 씁니다. 읽기 속도는 지침대로입니다.
+    """지침 줄당 42자는 가로 화면 기준입니다. 세로 숏폼에 들어가는지는 CI가
+    렌더해서 확인하고(scripts/measure_subtitles.py), 여기서는 그 값이 코드에
+    그대로 박혀 있는지만 봅니다.
 
     한국어 숫자를 그대로 쓰면 영어 줄이 32자에서 잘리고 읽기 속도는 24자/초까지
     봐줍니다. 그래서 언어별 값이 필요합니다."""

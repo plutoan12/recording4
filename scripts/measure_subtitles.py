@@ -8,11 +8,16 @@ libass로 한 프레임을 그린 뒤 밝은 화소의 경계를 직접 찾습�
     docker run --rm -v "$PWD/scripts:/work" --entrypoint python \
         recording4-worker:ci /work/measure_subtitles.py
 
-검사 기준은 두 가지입니다.
+검사 기준은 세 가지입니다.
 
-1. 기본 줄 길이(16자)가 좌우 여백 안에 들어갈 것. 넘으면 libass가 제멋대로
-   다시 줄바꿈해서 우리 줄 규칙이 화면에서 깨집니다.
+1. 기본 줄 길이(한국어 16자)가 좌우 여백 안에 들어갈 것. 넘으면 libass가
+   제멋대로 다시 줄바꿈해서 우리 줄 규칙이 화면에서 깨집니다.
 2. 기본 줄 길이가 한 줄로 그려질 것. 두 줄이 되면 같은 문제입니다.
+3. 영어 줄 한도를 꽉 채운 줄도 여백 안에 들어갈 것.
+
+**넘친 줄의 픽셀 값은 믿지 마세요.** 밝은 화소의 상자는 화면 가장자리에서
+멈추므로, 넘치면 글자 폭이 아니라 화면 폭이 나옵니다. 그래서 넘친 줄은
+숫자 대신 "넘침"으로 찍습니다.
 """
 
 from __future__ import annotations
@@ -26,18 +31,35 @@ from pathlib import Path
 import numpy as np
 
 from pipeline.editing import Cue, EditSpec
-from pipeline.subtitles import DEFAULT_RULES, SubtitleRules, rules_for, text_width
+from pipeline.subtitles import DEFAULT_RULES, SubtitleRules, rules_for, text_width, wrap_text
 from worker.rendering import ffmpeg_binary, write_subtitles
 
 # 배경(제한 범위 검정, Y=16)과 검은 외곽선을 빼고 글자만 남기는 문턱입니다.
 INK = 32
 
+# 글자가 화면 밖으로 넘쳐 폭을 잴 수 없을 때. 숫자가 아니어야 실수로 픽셀
+# 값처럼 쓰이지 않습니다. 넘쳤다는 사실만으로도 "여백 안에 안 들어간다"는
+# 판정에는 충분합니다.
+OVERFLOW = "넘침"
+
 # 한국어 실사용 문장. 같은 글자 반복보다 자간·받침 폭이 현실적입니다.
 SAMPLE = "다람쥐 헌 쳇바퀴에 타고파 오늘도 즐겁게 달린다 정말로"
 
+# 영어 실사용 문장. 라틴 글자는 폭이 제각각이라(i와 M이 몇 배 차이) 같은
+# 글자를 반복해 재면 실제 자막과 딴판입니다.
+ENGLISH_SAMPLE = "In March last year a colleague of the former minister was appointed"
 
-def measure(text: str, spec: EditSpec, rules: SubtitleRules) -> tuple[int, int] | None:
-    """글자가 그려진 픽셀 상자 (가로, 세로)를 돌려줍니다. 안 보이면 None.
+# 판정용 한 줄. 문장은 어절 경계에서 끊겨 한도를 꽉 채우지 못합니다(위 문장은
+# 폭 19 한도에 18.5까지). 한도를 다 쓴 줄이 들어가는지 보려면 한도만큼 채운
+# 줄이 필요합니다. 알파벳 한 바퀴는 실제 문장의 글자 분포에 가깝고 공백이
+# 없어 오히려 조금 넓습니다.
+ALPHABET = "abcdefghijklmnopqrstuvwxyz"
+
+
+def measure(text: str, spec: EditSpec, rules: SubtitleRules) -> tuple[int, int] | str | None:
+    """글자가 그려진 픽셀 상자 (가로, 세로)를 돌려줍니다.
+
+    안 보이면 None, 화면 밖으로 넘쳐 잴 수 없으면 OVERFLOW입니다.
 
     FFmpeg cropdetect는 레터박스용이라 행·열 평균으로 판정합니다. 세로 1920px
     중 자막 100px만 밝으면 열 평균이 문턱을 못 넘어 폭을 못 잽니다. 그래서
@@ -79,6 +101,12 @@ def measure(text: str, spec: EditSpec, rules: SubtitleRules) -> tuple[int, int] 
     columns = np.nonzero(mask.any(axis=0))[0]
     if not rows.size or not columns.size:
         return None
+    if columns[0] == 0 or columns[-1] == spec.width - 1:
+        # 글자가 프레임 밖으로 나갔습니다. 밝은 화소의 상자는 화면 가장자리에서
+        # 멈추므로 여기서 숫자를 돌려주면 글자 폭이 아니라 화면 폭이 나옵니다.
+        # 실제로 그렇게 나왔습니다: 영어 30자부터 42자까지 전부 1068px로 찍혀
+        # 42자를 1068px이라고 적었는데, 그건 측정이 아니라 잘린 값이었습니다.
+        return OVERFLOW
     return int(columns[-1] - columns[0] + 1), int(rows[-1] - rows[0] + 1)
 
 
@@ -91,6 +119,33 @@ def spec_for(text: str, font_size: int, width: int, height: int) -> EditSpec:
         font_size=font_size,
         cues=[Cue(start=0, end=5, text=text)],
     )
+
+
+def table(header, counts, make, args, rules: SubtitleRules, usable: int) -> int:
+    """글자 수를 늘려 가며 렌더 폭을 찍고, 여백 안에 들어간 최대 글자 수를 돌려줍니다.
+
+    통과/실패만 알려 주면 얼마나 줄여야 하는지 알 수 없어 표로 찍습니다.
+    넘친 줄은 픽셀 값을 찍지 않습니다. 그 숫자는 글자 폭이 아니라 화면
+    폭입니다.
+    """
+    print(f"\n{header:>14} {'렌더 폭(px)':>12} {'화면 대비':>10} {'여백 안':>8}")
+    fits = 0
+    for count in counts:
+        text = make(count)
+        box = measure(text, spec_for(text, args.font_size, args.width, args.height), rules)
+        if box is None:
+            print(f"{count:>14} {'측정 실패':>12}")
+            continue
+        if box is OVERFLOW:
+            print(f"{count:>14} {OVERFLOW:>12} {'-':>10} {'아니오':>8}")
+            continue
+        inside = box[0] <= usable
+        fits = max(fits, count) if inside else fits
+        print(
+            f"{count:>14} {box[0]:>12} {box[0] / args.width:>9.0%} "
+            f"{'예' if inside else '아니오':>8}"
+        )
+    return fits
 
 
 def main() -> int:
@@ -106,24 +161,11 @@ def main() -> int:
     print(f"화면 {args.width}x{args.height}, 글자 크기 {args.font_size}, 좌우 여백 {margin}px")
     print(f"글자가 쓸 수 있는 가로 폭 {usable}px\n")
 
-    # 줄 길이별 실제 렌더 폭. 규칙이 다시 줄바꿈하지 않도록 한도를 넉넉히 둡니다.
-    print(f"{'한글 글자 수':>12} {'렌더 폭(px)':>12} {'화면 대비':>10} {'여백 안':>8}")
     single_line = SubtitleRules(max_chars_per_line=200, max_lines=9)
-    fits = 0
-    for count in (8, 10, 12, 14, 16, 18, 20):
-        text = "가" * count
-        box = measure(text, spec_for(text, args.font_size, args.width, args.height), single_line)
-        if box is None:
-            print(f"{count:>12} {'측정 실패':>12}")
-            continue
-        pixels, _ = box
-        inside = pixels <= usable
-        fits = max(fits, count) if inside else fits
-        print(
-            f"{count:>12} {pixels:>12} {pixels / args.width:>9.0%} "
-            f"{'예' if inside else '아니오':>8}"
-        )
-    print(f"\n글자 크기 {args.font_size}에서 여백 안에 들어가는 한글 글자 수: {fits}자까지")
+    korean_fits = table(
+        "한글 글자 수", range(8, 30, 2), lambda n: "가" * n, args, single_line, usable
+    )
+    print(f"\n글자 크기 {args.font_size}에서 여백 안에 들어가는 한글 글자 수: {korean_fits}자까지")
 
     # 기본 규칙 그대로 그린 결과. 한 줄인지 두 줄인지 높이로 봅니다.
     print()
@@ -133,44 +175,60 @@ def main() -> int:
     sample_box = measure(
         SAMPLE, spec_for(SAMPLE, args.font_size, args.width, args.height), single_line
     )
-    if one is None or filled is None or sample_box is None:
+    if one is None or filled is None:
         print("자막이 그려지지 않았습니다. 글꼴과 FFmpeg subtitles 필터를 확인하세요.")
+        return 1
+    if OVERFLOW in (one, filled):
+        print(
+            f"기본 규칙으로 그린 자막이 화면 밖으로 나갔습니다({OVERFLOW}). 규칙이 화면보다 큽니다."
+        )
         return 1
 
     line_height = one[1]
     print(f"한 줄 높이 {line_height}px (화면 세로의 {line_height / args.height:.0%})")
     print(f"기본 한도({DEFAULT_RULES.max_chars_per_line}자) 한 줄: {filled[0]}x{filled[1]}px")
-    print(f"예문 '{SAMPLE}' (폭 {text_width(SAMPLE):.1f}자): {sample_box[0]}px")
+    drawn = f"{sample_box[0]}px" if isinstance(sample_box, tuple) else str(sample_box)
+    print(f"예문 '{SAMPLE}' (폭 {text_width(SAMPLE):.1f}자): {drawn}")
 
-    # 영어는 지침 줄 길이가 더 깁니다(42자). 라틴 글자는 폭이 제각각이라
-    # 가장 넓은 M으로 잽니다. 실제 문장은 이보다 좁지만, 넘치면 libass가
-    # 제멋대로 다시 줄바꿈하므로 최악을 기준으로 둡니다.
-    print(f"\n{'영어 글자 수(M)':>14} {'렌더 폭(px)':>12} {'화면 대비':>10} {'여백 안':>8}")
-    english_fits = 0
-    for count in (30, 34, 36, 38, 40, 42):
-        text = "M" * count
-        box = measure(text, spec_for(text, args.font_size, args.width, args.height), single_line)
-        if box is None:
-            print(f"{count:>14} {'측정 실패':>12}")
-            continue
-        inside = box[0] <= usable
-        english_fits = max(english_fits, count) if inside else english_fits
-        print(
-            f"{count:>14} {box[0]:>12} {box[0] / args.width:>9.0%} "
-            f"{'예' if inside else '아니오':>8}"
-        )
+    # 영어는 두 가지로 잽니다. 실제 자막에 가까운 것은 문장이고, 반복 M은
+    # 최악의 글자입니다. 판정은 문장으로 합니다. 라틴 글자는 폭이 제각각이라
+    # (i와 M이 몇 배 차이) M 반복을 기준으로 삼으면 실제 문장에 비해 한 줄이
+    # 지나치게 짧아집니다. M 표는 참고로만 찍습니다.
     english_rules = rules_for("en")
     limit = int(english_rules.max_chars_per_line * 2)
-    print(
-        f"글자 크기 {args.font_size}에서 여백 안에 들어가는 영어 글자 수: {english_fits}자까지 "
-        f"(기본 한도 {limit}자)"
+    full_line = (ALPHABET * (limit // len(ALPHABET) + 1))[:limit]
+    english_box = measure(
+        full_line, spec_for(full_line, args.font_size, args.width, args.height), single_line
     )
+    sentence = wrap_text(ENGLISH_SAMPLE, english_rules)[0]
+    sentence_box = measure(
+        sentence, spec_for(sentence, args.font_size, args.width, args.height), single_line
+    )
+    print(f"\n영어 한 줄 한도 {limit}자(폭 {english_rules.max_chars_per_line})")
+    if english_box is None:
+        print("  영어 자막이 그려지지 않았습니다.")
+        return 1
+    print(f"  한도를 채운 줄 '{full_line}' (폭 {text_width(full_line):.1f})")
+    if english_box is OVERFLOW:
+        print(f"    {OVERFLOW}: 화면 밖으로 나가 폭을 잴 수 없습니다.")
+    else:
+        print(f"    렌더 폭 {english_box[0]}px (여백 {usable}px의 {english_box[0] / usable:.0%})")
+    drawn = f"{sentence_box[0]}px" if isinstance(sentence_box, tuple) else str(sentence_box)
+    print(f"  실제 문장 '{sentence}' (폭 {text_width(sentence):.1f}): {drawn}")
+
+    # 참고: 가장 넓은 글자만 반복했을 때. 전부 대문자인 자막은 여기에 걸려
+    # libass가 다시 줄바꿈할 수 있습니다.
+    worst_fits = table(
+        "M 반복 글자 수", range(16, 34, 2), lambda n: "M" * n, args, single_line, usable
+    )
+    print(f"참고: 가장 넓은 글자 M만 반복하면 {worst_fits}자까지 들어갑니다.")
 
     problems = []
-    if limit > english_fits:
+    if english_box is OVERFLOW or english_box[0] > usable:
+        measured = OVERFLOW if english_box is OVERFLOW else f"{english_box[0]}px"
         problems.append(
-            f"영어 기본 한도 {limit}자가 여백 안({usable}px)에 안 들어갑니다. "
-            f"실측으로 {english_fits}자까지입니다. 기본값을 줄이거나 글자 크기를 낮추세요."
+            f"영어 한 줄 한도 {limit}자가 여백 안({usable}px)에 안 들어갑니다(실측 {measured}). "
+            "기본값을 줄이거나 글자 크기를 낮추세요."
         )
     if filled[0] > usable:
         problems.append(
