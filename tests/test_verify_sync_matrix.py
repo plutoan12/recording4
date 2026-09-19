@@ -74,3 +74,23 @@ def test_matrix_does_not_pass_word_alignment_that_misses(matrix, monkeypatch):
         ),
     )
     assert not matrix.evaluate(Path("unused"), original, 0, 0.5, "align")["pass"]
+
+
+def test_matrix_splits_start_and_end_errors(matrix, monkeypatch):
+    """합쳐 놓으면 어디가 어긋났는지 안 보입니다.
+
+    끝 시각의 정답은 에너지 문턱이라 말끝 숨소리·잔향만큼 늦습니다. 길이를
+    그대로 옮기는 방법은 그 정답과 저절로 맞고, 음성에서 끝을 다시 찾는
+    방법은 벌을 받습니다. 나눠 놓아야 그 편향이 보입니다.
+    """
+    original = [Cue(start=1, end=5, text="test")]
+    monkeypatch.setattr(
+        matrix,
+        "sync_subtitles",
+        # 시작은 맞고 끝만 1.4초 이릅니다.
+        lambda *a: ([Cue(start=1, end=3.6, text="test")], {"offset_seconds": 0}),
+    )
+    found = matrix.evaluate(Path("unused"), original, 0, 0.5)
+    assert found["max_start_error_seconds"] == 0.0
+    assert found["max_end_error_seconds"] == 1.4
+    assert not found["pass"]

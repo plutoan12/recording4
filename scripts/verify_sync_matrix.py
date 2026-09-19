@@ -136,15 +136,21 @@ def evaluate(
             moved, meta = realign_subtitles(source, pushed, language="ko")
         else:
             moved, meta = sync_subtitles(source, pushed)
-        errors = [
-            max(abs(a.start - b.start), abs(a.end - b.end))
-            for a, b in zip(moved, truth, strict=True)
-        ]
+        starts = [abs(a.start - b.start) for a, b in zip(moved, truth, strict=True)]
+        ends = [abs(a.end - b.end) for a, b in zip(moved, truth, strict=True)]
+        errors = [max(pair) for pair in zip(starts, ends, strict=True)]
         same = [c.text for c in moved] == [c.text for c in truth]
         passed = same and max(errors) <= limit + 1e-9
         found = {
             "pass": passed,
             "max_error_seconds": round(max(errors), 3),
+            # 시작과 끝을 나눠 남깁니다. 합쳐 놓으면 어디가 어긋났는지 안 보입니다.
+            # 끝 시각의 정답은 에너지 문턱으로 잰 값이라 말끝 숨소리·잔향만큼
+            # 늦습니다(측정: 1.21~1.74초). 자막 길이를 그대로 옮기는 방법은 그
+            # 정답과 저절로 맞고, 음성에서 끝을 다시 찾는 방법은 벌을 받습니다.
+            # 두 방법을 끝 시각으로 견주면 안 되는 이유입니다.
+            "max_start_error_seconds": round(max(starts), 3),
+            "max_end_error_seconds": round(max(ends), 3),
             "text_preserved": same,
         }
         if method == "align":
@@ -159,9 +165,11 @@ def evaluate(
 
 def summarize(results: list[dict], methods: tuple[str, ...]) -> None:
     """조건마다 방법별 최대 오차를 한 표로 찍습니다. 눈으로 견줄 수 있어야 합니다."""
-    print("\n조건별 최대 오차(초) — 작을수록 좋습니다")
-    head = "  ".join(f"{m:>18}" for m in methods)
-    print(f"{'조건':22} {'길이(초)':>9}  {head}")
+    print("\n조건별 최대 오차(초) — 시작 / 끝. 작을수록 좋습니다")
+    print("끝 시각의 정답은 에너지 문턱이라 말끝 숨소리·잔향만큼 늦습니다.")
+    print("길이를 그대로 옮기는 방법은 그 정답과 저절로 맞으므로, 끝으로는 견주지 마세요.")
+    head = "  ".join(f"{m:>17}" for m in methods)
+    print(f"\n{'조건':22} {'길이(초)':>9}  {head}")
     for entry in results:
         cells = []
         for method in methods:
@@ -171,9 +179,11 @@ def summarize(results: list[dict], methods: tuple[str, ...]) -> None:
                 if key.split(":")[0] == method or len(methods) == 1
             ]
             if any("rejected" in case for case in worst):
-                cells.append(f"{'거부':>18}")
+                cells.append(f"{'거부':>17}")
             else:
-                cells.append(f"{max(c['max_error_seconds'] for c in worst):18.3f}")
+                begin = max(c["max_start_error_seconds"] for c in worst)
+                finish = max(c["max_end_error_seconds"] for c in worst)
+                cells.append(f"{begin:7.3f} /{finish:8.3f}")
         print(f"{entry['variant']:22} {entry['duration_seconds']:9.1f}  " + "  ".join(cells))
 
 
