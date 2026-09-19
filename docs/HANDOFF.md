@@ -933,3 +933,31 @@ CI가 토큰 없이도 이 경로를 점검합니다(`화자 분리 토큰 오�
 - **구운 자막과 트랙이 두 벌로 보이는 문제**는 설정을 켜는 사람이 판단해야 합니다. 구운 자막 없이 렌더하는 선택지는 아직 없습니다. 필요하면 편집본·작업에 "자막 굽지 않기" 설정을 넣는 것이 다음 단계입니다.
 - 외부 SRT를 **가져오는** 경로는 여전히 없습니다(ffsubsync 자리).
 - 관리화면에는 자막 트랙 결과를 아직 보여 주지 않습니다. `GET /publications` 응답에는 들어 있습니다.
+
+
+## 외부 자막 파일 반입 (2026-09-19)
+
+- 사용자 요청: 자막 조사에서 남은 3번(외부 SRT 가져오기). 브랜치 `claude/subtitle-file-generation-38xjz4`(PR #16 병합 후 최신 main에서 재시작).
+- 담당 파일: `packages/pipeline/pipeline/subtitle_files.py`, `services/api/adminapi/routers/editing.py`, `apps/web/src/ClipEditor.tsx`, `tests/{test_subtitle_files,test_editing_api}.py`, `README.md`, `docs/{CONNECTED_WORKFLOW,OPEN_SOURCE_INTEGRATIONS,TECH_DECISIONS,HANDOFF}.md`.
+- 의존 작업: 없습니다. 새 의존성도 없습니다(pysubs2가 읽습니다).
+
+### 구현한 것
+
+- `pipeline/subtitle_files.py:parse_subtitles()`: SRT·WebVTT·ASS를 형식 표시 없이 읽습니다. 꾸밈 표기를 벗기고, 파일의 줄바꿈을 공백으로 합치고, 못 쓰는 자막은 **몇 번째를 왜 뺐는지와 함께** 돌려줍니다.
+- `POST /source-assets/{id}/transcript/import`: 대본 새 버전으로 저장합니다. 직접 편집과 같은 저장 경로(`save_transcript`)라 원본 길이 검사와 가독성 보고가 똑같이 적용됩니다.
+- 편집기에 **자막 파일 가져오기**(파일 선택). 들인 뒤 대본을 다시 읽고 뺀 자막을 알립니다.
+
+### 검증 결과
+
+- `pytest -q`: **330 통과 / 5 skip**(SQLite). 새 테스트 9개.
+- 우리가 내보낸 SRT를 다시 들이면 시각·글자가 같음을 확인했습니다(왕복).
+- WebVTT 화자 태그(`<v 진행자>`)와 SRT 기울임 표기가 벗겨지는 것, 순서가 뒤섞인 파일이 시간순으로 정렬되는 것을 확인했습니다.
+- 자막이 아닌 글자, 쓸 자막이 하나도 없는 파일, 원본 길이를 넘는 자막은 422로 막고 저장하지 않는 것을 확인했습니다.
+- `ruff check`·`ruff format --check`, `npm run typecheck`·`npm run build` 통과.
+- **미검증**: 실제 외부 도구(Aegisub·유튜브 내려받기 등)가 만든 파일로 시험해 본 적은 없습니다. 인코딩이 UTF-8이 아닌 파일(한국어 SRT에 흔한 CP949)은 **읽지 못합니다.** 브라우저가 `file.text()`로 UTF-8로 읽기 때문입니다.
+
+### 남은 작업
+
+- **인코딩**: CP949·EUC-KR 자막 파일을 어떻게 받을지 정하지 않았습니다. 브라우저에서 인코딩을 고르게 하거나, 바이트를 그대로 보내고 서버가 판별하는 방법이 있습니다. 자동 판별은 틀리면 글자가 깨지므로 사람이 고르게 하는 편이 안전합니다.
+- **싱크 보정(ffsubsync)**: 반입 경로는 생겼지만 들인 자막이 실제로 얼마나 어긋나는지 재 본 적이 없습니다. 재기 전에 넣으면 맞는 자막을 흔듭니다.
+- 자막 두 벌(구운 자막 + YouTube 트랙) 문제는 그대로입니다. 구운 자막 없이 렌더하는 선택지가 필요합니다.

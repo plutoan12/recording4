@@ -28,7 +28,7 @@ from adminapi.storage import ObjectStorage, get_storage
 from adminapi.subtitle_rules import subtitle_rules
 from pipeline.editing import Cue, EditSpec, suggest_clips
 from pipeline.states import JobState
-from pipeline.subtitle_files import MEDIA_TYPES, SubtitleFormat
+from pipeline.subtitle_files import MEDIA_TYPES, SubtitleFormat, parse_subtitles
 from pipeline.subtitles import check
 from pipeline.time import as_utc
 
@@ -108,32 +108,58 @@ def get_transcript(asset_id: uuid.UUID, user: CurrentUser, session: SessionDep):
     ]
 
 
-@router.put("/source-assets/{asset_id}/transcript")
-def put_transcript(
-    asset_id: uuid.UUID, payload: TranscriptRequest, user: CurrentUser, session: SessionDep
-):
-    asset = asset_for_edit(session, asset_id)
-    if any(c.end > float(asset.duration_seconds) for c in payload.cues):
+def save_transcript(session, asset, cues: list[Cue]) -> dict:  # noqa: ANN001
+    """대본을 새 버전으로 저장합니다. 기존 버전은 감사용으로 남깁니다."""
+    if any(c.end > float(asset.duration_seconds) for c in cues):
         raise HTTPException(422, "대본 구간이 원본 길이를 넘습니다.")
-    latest = transcript(session, asset_id)
+    latest = transcript(session, asset.id)
     version = latest[0].transcript_version + 1 if latest else 1
     session.add_all(
         [
             TranscriptSegment(
-                source_asset_id=asset_id,
+                source_asset_id=asset.id,
                 start_seconds=c.start,
                 end_seconds=c.end,
                 text=c.text,
                 transcript_version=version,
             )
-            for c in payload.cues
+            for c in cues
         ]
     )
-    return {
-        "version": version,
-        "count": len(payload.cues),
-        "violations": violations(payload.cues),
-    }
+    return {"version": version, "count": len(cues), "violations": violations(cues)}
+
+
+@router.put("/source-assets/{asset_id}/transcript")
+def put_transcript(
+    asset_id: uuid.UUID, payload: TranscriptRequest, user: CurrentUser, session: SessionDep
+):
+    return save_transcript(session, asset_for_edit(session, asset_id), payload.cues)
+
+
+class SubtitleImportRequest(BaseModel):
+    """밖에서 만든 자막 파일. 형식은 글자를 보고 판별합니다."""
+
+    text: str = Field(min_length=1, max_length=2_000_000)
+
+
+@router.post("/source-assets/{asset_id}/transcript/import")
+def import_subtitles(
+    asset_id: uuid.UUID, payload: SubtitleImportRequest, user: CurrentUser, session: SessionDep
+):
+    """SRT·WebVTT·ASS 파일을 읽어 대본 새 버전으로 저장합니다.
+
+    시각은 **파일에 적힌 그대로** 씁니다. 원본 음성과 맞는지는 확인하지 않습니다.
+    다른 판본에서 만든 자막이면 통째로 어긋날 수 있으니 편집기에서 확인하세요.
+
+    글자가 없거나 시간이 올바르지 않은 자막은 빼고, 무엇을 왜 뺐는지 `skipped`로
+    함께 돌려줍니다. 조용히 버리지 않습니다.
+    """
+    asset = asset_for_edit(session, asset_id)
+    try:
+        cues, notes = parse_subtitles(payload.text)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from None
+    return {**save_transcript(session, asset, cues), "skipped": notes}
 
 
 class AnalysisRequest(BaseModel):

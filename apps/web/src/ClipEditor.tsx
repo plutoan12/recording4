@@ -99,6 +99,23 @@ export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWo
         })}>대본 다시 읽기</button>
       </div>
       <details>
+        <summary>자막 파일 가져오기 (SRT·VTT·ASS)</summary>
+        <p>밖에서 만든 자막 파일을 대본으로 들입니다. 시각은 파일에 적힌 그대로 씁니다. 원본과 맞는지는 확인하지 않으니 들인 뒤 확인하세요.</p>
+        <input type="file" accept=".srt,.vtt,.ass,.ssa,text/plain" disabled={busy} onChange={e => {
+          const file = e.target.files?.[0]
+          e.target.value = ''
+          if (!file) return
+          void act(async () => {
+            const imported = await request<{version:number;count:number;skipped:string[];violations:Violation[]}>(
+              `/source-assets/${assetId}/transcript/import`, {method:'POST', body: JSON.stringify({text: await file.text()})})
+            setCaptions(await request<Cue[]>(`/source-assets/${assetId}/transcript`))
+            setViolations(imported.violations)
+            setMessage(`자막 ${imported.count}개를 대본 ${imported.version}번으로 들였습니다.`
+              + (imported.skipped.length ? ` 뺀 자막 ${imported.skipped.length}개: ${imported.skipped.join(' ')}` : ''))
+          })
+        }} />
+      </details>
+      <details>
         <summary>시간 없는 대본 붙여넣기</summary>
         <p>이미 있는 대본을 원본 음성에 맞춰 시각을 찾습니다. 글자는 그대로 두고 시간만 붙입니다. 유료 호출이 아닙니다.</p>
         <textarea rows={6} maxLength={50000} value={plainScript} placeholder="대본을 붙여넣으세요"
