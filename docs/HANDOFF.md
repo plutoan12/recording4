@@ -51,6 +51,40 @@
 
 PR #22 병합 후 Mac 운영 배포 완료(`83d94b1`). 자동 시작 경로는 `recording4-caption-delivery` 체크아웃입니다. API/워커 의존성·0006_sync 마이그레이션·트랙 설정 반영 확인. 350개 테스트 통과, 5개 조건부 skip. 실제 운영 싱크 작업은 안전하게 실패하고 대본 보존을 확인했습니다. **남은 품질 문제는 사람 목소리의 자동 싱크 정확도**이며, 실패를 성공으로 처리하거나 측정 기준을 완화하지 않았습니다.
 
+## 2026-09-19: 싱크를 단어 정렬로도 잡을 수 있게 함 (Claude)
+
+- 사용자 요청: 한국어 낭독 싱크 정확도 올리기. 브랜치 `claude/subtitle-file-generation-38xjz4`(최신 main에서 재시작).
+- 담당 파일: `services/worker/worker/{analysis,media_tasks}.py`, `services/api/adminapi/{config.py,routers/editing.py}`, `apps/web/src/ClipEditor.tsx`, `scripts/verify_sync_matrix.py`, `.github/workflows/ci.yml`, `tests/{test_editing_api,test_verify_sync_matrix}.py`, `docs/{TECH_DECISIONS,HANDOFF}.md`. 새 의존성 없습니다.
+
+### 왜 설정 조정으로는 더 못 올리는가
+
+Codex의 조건별 측정에서 남은 오차는 **한곳에 몰려 있습니다**: 1.25배 빠른 말 0.50초, 짧은 영상 0.40초, 나머지 8개 조건은 0.00~0.07초. 두 경우 모두 **이동값 하나로는 원리상 못 맞추는** 자리입니다(말 속도가 달라지면 전체를 같은 만큼 밀어서는 맞출 수 없습니다). ffsubsync 설정을 더 돌려도 이 한계는 남습니다.
+
+### 구현한 것
+
+- `worker/analysis.py:realign_subtitles()`: 대본 글자를 그대로 정렬기에 넘겨 **자막마다 시각을 따로** 받습니다. 글자는 건드리지 않고, 자막 개수가 그대로가 아니면 실패로 봅니다. 대본이 실제 발화와 다르면(번역 자막) 여기서 걸립니다.
+- `POST .../transcript/sync`에 `method`(`align`|`shift`)와 `language`를 받습니다. 편집기에 버튼 두 개와 차이 설명을 넣었습니다.
+- `verify_sync_matrix.py --method both`: **같은 10가지 조건에서 두 방법을 나란히** 잽니다. 손으로 따로 돌려 비교하지 않게 하려는 것입니다.
+- CI 워크플로의 `pull_request`에 `labeled`를 넣었습니다. 지금까지는 `verify-align` 라벨을 붙여도 CI가 돌지 않아 의미 없는 커밋을 하나 더 밀어야 했습니다.
+
+### 검증 결과
+
+- `pytest -q`: **405 통과 / 2 skip**(SQLite). `ruff check`·`format --check`, `npm run typecheck`·`build` 통과.
+- **정렬 품질 자체는 이 환경에서 재지 못했습니다.** 프록시가 `download.pytorch.org`를 막아 CPU torch를 설치할 수 없고(PyPI 기본 휠은 CUDA 빌드라 `libcudart.so.13`이 없어 못 씁니다), `huggingface.co`도 막혀 한국어 표본을 받지 못합니다. 대역으로 배선만 확인했습니다.
+
+### 남은 작업 — 기본값을 정하려면 이것부터
+
+**기본값은 아직 `shift`입니다.** align이 더 낫다는 근거가 없기 때문입니다. 지금 있는 한국어 숫자는 서로 다른 검사에서 나온 것이라 나란히 둘 수 없습니다(align 0.77/0.08/0.07초는 문장 3개·시작 시각만, shift 최대 0.50초는 조건 10종·시작과 끝 모두). **align의 최악값이 shift의 최악값보다 나쁩니다.**
+
+다음 차례는 한 명령입니다(torch와 Hugging Face가 되는 곳에서):
+
+```
+scripts/fetch_korean_speech.py --out /audio --count 9 --offset 30
+scripts/verify_sync_matrix.py --directory /audio --out /tmp/matrix --method both
+```
+
+그 표를 보고 기본값을 정하면 됩니다. 조건마다 다르면 자동으로 고르게 만드는 것도 선택지입니다(짧은 영상·속도 변화에서만 align).
+
 최종 갱신: 2026-09-19
 
 ## 현재 상태

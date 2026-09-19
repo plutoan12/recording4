@@ -18,7 +18,7 @@ from pathlib import Path
 import numpy as np
 
 from pipeline.editing import Cue
-from worker.analysis import sync_subtitles
+from worker.analysis import realign_subtitles, sync_subtitles
 
 RATE = 16000
 VARIANTS = [
@@ -121,23 +121,38 @@ def make_variant(directory: Path, out: Path, spec: tuple) -> tuple[Path, list[Cu
     return video, truth, cursor / speed
 
 
-def evaluate(source: Path, truth: list[Cue], offset: float, limit: float) -> dict:
+def evaluate(
+    source: Path, truth: list[Cue], offset: float, limit: float, method: str = "shift"
+) -> dict:
+    """한 조건에서 한 방법을 잽니다. 거부와 실패를 통과로 세지 않습니다.
+
+    두 방법은 재는 것이 다릅니다. shift는 이동값이 하나라 그 값 자체도 봅니다.
+    align은 자막마다 시각을 따로 받으므로 이동값 하나로 판정할 수 없고, 자막
+    시각의 오차만 봅니다.
+    """
     pushed = [Cue(start=c.start + offset, end=c.end + offset, text=c.text) for c in truth]
     try:
-        moved, meta = sync_subtitles(source, pushed)
+        if method == "align":
+            moved, meta = realign_subtitles(source, pushed, language="ko")
+        else:
+            moved, meta = sync_subtitles(source, pushed)
         errors = [
             max(abs(a.start - b.start), abs(a.end - b.end))
             for a, b in zip(moved, truth, strict=True)
         ]
         same = [c.text for c in moved] == [c.text for c in truth]
-        return {
-            "pass": same
-            and max(errors) <= limit + 1e-9
-            and abs(meta["offset_seconds"] + offset) <= limit + 1e-9,
+        passed = same and max(errors) <= limit + 1e-9
+        found = {
+            "pass": passed,
             "max_error_seconds": round(max(errors), 3),
             "text_preserved": same,
-            "offset_seconds": meta["offset_seconds"],
         }
+        if method == "align":
+            found["max_shift_seconds"] = meta["max_shift_seconds"]
+        else:
+            found["offset_seconds"] = meta["offset_seconds"]
+            found["pass"] = passed and abs(meta["offset_seconds"] + offset) <= limit + 1e-9
+        return found
     except (ValueError, RuntimeError) as exc:
         return {"pass": False, "rejected": str(exc)}
 
@@ -147,7 +162,10 @@ def main() -> int:
     parser.add_argument("--directory", type=Path, required=True)
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--limit", type=float, default=0.5)
+    # 같은 조건에서 두 방법을 나란히 잽니다. 손으로 따로 돌려 비교하지 않게 합니다.
+    parser.add_argument("--method", choices=("shift", "align", "both"), default="shift")
     args = parser.parse_args()
+    methods = ("shift", "align") if args.method == "both" else (args.method,)
     args.out.mkdir(parents=True, exist_ok=True)
     results = []
     for spec in VARIANTS:
@@ -158,18 +176,24 @@ def main() -> int:
             "cue_count": len(truth),
             "cases": {},
         }
-        for offset in (0.0, 2.5):
-            with (
-                (args.out / spec[0] / f"{offset}.log").open("w") as log,
-                contextlib.redirect_stdout(log),
-                contextlib.redirect_stderr(log),
-            ):
-                logging.disable(logging.CRITICAL)
-                entry["cases"][str(offset)] = evaluate(source, truth, offset, args.limit)
-                logging.disable(logging.NOTSET)
+        for method in methods:
+            for offset in (0.0, 2.5):
+                key = f"{method}:{offset}" if len(methods) > 1 else str(offset)
+                with (
+                    (args.out / spec[0] / f"{method}-{offset}.log").open("w") as log,
+                    contextlib.redirect_stdout(log),
+                    contextlib.redirect_stderr(log),
+                ):
+                    logging.disable(logging.CRITICAL)
+                    entry["cases"][key] = evaluate(source, truth, offset, args.limit, method)
+                    logging.disable(logging.NOTSET)
         results.append(entry)
         (args.out / "results.json").write_text(
-            json.dumps({"limit": args.limit, "results": results}, ensure_ascii=False, indent=2)
+            json.dumps(
+                {"limit": args.limit, "methods": list(methods), "results": results},
+                ensure_ascii=False,
+                indent=2,
+            )
         )
         print(json.dumps(entry, ensure_ascii=False), flush=True)
     return 0 if all(c["pass"] for r in results for c in r["cases"].values()) else 1

@@ -441,6 +441,58 @@ class SyncOptions:
         return extra
 
 
+def realign_subtitles(
+    source: Path,
+    cues: list[Cue],
+    *,
+    model: str = "small",
+    language: str | None = None,
+    device: str = "cpu",
+) -> tuple[list[Cue], dict]:
+    """자막을 **단어 단위로** 원본 음성에 다시 맞춥니다(강제 정렬).
+
+    `sync_subtitles`와 목적은 같지만 쓰는 정보가 다릅니다. 싱크 보정은 글자를
+    버리고 말/침묵 신호만 견주어 **전체에 하나뿐인 이동값**을 찾습니다. 그래서
+    문장마다 다르게 어긋난 자막이나 말 속도가 달라진 자막은 원리상 맞출 수
+    없습니다(측정: 1.25배 빠른 말에서 0.50초, 짧은 영상에서 0.40초).
+
+    여기서는 대본 글자를 그대로 정렬기에 넘겨 **자막마다 시각을 따로** 받습니다.
+    자막 파일을 들여오는 경우 우리는 글자를 갖고 있으므로 쓸 수 있는 정보가 더
+    많습니다.
+
+    **글자는 건드리지 않습니다.** 정렬 결과에서 시각만 가져옵니다. 자막 하나가
+    줄 하나이므로 개수가 그대로여야 하며, 정렬기가 줄을 못 맞추면 실패로 봅니다.
+    대본 글자가 실제 발화와 다르면(번역 자막) 여기서 걸립니다. 그런 자막은
+    `sync_subtitles`로 옮겨야 합니다.
+    """
+    if not cues:
+        raise ValueError("정렬할 자막이 없습니다.")
+    # 정렬기는 줄 하나를 자막 하나로 봅니다. 자막 안의 줄바꿈은 공백으로 만듭니다.
+    lines = [" ".join(cue.text.split()) for cue in cues]
+    if any(not line for line in lines):
+        raise ValueError("글자가 없는 자막이 있어 정렬할 수 없습니다.")
+    aligned = align_text(source, "\n".join(lines), model=model, language=language, device=device)
+    # align_text는 줄을 못 맞추면 정렬기가 나눈 구간으로 돌아갑니다. 그 결과는
+    # 우리 자막과 짝이 지어지지 않으므로 여기서는 실패로 봅니다.
+    if len(aligned) != len(cues) or [cue.text for cue in aligned] != lines:
+        raise ValueError(
+            "정렬 결과를 원래 자막에 맞출 수 없습니다. 대본 글자가 실제 발화와 "
+            "같은지 확인하세요(번역 자막은 싱크 보정을 쓰세요)."
+        )
+    moved = [
+        Cue(start=new.start, end=new.end, text=old.text)
+        for old, new in zip(cues, aligned, strict=True)
+    ]
+    shifts = sorted(new.start - old.start for old, new in zip(cues, aligned, strict=True))
+    return moved, {
+        "method": "align",
+        "count": len(moved),
+        # 자막마다 이동이 다릅니다. 하나의 오프셋으로 요약할 수 없으므로 폭을 남깁니다.
+        "max_shift_seconds": round(max(shifts, key=abs), 3),
+        "median_shift_seconds": round(shifts[len(shifts) // 2], 3),
+    }
+
+
 def _run_sync(args):  # noqa: ANN001 - ffsubsync의 argparse.Namespace입니다.
     """보정기를 실제로 돌립니다. 시험에서 이 자리를 갈아끼워 응답을 꾸밉니다."""
     from ffsubsync.ffsubsync import run

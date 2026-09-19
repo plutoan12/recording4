@@ -22,6 +22,7 @@ from worker.analysis import (
     align_text,
     detect_scenes,
     diarize,
+    realign_subtitles,
     sync_subtitles,
     transcribe,
 )
@@ -104,20 +105,30 @@ def run_media(task_id: str) -> dict:
                 )
                 result = {"speakers": speaker_totals(turns)}
             elif kind == "sync":
-                # 글자는 그대로 두고 시각만 통째로 옮깁니다. 얼마나 옮겼는지 남깁니다.
+                # 글자는 그대로 두고 시각만 다시 잡습니다. 무엇을 했는지 남깁니다.
                 with get_session_factory()() as session:
                     rows = latest_transcript(session, task_uuid)
                 if not rows:
                     raise ValueError("보정할 대본이 없습니다.")
-                cues, report = sync_subtitles(
-                    source,
-                    rows,
-                    SyncOptions(
-                        fix_framerate=settings.sync_fix_framerate,
-                        max_offset_seconds=settings.sync_max_offset_seconds,
-                        vad=settings.sync_vad,
-                    ),
-                )
+                if spec.get("method", settings.sync_method) == "align":
+                    # 대본 글자를 그대로 써서 자막마다 시각을 따로 찾습니다.
+                    cues, report = realign_subtitles(
+                        source,
+                        rows,
+                        model=settings.whisper_model,
+                        language=spec.get("language"),
+                        device=settings.whisper_device,
+                    )
+                else:
+                    cues, report = sync_subtitles(
+                        source,
+                        rows,
+                        SyncOptions(
+                            fix_framerate=settings.sync_fix_framerate,
+                            max_offset_seconds=settings.sync_max_offset_seconds,
+                            vad=settings.sync_vad,
+                        ),
+                    )
                 result = {"sync": report}
             elif kind == "align":
                 # 전사가 아니라 정렬입니다. 대본 글자는 그대로 두고 시각만 찾습니다.

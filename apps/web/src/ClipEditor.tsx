@@ -7,7 +7,11 @@ type Cue = { start: number; end: number; text: string }
 type Suggestion = { start: number; end: number; title: string; reason: string }
 type Violation = { index: number; kind: string; detail: string }
 type Task = { id: string; source_asset_id: string; clip_edit_id: string | null; kind: string; state: string; error: string | null;
-  result: { artifact_id?: string; scenes?: {start: number; end: number}[]; sync?: {offset_seconds:number; framerate_scale:number; clamped:number} } }
+  result: { artifact_id?: string; scenes?: {start: number; end: number}[];
+    // 싱크 결과는 방법마다 모양이 다릅니다. align은 자막마다 다르게 옮기므로
+    // 이동값 하나로 요약할 수 없어 움직인 폭을 남깁니다.
+    sync?: {method?:string; offset_seconds?:number; framerate_scale?:number;
+            max_shift_seconds?:number; median_shift_seconds?:number; count?:number} } }
 
 export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWorkflow: (draft:WorkflowDraft)=>void }) {
   const [assetId, setAssetId] = useState('')
@@ -146,12 +150,17 @@ export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWo
       <details>
         <summary>시간 없는 대본 붙여넣기</summary>
         <p>이미 있는 대본을 원본 음성에 맞춰 시각을 찾습니다. 글자는 그대로 두고 시간만 붙입니다. 유료 호출이 아닙니다.</p>
+        <p><b>통째로 옮기기</b>가 기본입니다. 빠르지만 이동값이 하나뿐이라 문장마다 다르게 어긋났거나 말 속도가 달라진 자막은 원리상 맞출 수 없습니다(측정: 1.25배 빠른 말에서 0.50초). <b>단어 정렬</b>은 대본 글자를 음성에 하나씩 맞춰 자막마다 시각을 따로 찾으므로 그런 경우를 다룰 수 있지만, 음성 인식 모델을 돌려 훨씬 느리고 <b>한국어 낭독에서 어느 쪽이 나은지는 아직 같은 조건으로 재지 못했습니다.</b> 글자가 실제 발화와 다른 번역 자막에는 통째로 옮기기만 됩니다. 어느 쪽이든 결과는 대본 새 버전이라 되돌릴 수 있습니다.</p>
         <textarea rows={6} maxLength={50000} value={plainScript} placeholder="대본을 붙여넣으세요"
           onChange={e => setPlainScript(e.target.value)} />
         <button disabled={busy} onClick={() => void act(async () => {
-          await request(`/source-assets/${assetId}/transcript/sync`, {method:'POST'})
-          setMessage('자막 싱크 보정을 요청했습니다. 끝나면 아래 결과에 옮긴 초가 나옵니다. 대본 다시 읽기를 누르세요.'); await refresh()
-        })}>자막 싱크 보정 (원본 음성에 맞추기)</button>
+          await request(`/source-assets/${assetId}/transcript/sync`, {method:'POST', body: JSON.stringify({method:'align'})})
+          setMessage('단어 정렬로 싱크를 다시 잡습니다. 자막마다 시각을 따로 찾으므로 느립니다. 끝나면 대본 다시 읽기를 누르세요.'); await refresh()
+        })}>단어 정렬로 다시 잡기 (느림)</button>
+        <button disabled={busy} onClick={() => void act(async () => {
+          await request(`/source-assets/${assetId}/transcript/sync`, {method:'POST', body: JSON.stringify({method:'shift'})})
+          setMessage('자막 전체를 통째로 옮깁니다. 끝나면 대본 다시 읽기를 누르세요.'); await refresh()
+        })}>통째로 옮기기 (기본·빠름)</button>
         <button disabled={busy || !plainScript.trim()} onClick={() => void act(async () => {
           await request(`/source-assets/${assetId}/align`, {method:'POST', body: JSON.stringify({text: plainScript})})
           setMessage('대본 정렬을 요청했습니다. 완료 후 대본 다시 읽기를 누르세요.'); await refresh()
@@ -199,9 +208,11 @@ export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWo
     <h3>분석·렌더 결과</h3>
     <ul>{tasks.filter(t => !assetId || t.source_asset_id === assetId).map(t => <li key={t.id}>
       {t.kind} · {t.state} {t.error}
-      {t.result.sync && <span> · {t.result.sync.offset_seconds >= 0 ? '뒤로' : '앞으로'} {Math.abs(t.result.sync.offset_seconds).toFixed(2)}초 옮김
-        {t.result.sync.framerate_scale !== 1 && ` · 속도 ${t.result.sync.framerate_scale}배`}
-        {t.result.sync.clamped > 0 && ` · 0초로 잘린 자막 ${t.result.sync.clamped}개`}</span>}
+      {t.result.sync && (t.result.sync.method === 'align'
+        ? <span> · 단어 정렬 · 자막 {t.result.sync.count}개 · 가장 크게 {Math.abs(t.result.sync.max_shift_seconds ?? 0).toFixed(2)}초 옮김
+          {` (보통 ${Math.abs(t.result.sync.median_shift_seconds ?? 0).toFixed(2)}초)`}</span>
+        : <span> · 통째로 {(t.result.sync.offset_seconds ?? 0) >= 0 ? '뒤로' : '앞으로'} {Math.abs(t.result.sync.offset_seconds ?? 0).toFixed(2)}초 옮김
+          {t.result.sync.framerate_scale !== 1 && ` · 속도 ${t.result.sync.framerate_scale}배`}</span>)}
       {t.result.scenes?.map((s,i) => <button key={i} onClick={() => {setStart(s.start);setEnd(Math.min(s.end,s.start+180))}}>{s.start.toFixed(1)}–{s.end.toFixed(1)}초</button>)}
       {t.state === 'failed' && <button disabled={busy} onClick={() => void act(async () => {
         await request(`/media-tasks/${t.id}/retry`, {method:'POST'}); await refresh()
