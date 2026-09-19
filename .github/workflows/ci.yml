@@ -267,7 +267,11 @@ jobs:
           contains(github.event.pull_request.labels.*.name, 'verify-align') ||
           contains(github.event.head_commit.message, '[verify-align]')
         run: |
-          python3 scripts/fetch_korean_speech.py --out /tmp/matrix-audio --count 9 --offset 30
+          # 행 번호는 표본을 고정하지 못합니다. 같은 --offset 30으로 30분 간격을 두고
+          # 받은 문장 아홉 개가 전부 달랐습니다(run #306·#330 대 #328). 표본 id로
+          # 고정합니다. 찾지 못하면 다른 표본으로 갈아타지 않고 실패합니다.
+          python3 scripts/fetch_korean_speech.py --out /tmp/matrix-audio --count 9 \
+            --expect 095fd58c31ba
           # 워커 컨테이너는 appuser(10001)로 돌아 러너가 만든 폴더에 못 씁니다.
           mkdir -p /tmp/matrix-out && chmod 777 /tmp/matrix-out
           docker run --rm -v /tmp/matrix-audio:/audio -v /tmp/matrix-out:/out \
@@ -275,7 +279,10 @@ jobs:
             /work/verify_sync_matrix.py --directory /audio --out /out \
             --method shift,align --gate none \
             --variants music_intro --drift 0,0.15,0.3,0.45,0.6
-          cat /tmp/matrix-out/results.json
+          # 전문을 찍으면 로그가 200줄 길어지고 읽을 때마다 그만큼 퍼 옵니다.
+          # 조건별 한 줄 JSON과 표가 위에 이미 있으니 머리말만 남깁니다.
+          python3 -c "import json; d = json.load(open('/tmp/matrix-out/results.json')); \
+            print(json.dumps({k: d[k] for k in ('sample_id', 'limit', 'methods', 'gated', 'drifts')}, ensure_ascii=False))"
 
       # 합성 음성만으로는 사람 목소리 정확도를 말할 수 없습니다. 공개 한국어
       # 낭독 음성을 받아 같은 검사를 한 번 더 돌립니다. 받지 못하면 실패합니다.
@@ -285,7 +292,10 @@ jobs:
           contains(github.event.pull_request.labels.*.name, 'verify-align') ||
           contains(github.event.head_commit.message, '[verify-align]')
         run: |
-          python3 scripts/fetch_korean_speech.py --out /tmp/human-sample --count 3
+          # 이 검사도 같은 이유로 표본을 고정합니다. 고정하지 않으면 코드가 아니라
+          # 그날 뽑힌 표본을 재게 됩니다(전사 CER이 10.4%와 54.8% 사이를 오갔습니다).
+          python3 scripts/fetch_korean_speech.py --out /tmp/human-sample --count 3 \
+            --expect a782da697dd0
           docker run --rm -v /tmp/human-sample:/audio -v "$PWD/scripts:/work:ro" \
             --entrypoint python recording4-worker:ci /work/verify_align.py \
             --directory /audio --model small --no-diagnose
