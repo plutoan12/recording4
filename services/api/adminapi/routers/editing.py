@@ -144,7 +144,8 @@ def put_transcript(
 
 
 class AnalysisRequest(BaseModel):
-    kind: Literal["transcribe", "scenes"]
+    # faces는 세로로 자를 때 어디를 남길지 제안만 합니다. 적용하지 않습니다.
+    kind: Literal["transcribe", "scenes", "faces"]
     language: str | None = Field(default=None, pattern=r"^[a-z]{2,3}$")
 
 

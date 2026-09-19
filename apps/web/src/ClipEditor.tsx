@@ -7,7 +7,8 @@ type Cue = { start: number; end: number; text: string }
 type Suggestion = { start: number; end: number; title: string; reason: string }
 type Violation = { index: number; kind: string; detail: string }
 type Task = { id: string; source_asset_id: string; clip_edit_id: string | null; kind: string; state: string; error: string | null;
-  result: { artifact_id?: string; scenes?: {start: number; end: number}[] } }
+  result: { artifact_id?: string; scenes?: {start: number; end: number}[];
+    focus?: {focus_x: number; samples: number; found: number; reason: string} } }
 
 export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWorkflow: (draft:WorkflowDraft)=>void }) {
   const [assetId, setAssetId] = useState('')
@@ -95,6 +96,10 @@ export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWo
           await request(`/source-assets/${assetId}/analyze`, {method:'POST', body: JSON.stringify({kind:'scenes'})}); await refresh()
         })}>장면 감지</button>
         <button disabled={busy} onClick={() => void act(async () => {
+          await request(`/source-assets/${assetId}/analyze`, {method:'POST', body: JSON.stringify({kind:'faces'})})
+          setMessage('얼굴 위치를 찾고 있습니다. 결과는 제안일 뿐이고 좌우 중심은 바뀌지 않습니다.'); await refresh()
+        })}>좌우 중심 제안</button>
+        <button disabled={busy} onClick={() => void act(async () => {
           setCaptions(await request<Cue[]>(`/source-assets/${assetId}/transcript`))
         })}>대본 다시 읽기</button>
       </div>
@@ -149,6 +154,11 @@ export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWo
     <ul>{tasks.filter(t => !assetId || t.source_asset_id === assetId).map(t => <li key={t.id}>
       {t.kind} · {t.state} {t.error}
       {t.result.scenes?.map((s,i) => <button key={i} onClick={() => {setStart(s.start);setEnd(Math.min(s.end,s.start+180))}}>{s.start.toFixed(1)}–{s.end.toFixed(1)}초</button>)}
+      {t.result.focus && <> <span>{t.result.focus.reason}</span>
+        {/* 누를 때만 적용합니다. 검출기가 틀리면 맞춰 둔 값을 망칩니다. */}
+        <button disabled={busy} onClick={() => {setMode('crop');setFocus(t.result.focus!.focus_x);
+          setMessage(`좌우 중심을 ${t.result.focus!.focus_x}로 바꿨습니다. 미리보기로 확인하세요.`)}}>
+          이 제안 적용</button></>}
       {t.state === 'failed' && <button disabled={busy} onClick={() => void act(async () => {
         await request(`/media-tasks/${t.id}/retry`, {method:'POST'}); await refresh()
       })}>재시도</button>}
