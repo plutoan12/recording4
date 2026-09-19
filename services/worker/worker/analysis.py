@@ -448,6 +448,7 @@ def realign_subtitles(
     model: str = "small",
     language: str | None = None,
     device: str = "cpu",
+    keep_duration: bool = True,
 ) -> tuple[list[Cue], dict]:
     """자막을 **단어 단위로** 원본 음성에 다시 맞춥니다(강제 정렬).
 
@@ -483,14 +484,25 @@ def realign_subtitles(
             "정렬 결과를 원래 자막에 맞출 수 없습니다. 대본 글자가 실제 발화와 "
             "같은지 확인하세요(번역 자막은 싱크 보정을 쓰세요)."
         )
-    moved = [
-        Cue(start=new.start, end=new.end, text=old.text)
-        for old, new in zip(cues, aligned, strict=True)
-    ]
+    moved: list[Cue] = []
+    for index, (old, new) in enumerate(zip(cues, aligned, strict=True)):
+        end = new.end
+        if keep_duration:
+            # 정렬기의 끝 시각은 말이 끝나는 지점을 짚습니다. 그대로 쓰면 숨소리와
+            # 잔향이 남은 구간이 잘려 자막이 이르게 사라집니다(측정: 1.21~1.74초).
+            # 원래 자막 길이를 지키는 편이 낫습니다. 통째로 옮기기도 같은 이유로
+            # 길이를 보존합니다.
+            end = new.start + (old.end - old.start)
+            # 다음 자막을 침범하면 거기서 끊습니다. 겹친 자막은 화면에서 겹칩니다.
+            if index + 1 < len(aligned):
+                end = min(end, aligned[index + 1].start)
+            end = max(end, new.start + 0.001)
+        moved.append(Cue(start=new.start, end=end, text=old.text))
     shifts = sorted(new.start - old.start for old, new in zip(cues, aligned, strict=True))
     return moved, {
         "method": "align",
         "count": len(moved),
+        "keep_duration": keep_duration,
         # 자막마다 이동이 다릅니다. 하나의 오프셋으로 요약할 수 없으므로 폭을 남깁니다.
         "max_shift_seconds": round(max(shifts, key=abs), 3),
         "median_shift_seconds": round(shifts[len(shifts) // 2], 3),
