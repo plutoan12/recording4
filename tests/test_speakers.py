@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from pipeline.editing import Cue
@@ -118,3 +120,11 @@ def test_a_voice_change_inside_a_span_becomes_two_turns() -> None:
     turns = turns_from_labels([(0.0, 1.5), (1.5, 3.0)], [0, 1])
     assert [t.speaker for t in turns] == ["SPEAKER_00", "SPEAKER_01"]
     assert turns[1].start == 1.5
+
+
+def test_embedding_diarizer_refuses_a_speaker_count_below_one() -> None:
+    """모델을 내려받기 전에 막습니다. 잘못된 값으로 큰 모델을 부르지 않습니다."""
+    from worker.analysis import diarize_by_embedding
+
+    with pytest.raises(ValueError):
+        diarize_by_embedding(Path("/nonexistent.wav"), speakers=0)
