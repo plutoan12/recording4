@@ -42,13 +42,13 @@ def setup_flow(client, auth_headers, session, user, monkeypatch):
     session.add(asset)
     session.commit()
 
-    def create(**options):
+    def create(target_language="en", **options):
         response = client.post(
             "/jobs",
             headers=auth_headers,
             json={
                 "source_asset_id": str(asset.id),
-                "target_language": "en",
+                "target_language": target_language,
                 "workflow": {
                     "audio_mode": "original",
                     "transcript": [{"start": 1, "end": 2, "text": "hello"}],
@@ -778,3 +778,103 @@ def test_burned_video_never_adds_a_duplicate_track(setup_flow, client, auth_head
     )
     assert pub.run_publication(pid)["status"] == "scheduled"
     assert tracks["inserted"] == []
+
+
+@pytest.mark.parametrize(
+    "source,target",
+    [(s, t) for s in ("ko", "en", "ja", "zh") for t in ("ko", "en", "ja", "zh") if s != t],
+)
+def test_subtitles_only_languages_keep_audio_and_times(
+    setup_flow, client, auth_headers, session, monkeypatch, source, target
+):
+    from pipeline.subtitle_files import parse_subtitles
+
+    create, _ = setup_flow
+    texts = {"ko": "안녕하세요", "en": "Hello", "ja": "こんにちは", "zh": "你好"}
+    settings = get_settings().model_copy(
+        update={
+            "paid_processing_enabled": True,
+            "google_cloud_project": "test-only",
+            "translate_usd_per_1k_chars": Decimal("0.02"),
+            "elevenlabs_api_key": None,
+        }
+    )
+    monkeypatch.setattr(wf, "get_settings", lambda: settings)
+    calls = []
+
+    class Translator:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def translate(self, inputs, target_code, source_code):
+            calls.append((source_code, target_code))
+            assert inputs == [texts[source]]
+            return [texts[target]]
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("자막 전용 작업에서 더빙이 실행됐습니다.")
+
+    def render(original, output, **kwargs):
+        assert original.read_bytes() == b"source bytes"
+        assert kwargs["cues"][0].text == texts[target]
+        assert kwargs["cues"][0].start == 1
+        assert kwargs["cues"][0].end == 3
+        output.write_bytes(b"final")
+
+    monkeypatch.setattr(wf, "GoogleTranslator", Translator)
+    monkeypatch.setattr(wf, "ElevenLabsSpeech", forbidden)
+    monkeypatch.setattr(wf, "render_final", render)
+    jid = create(
+        audio_mode="subtitles",
+        target_language=target,
+        source_language=source,
+        budget_usd="1",
+        transcript=[{"start": 1, "end": 3, "text": texts[source]}],
+    )
+    assert (
+        client.put(
+            "/workflow/monthly-budget", headers=auth_headers, json={"limit_usd": "10"}
+        ).status_code
+        == 200
+    )
+    assert wf.run_job(jid)["stage"] == "transcribe"
+    assert wf.run_job(jid)["stage"] == "translate:0"
+    assert wf.run_job(jid)["stage"] == "render"
+    assert wf.run_job(jid)["status"] == "review_required"
+    assert calls == [(source, target)]
+    for fmt in ("srt", "vtt"):
+        response = client.get(f"/jobs/{jid}/subtitles?format={fmt}", headers=auth_headers)
+        assert response.status_code == 200
+        cues, _ = parse_subtitles(response.text)
+        assert [(c.start, c.end, c.text) for c in cues] == [(1, 3, texts[target])]
+
+
+def test_subtitles_only_rejects_lipsync():
+    from pydantic import ValidationError
+
+    from pipeline.workflow import WorkflowOptions
+
+    with pytest.raises(ValidationError, match="립싱크"):
+        WorkflowOptions(audio_mode="subtitles", lipsync=True)
+
+
+def test_subtitles_budget_blocks_before_translation(setup_flow, monkeypatch):
+    create, _ = setup_flow
+    settings = get_settings().model_copy(
+        update={
+            "paid_processing_enabled": True,
+            "google_cloud_project": "test-only",
+            "translate_usd_per_1k_chars": Decimal("0.02"),
+        }
+    )
+    monkeypatch.setattr(wf, "get_settings", lambda: settings)
+    monkeypatch.setattr(wf, "GoogleTranslator", lambda *a, **kw: pytest.fail("예산 없이 호출됨"))
+    jid = create(audio_mode="subtitles", source_language="ko", budget_usd="0")
+    assert wf.run_job(jid)["stage"] == "transcribe"
+    assert wf.run_job(jid)["status"] == "blocked_or_failed"
+
+
+def test_subtitles_empty_transcript_does_not_render(setup_flow):
+    create, _ = setup_flow
+    jid = create(audio_mode="subtitles", transcript=[])
+    assert wf.run_job(jid)["status"] == "blocked_or_failed"
