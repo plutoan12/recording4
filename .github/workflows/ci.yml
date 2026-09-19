@@ -289,7 +289,9 @@ jobs:
               diarize(Path('/audio/sample.wav'), token='not-a-real-token', device='cpu')
           except MissingDependency as exc:
               text = str(exc)
-              assert 'speaker-diarization-3.1' in text, text
+              # 막힌 저장소를 그대로 짚어 줘야 합니다. 엉뚱한 페이지를 적으면
+              # 사람이 동의를 다 해 놓고도 같은 오류를 다시 봅니다.
+              assert 'speaker-diarization-community-1' in text, text
               assert 'segmentation-3.0' in text, text
               print('토큰이 잘못됐을 때 이렇게 안내합니다:')
               print(text)
