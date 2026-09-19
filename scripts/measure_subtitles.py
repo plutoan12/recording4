@@ -17,6 +17,9 @@ libass로 한 프레임을 그린 뒤 밝은 화소의 경계를 직접 찾습�
 4. 우리가 끊은 줄이 화면에서 그대로 그려질 것. 한 줄이 넘치면 libass가 제
    마음대로 다시 줄바꿈해서 두 줄이 세 줄이 됩니다. 폭만 재면 이건 안 보입니다.
    줄을 세어야 압니다.
+5. 줄이 늘어도 세로로 제자리에 있을 것. 자막은 화면 아래에 붙고 줄이 늘면
+   **위로** 자랍니다. 설정한 아래 여백이 지켜지는지, 화면 밖이나 제목까지
+   올라가지 않는지 봅니다.
 
 **넘친 줄의 픽셀 값은 믿지 마세요.** 밝은 화소의 상자는 화면 가장자리에서
 멈추므로, 넘치면 글자 폭이 아니라 화면 폭이 나옵니다. 그래서 넘친 줄은
@@ -64,6 +67,10 @@ ENGLISH_SAMPLE = "In March last year a colleague of the former minister was appo
 # 줄이 필요합니다. 알파벳 한 바퀴는 실제 문장의 글자 분포에 가깝고 공백이
 # 없어 오히려 조금 넓습니다.
 ALPHABET = "abcdefghijklmnopqrstuvwxyz"
+
+# 세로 위치를 볼 때 쓰는 글. 줄 길이만 바꾸면 같은 글이 2·3·5줄이 됩니다.
+VERTICAL_SAMPLE = "다람쥐 헌 쳇바퀴에 타고파 오늘도 즐겁게"
+TITLE_SAMPLE = "화면 제목"
 
 
 def render_mask(spec: EditSpec, rules: SubtitleRules) -> np.ndarray | None:
@@ -128,43 +135,49 @@ def measure(spec: EditSpec, rules: SubtitleRules) -> tuple[int, int] | str | Non
     return int(columns[-1] - columns[0] + 1), int(rows[-1] - rows[0] + 1)
 
 
-def drawn_lines(mask: np.ndarray) -> list[tuple[int, int]]:
-    """실제로 그려진 줄들의 (가로, 세로) 픽셀. 글자가 없는 행으로 끊어 셉니다.
-
-    폭만 재면 우리가 넣은 줄바꿈이 화면에서 지켜지는지 알 수 없습니다. 한 줄이
-    여백을 넘으면 libass가 제 마음대로 다시 줄바꿈해서 두 줄이 세 줄이 됩니다.
-    그러면 자막이 다른 자리에서 끊기고 화면 아래로 더 내려옵니다.
-
-    외곽선과 그림자 때문에 줄 사이가 붙으면 두 줄이 한 덩어리로 보일 수
-    있습니다. 그래서 **줄이 더 많이 그려진 경우만** 문제로 셉니다. 적게 나온
-    것은 세는 방법의 한계일 수 있으므로 적어만 둡니다.
-    """
+def bands(mask: np.ndarray) -> list[tuple[int, int]]:
+    """글자가 그려진 세로 구간들 (위 행, 아래 행). 글자가 없는 행으로 끊습니다."""
     ink = mask.any(axis=1)
-    bands: list[tuple[int, int]] = []
+    found: list[tuple[int, int]] = []
     top: int | None = None
     for index, lit in enumerate(ink):
         if lit and top is None:
             top = index
         elif not lit and top is not None:
-            bands.append((top, index))
+            found.append((top, index - 1))
             top = None
     if top is not None:
-        bands.append((top, len(ink)))
-    found: list[tuple[int, int]] = []
-    for start, end in bands:
-        columns = np.nonzero(mask[start:end].any(axis=0))[0]
-        if columns.size:
-            found.append((int(columns[-1] - columns[0] + 1), int(end - start)))
+        found.append((top, len(ink) - 1))
     return found
 
 
-def spec_for(text: str, font_size: int, width: int, height: int) -> EditSpec:
+def drawn_lines(mask: np.ndarray) -> list[tuple[int, int]]:
+    """실제로 그려진 줄들의 (가로, 세로) 픽셀.
+
+    폭만 재면 우리가 넣은 줄바꿈이 화면에서 지켜지는지 알 수 없습니다. 한 줄이
+    여백을 넘으면 libass가 제 마음대로 다시 줄바꿈해서 두 줄이 세 줄이 됩니다.
+    그러면 자막이 다른 자리에서 끊기고 화면 위로 더 올라갑니다.
+
+    외곽선과 그림자 때문에 줄 사이가 붙으면 두 줄이 한 덩어리로 보일 수
+    있습니다. 그래서 **줄이 더 많이 그려진 경우만** 문제로 셉니다. 적게 나온
+    것은 세는 방법의 한계일 수 있으므로 적어만 둡니다.
+    """
+    found: list[tuple[int, int]] = []
+    for start, end in bands(mask):
+        columns = np.nonzero(mask[start : end + 1].any(axis=0))[0]
+        if columns.size:
+            found.append((int(columns[-1] - columns[0] + 1), int(end - start + 1)))
+    return found
+
+
+def spec_for(text: str, font_size: int, width: int, height: int, title: str = "") -> EditSpec:
     return EditSpec(
         start=0,
         end=5,
         width=width,
         height=height,
         font_size=font_size,
+        title=title,
         cues=[Cue(start=0, end=5, text=text)],
     )
 
@@ -270,7 +283,7 @@ def main() -> int:
     # 여기까지는 "한 줄이 여백 안에 들어가는가"만 봤습니다. 정작 걱정하던 것은
     # 우리가 끊은 줄이 화면에서 그대로 그려지는가입니다. 한 줄이 넘치면 libass가
     # 제 마음대로 다시 줄바꿈해서 두 줄이 세 줄이 되고, 자막이 다른 자리에서
-    # 끊기며 화면 아래로 더 내려옵니다. 줄을 세어 봐야 압니다.
+    # 끊기며 화면 위로 더 올라옵니다. 줄을 세어 봐야 압니다.
     print("\n우리가 끊은 줄이 화면에서 그대로 그려지는가")
     for label, text, rules in (
         ("한글 한 줄", "다람쥐 헌 쳇바퀴에", DEFAULT_RULES),
@@ -297,6 +310,74 @@ def main() -> int:
             # 외곽선·그림자로 줄 사이가 붙으면 한 덩어리로 보입니다. 세는
             # 방법의 한계라 문제로 세지 않고 적어만 둡니다.
             print("      (줄 사이가 붙어 보입니다. 외곽선 때문일 수 있어 문제로 세지 않습니다.)")
+
+    # 세로 위치. 자막은 화면 **아래에 붙고** 줄이 늘면 위로 자랍니다. 그래서
+    # 봐야 할 것은 두 가지입니다: 설정한 아래 여백이 지켜지는가, 줄이 늘었을 때
+    # 화면 밖이나 제목까지 올라가지 않는가. write_subtitles와 같은 값을 씁니다.
+    bottom_margin = int(args.height * 0.13)
+    print(f"\n세로 위치 (설정한 아래 여백 {bottom_margin}px)")
+    for label, text, line_limit in (
+        ("1줄", "다람쥐 헌", 16),
+        ("2줄", VERTICAL_SAMPLE, 16),
+        ("3줄", VERTICAL_SAMPLE, 8),
+        ("5줄", VERTICAL_SAMPLE, 6),
+    ):
+        # 시간이 모자라 나뉘지 않게 최소 표시 시간을 자막 길이와 같게 둡니다.
+        # 줄 수만 바꿔 가며 세로로 얼마나 자라는지 보려는 것입니다.
+        rules = SubtitleRules(max_chars_per_line=line_limit, max_lines=9, min_duration=5.0)
+        mask = render_mask(spec_for(text, args.font_size, args.width, args.height), rules)
+        if mask is None:
+            problems.append(f"세로 위치 {label}: 자막이 그려지지 않았습니다.")
+            continue
+        drawn = bands(mask)
+        if not drawn:
+            problems.append(f"세로 위치 {label}: 자막이 그려지지 않았습니다.")
+            continue
+        top, bottom = drawn[0][0], drawn[-1][1]
+        gap = args.height - 1 - bottom
+        print(
+            f"  {label}: 위 {top}px ~ 아래 {bottom}px "
+            f"(높이 {bottom - top + 1}px, 화면 아래까지 {gap}px, 줄 {len(drawn)}개)"
+        )
+        if top <= 0 or bottom >= args.height - 1:
+            problems.append(
+                f"세로 위치 {label}: 자막이 화면 밖으로 잘립니다(위 {top}, 아래 {bottom})."
+            )
+        # 외곽선 3px과 그림자 1px이 글자 상자 밖으로 나갑니다. 그만큼 봐줍니다.
+        elif gap < bottom_margin - 8:
+            problems.append(
+                f"세로 위치 {label}: 자막 아래가 화면에서 {gap}px 떨어져 있습니다. "
+                f"설정한 여백은 {bottom_margin}px입니다."
+            )
+
+    # 제목이 있을 때 자막이 제목까지 올라오는지. 둘이 겹치면 둘 다 못 읽습니다.
+    #
+    # 겹침은 "구간이 몇 개인가"로 봅니다. 구간은 글자가 없는 행으로 끊으므로
+    # 서로 겹친 두 글덩어리는 **한 구간**으로 붙어 버립니다. 제목 없이 그린
+    # 자막의 구간 수에 제목 하나를 더한 수가 나와야 둘이 떨어져 있는 것입니다.
+    many = SubtitleRules(max_chars_per_line=6, max_lines=9, min_duration=5.0)
+    plain = render_mask(spec_for(VERTICAL_SAMPLE, args.font_size, args.width, args.height), many)
+    titled = render_mask(
+        spec_for(VERTICAL_SAMPLE, args.font_size, args.width, args.height, title=TITLE_SAMPLE),
+        many,
+    )
+    if plain is None or titled is None:
+        problems.append("제목과 함께 그린 자막을 재지 못했습니다.")
+    else:
+        alone, together = bands(plain), bands(titled)
+        print(
+            f"  제목 포함: 구간 {len(together)}개 (제목 없이 {len(alone)}개 + 제목 1개)"
+            + (
+                f", 제목 아래 {together[0][1]}px / 자막 위 {together[1][0]}px"
+                if len(together) > 1
+                else ""
+            )
+        )
+        if len(together) < len(alone) + 1:
+            problems.append(
+                f"제목과 자막이 한 덩어리로 그려졌습니다(구간 {len(together)}개, "
+                f"떨어져 있으면 {len(alone) + 1}개). 겹치면 둘 다 읽기 어려워집니다."
+            )
 
     if english_box is OVERFLOW or english_box[0] > usable:
         measured = OVERFLOW if english_box is OVERFLOW else f"{english_box[0]}px"
