@@ -1,0 +1,23 @@
+{
+  "dataset": "google/fleurs",
+  "revision": "70bb2e84b976b7e960aa89f1c648e09c59f894dd",
+  "license": "CC-BY-4.0",
+  "language": "en",
+  "config": "en_us",
+  "split": "validation",
+  "selection": "first matching regular files in dev.tar.gz",
+  "clips": [
+    {
+      "filename": "10010138729160973689.wav",
+      "sha256": "048169439c0328b758349af74aeb54a82a7a476e309709eb791dced06db25d48"
+    },
+    {
+      "filename": "10035998729701048400.wav",
+      "sha256": "5fefdcd12d4c136762cc7841b084126fc60c6d6410f983cc9f82b6cfc45737a2"
+    },
+    {
+      "filename": "1009709090964908274.wav",
+      "sha256": "e5664ae10a6273fbe0009068e512f4c416cccbeff19d3d2d11e5fb8d72d03fb7"
+    }
+  ]
+}
