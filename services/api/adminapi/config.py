@@ -64,6 +64,9 @@ class Settings(BaseSettings):
     tts_usd_per_1k_chars: Decimal | None = None
     lipsync_usd_per_second: Decimal | None = None
     youtube_upload_enabled: bool = False
+    # 선택 가능한 자막 트랙 업로드. 영상에는 자막이 이미 구워져 있으므로 켜면
+    # 시청자 화면에 자막이 두 벌 보일 수 있습니다. 확인한 뒤 켜세요.
+    youtube_captions_enabled: bool = False
     youtube_credentials_file: str | None = None
     youtube_channel_id: str | None = None
 

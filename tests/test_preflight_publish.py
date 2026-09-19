@@ -77,3 +77,16 @@ def test_a_file_without_scopes_is_reported_not_passed(preflight, tmp_path) -> No
     del data["scopes"]
     problems = preflight.check_credentials_file(write(tmp_path / "t.json", data))
     assert any("확인하지 못했습니다" in p for p in problems)
+
+
+def test_caption_scope_is_only_required_when_captions_are_enabled(preflight, tmp_path) -> None:
+    """자막 트랙을 올리려면 force-ssl이 필요합니다. 끈 상태에서는 요구하지 않습니다."""
+    path = write(tmp_path / "t.json", GOOD)
+    assert preflight.check_credentials_file(path) == []
+    problems = preflight.check_credentials_file(path, captions=True)
+    assert any("force-ssl" in problem for problem in problems)
+
+    with_scope = dict(GOOD)
+    with_scope["scopes"] = [*GOOD["scopes"], "https://www.googleapis.com/auth/youtube.force-ssl"]
+    granted = write(tmp_path / "with-scope.json", with_scope)
+    assert preflight.check_credentials_file(granted, captions=True) == []

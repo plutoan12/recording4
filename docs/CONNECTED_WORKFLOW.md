@@ -47,7 +47,7 @@ export PYTHONPATH=packages/pipeline:services/api:services/worker
 python -m worker.connect_youtube /private/path/client-secret.json /private/path/youtube-token.json
 ```
 
-6. 표시된 채널 ID를 `R4_YOUTUBE_CHANNEL_ID`, 토큰 경로를 `R4_YOUTUBE_CREDENTIALS_FILE`에 지정합니다. 준비 후 `R4_YOUTUBE_UPLOAD_ENABLED=true`를 설정합니다. OAuth 계정 채널과 게시 요청 채널이 일치해야 실행합니다. API·워커에 동일한 채널 설정을 적용합니다.
+6. 표시된 채널 ID를 `R4_YOUTUBE_CHANNEL_ID`, 토큰 경로를 `R4_YOUTUBE_CREDENTIALS_FILE`에 지정합니다. 준비 후 `R4_YOUTUBE_UPLOAD_ENABLED=true`를 설정합니다. 시청자가 켜고 끌 수 있는 자막 트랙까지 올리려면 `R4_YOUTUBE_CAPTIONS_ENABLED=true`를 켭니다(기본값 꺼짐, 영상에 구운 자막과 두 벌로 보일 수 있음). OAuth 계정 채널과 게시 요청 채널이 일치해야 실행합니다. API·워커에 동일한 채널 설정을 적용합니다.
 7. Docker에서는 자격증명 파일이 자동 전달되지 않습니다. 커밋하지 않는 compose override로 읽기 전용 마운트를 추가하고, 컨테이너의 UID 10001이 읽을 수 있도록 호스트 파일 권한을 설정합니다. 경로는 호스트 경로가 아닌 컨테이너 경로를 환경 변수에 지정합니다.
 
 ```yaml
@@ -110,6 +110,6 @@ services:
 
 기본값은 한국어 기준 제안이며 실제 화면에서 측정한 뒤 조정해야 합니다.
 
-자막을 파일로 쓸 때는 `GET /jobs/{id}/subtitles?format=srt|vtt`입니다. 규칙 적용 결과가 그대로 나오므로 화면 자막과 파일 자막이 같습니다. 시각은 출력 영상 시작이 0초이고 화면 제목은 넣지 않습니다. 더빙 음성에 맞춘 자막(`aligned`)이 있으면 그것을, 없으면 번역본을, 번역 전이면 원본 대본을 씁니다. 숏폼 편집본은 `GET /clips/{id}/subtitles`입니다.
+게시할 때 자막 트랙을 함께 올리면 같은 자막이 YouTube에도 올라갑니다(`R4_YOUTUBE_CAPTIONS_ENABLED`). 자막을 파일로 쓸 때는 `GET /jobs/{id}/subtitles?format=srt|vtt`입니다. 규칙 적용 결과가 그대로 나오므로 화면 자막과 파일 자막이 같습니다. 시각은 출력 영상 시작이 0초이고 화면 제목은 넣지 않습니다. 더빙 음성에 맞춘 자막(`aligned`)이 있으면 그것을, 없으면 번역본을, 번역 전이면 원본 대본을 씁니다. 숏폼 편집본은 `GET /clips/{id}/subtitles`입니다.
 
 워커 이미지는 CPU 전용 PyTorch를 고정한 뒤 `[subtitles]`를 설치합니다. GPU 워커가 필요하면 `infra/Dockerfile.worker`의 CPU 설치 단계를 지우고 기본 인덱스로 설치한 뒤 `R4_WHISPER_DEVICE`를 바꿉니다. 이미지가 커지므로 빌드 시간과 디스크를 확인하세요.

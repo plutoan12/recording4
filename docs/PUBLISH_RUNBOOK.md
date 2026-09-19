@@ -54,7 +54,14 @@ python -m worker.connect_youtube ~/client_secrets.json ~/.runtime/youtube-token.
 R4_YOUTUBE_UPLOAD_ENABLED=true
 R4_YOUTUBE_CREDENTIALS_FILE=/run/secrets/youtube-token.json
 R4_YOUTUBE_CHANNEL_ID=<1단계에서 출력된 채널 ID>
+# 선택: 시청자가 켜고 끌 수 있는 자막 트랙을 함께 올립니다. 기본값은 꺼짐입니다.
+R4_YOUTUBE_CAPTIONS_ENABLED=false
 ```
+
+**자막 트랙을 켜기 전에 확인하세요.** 영상에는 자막이 이미 구워져 있습니다.
+트랙까지 올리면 시청자가 자막을 켰을 때 **자막이 두 벌** 보일 수 있습니다.
+구운 자막을 끄고 트랙만 쓸지, 트랙 없이 갈지 정한 뒤 켜세요. 트랙은 `captions.insert`
+권한(`youtube.force-ssl`)이 필요하며, 2.5단계 점검이 함께 확인합니다.
 
 인증 파일은 워커 컨테이너의 `provider_secrets` 볼륨(`/run/secrets`, 읽기 전용)에
 둡니다.
@@ -118,6 +125,11 @@ curl -sS http://localhost:18444/api/publications -H "Authorization: Bearer $TOKE
 
 업로드 뒤 예약까지는 YouTube 처리(`processingStatus: succeeded`)가 끝나야
 합니다. 처리 중이면 워커가 다음 차례에 다시 시도합니다.
+
+자막 트랙을 켰다면 각 항목의 `captions`에 결과가 함께 나옵니다. `uploaded`는 올린
+것, `exists`는 같은 언어 트랙이 이미 있어 건드리지 않은 것, `skipped`는 자막이나
+언어가 없어 올리지 않은 것, `failed`는 올리지 못한 것입니다. **자막 실패는 게시를
+실패로 만들지 않습니다.** 영상은 이미 올라가 있으므로 되돌리지 않고 기록만 남깁니다.
 
 ## 5. 문제가 생겼을 때
 

@@ -4,6 +4,7 @@ import hashlib
 import uuid
 from datetime import timedelta
 from decimal import Decimal
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -602,3 +603,151 @@ def test_job_export_ignores_a_broken_rules_record(setup_flow, client, auth_heade
     response = client.get(f"/jobs/{jid}/subtitles", headers=auth_headers)
     assert response.status_code == 200
     assert response.headers["x-subtitle-rules"] == "settings"
+
+
+def caption_service(existing=None, state=None, info=None):
+    """게시 경로용 대역. 영상 조회와 자막 트랙 API만 흉내 냅니다."""
+    tracks = {"existing": existing or [], "inserted": []}
+
+    class Service:
+        def channels(self):
+            return SimpleNamespace(
+                list=lambda **kw: SimpleNamespace(execute=lambda: {"items": [{"id": "channel"}]})
+            )
+
+        def videos(self):
+            return SimpleNamespace(
+                list=lambda **kw: SimpleNamespace(execute=lambda: {"items": [info]})
+            )
+
+        def captions(self):
+            def insert(**kwargs):
+                # 파일은 임시 폴더가 닫히면 사라지므로 지금 읽어 둡니다.
+                sent = Path(kwargs["media_body"]._filename).read_text(encoding="utf-8")
+                tracks["inserted"].append({**kwargs, "text": sent})
+                return SimpleNamespace(execute=lambda: {"id": "caption-1"})
+
+            return SimpleNamespace(
+                list=lambda **kw: SimpleNamespace(execute=lambda: {"items": tracks["existing"]}),
+                insert=insert,
+            )
+
+    return Service, tracks
+
+
+def publish_ready(client, auth_headers, create, monkeypatch, **overrides):
+    """승인까지 끝낸 게시 요청 하나를 만들고 그 ID를 돌려줍니다."""
+    from adminapi.routers import workflow
+
+    settings = get_settings().model_copy(update={"youtube_channel_id": "channel", **overrides})
+    monkeypatch.setattr(workflow, "get_settings", lambda: settings)
+    monkeypatch.setattr(pub, "get_settings", lambda: settings)
+    jid = create(source_language="ko")
+    for _ in range(3):
+        wf.run_job(jid)
+    aid = client.get(f"/jobs/{jid}/workflow", headers=auth_headers).json()["artifact_id"]
+    client.post(f"/artifacts/{aid}/approve", headers=auth_headers)
+    response = client.post(
+        "/publications",
+        headers=auth_headers,
+        json={
+            "artifact_id": aid,
+            "title": "test",
+            "made_for_kids": False,
+            "publish_at": (utcnow() + timedelta(days=1)).isoformat(),
+        },
+    )
+    assert response.status_code == 202, response.text
+    return response.json()["id"], jid
+
+
+def test_caption_track_is_uploaded_once_with_the_burned_in_subtitles(
+    setup_flow, client, auth_headers, monkeypatch
+):
+    """설정을 켜면 영상에 구운 자막과 같은 내용을 트랙으로 올립니다. 두 번 올리지 않습니다."""
+    create, _ = setup_flow
+    pid, jid = publish_ready(
+        client, auth_headers, create, monkeypatch, youtube_captions_enabled=True
+    )
+    state = {"privacyStatus": "private"}
+    info = {
+        "snippet": {"channelId": "channel"},
+        "status": state,
+        "processingDetails": {"processingStatus": "succeeded"},
+    }
+    Service, tracks = caption_service(info=info)
+    monkeypatch.setattr(pub, "youtube_service", Service)
+    monkeypatch.setattr(pub, "upload_approved", lambda *a, **kw: "video")
+    monkeypatch.setattr(
+        pub, "schedule_video", lambda service, vid, at, **kw: state.update(publishAt=at.isoformat())
+    )
+
+    pub.run_publication(pid)
+    assert len(tracks["inserted"]) == 1
+    sent = tracks["inserted"][0]
+    assert sent["body"]["snippet"]["language"] == "ko"
+    # 올린 파일은 내려받기 경로가 주는 자막과 같아야 합니다. 같은 함수를 씁니다.
+    assert sent["text"] == client.get(f"/jobs/{jid}/subtitles", headers=auth_headers).text
+    row = client.get("/publications", headers=auth_headers).json()[0]
+    assert row["captions"]["state"] == "uploaded"
+    assert row["captions"]["language"] == "ko"
+    assert row["captions"]["rules"] == "rendered"
+
+    # 다시 실행해도 트랙이 늘지 않습니다. 기록에 남은 트랙 ID로 걸러집니다.
+    pub.run_publication(pid)
+    assert len(tracks["inserted"]) == 1
+
+
+def test_caption_failure_does_not_fail_the_publication(
+    setup_flow, client, auth_headers, monkeypatch
+):
+    """영상은 이미 올라가 있습니다. 자막 때문에 게시를 실패로 만들지 않습니다."""
+    create, _ = setup_flow
+    pid, _jid = publish_ready(
+        client, auth_headers, create, monkeypatch, youtube_captions_enabled=True
+    )
+    state = {"privacyStatus": "private"}
+    info = {
+        "snippet": {"channelId": "channel"},
+        "status": state,
+        "processingDetails": {"processingStatus": "succeeded"},
+    }
+    Service, _tracks = caption_service(info=info)
+    monkeypatch.setattr(pub, "youtube_service", Service)
+    monkeypatch.setattr(pub, "upload_approved", lambda *a, **kw: "video")
+    monkeypatch.setattr(
+        pub, "schedule_video", lambda service, vid, at, **kw: state.update(publishAt=at.isoformat())
+    )
+
+    def broken(*args, **kwargs):
+        raise RuntimeError("quota exceeded: secret-token-in-url")
+
+    monkeypatch.setattr(pub, "upload_captions", broken)
+    assert pub.run_publication(pid)["status"] == "scheduled"
+    row = client.get("/publications", headers=auth_headers).json()[0]
+    assert row["state"] == "scheduled"
+    assert row["captions"]["state"] == "failed"
+    assert "secret-token" not in str(row["captions"])
+
+
+def test_captions_stay_off_until_the_setting_is_turned_on(
+    setup_flow, client, auth_headers, monkeypatch
+):
+    """기본값은 꺼짐입니다. 영상에 자막이 이미 구워져 있어 두 벌로 보일 수 있습니다."""
+    create, _ = setup_flow
+    pid, _jid = publish_ready(client, auth_headers, create, monkeypatch)
+    state = {"privacyStatus": "private"}
+    info = {
+        "snippet": {"channelId": "channel"},
+        "status": state,
+        "processingDetails": {"processingStatus": "succeeded"},
+    }
+    Service, tracks = caption_service(info=info)
+    monkeypatch.setattr(pub, "youtube_service", Service)
+    monkeypatch.setattr(pub, "upload_approved", lambda *a, **kw: "video")
+    monkeypatch.setattr(
+        pub, "schedule_video", lambda service, vid, at, **kw: state.update(publishAt=at.isoformat())
+    )
+    pub.run_publication(pid)
+    assert tracks["inserted"] == []
+    assert client.get("/publications", headers=auth_headers).json()[0]["captions"] is None
