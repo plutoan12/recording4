@@ -94,3 +94,19 @@ def test_matrix_splits_start_and_end_errors(matrix, monkeypatch):
     assert found["max_start_error_seconds"] == 0.0
     assert found["max_end_error_seconds"] == 1.4
     assert not found["pass"]
+
+
+def test_matrix_measures_alignment_without_the_vad_snap(matrix, monkeypatch):
+    """align_nosnap은 스냅을 끈 정렬입니다. 같은 조건에서 함께 재야 폭이 보입니다."""
+    seen: dict = {}
+
+    def fake(source, cues, **kwargs):
+        seen.update(kwargs)
+        return list(cues), {"method": "align", "max_shift_seconds": 0.0}
+
+    monkeypatch.setattr(matrix, "realign_subtitles", fake)
+    original = [Cue(start=1, end=2, text="test")]
+    matrix.evaluate(Path("unused"), original, 0, 0.5, "align")
+    assert seen["snap"] is True
+    matrix.evaluate(Path("unused"), original, 0, 0.5, "align_nosnap")
+    assert seen["snap"] is False

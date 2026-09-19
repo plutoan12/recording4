@@ -61,3 +61,23 @@ def test_realign_does_not_let_a_kept_duration_run_into_the_next_cue(monkeypatch)
     )
     moved, _ = analysis.realign_subtitles(Path("unused"), original)
     assert moved[0].end == 13.0 and moved[1].start == 13.0
+
+
+def test_realign_can_turn_off_the_vad_snap_for_measurement(monkeypatch):
+    """스냅은 시작 시각의 정의를 VAD 쪽으로 옮깁니다. 끄고 재 봐야 그 폭이 보입니다."""
+    import worker.analysis as analysis
+
+    asked: dict = {}
+
+    def fake_align(source, text, **kwargs):
+        asked.update(kwargs)
+        return [Cue(start=5, end=7, text="문장")]
+
+    monkeypatch.setattr(analysis, "align_text", fake_align)
+    original = [Cue(start=1, end=3, text="문장")]
+
+    _, report = analysis.realign_subtitles(Path("unused"), original)
+    assert asked["snap"] is True and report["snap"] is True
+
+    _, report = analysis.realign_subtitles(Path("unused"), original, snap=False)
+    assert asked["snap"] is False and report["snap"] is False

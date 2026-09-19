@@ -132,8 +132,12 @@ def evaluate(
     """
     pushed = [Cue(start=c.start + offset, end=c.end + offset, text=c.text) for c in truth]
     try:
-        if method == "align":
-            moved, meta = realign_subtitles(source, pushed, language="ko")
+        if method.startswith("align"):
+            # align_nosnap은 자막 시작을 VAD 발화 시작에 맞추는 단계를 끕니다.
+            # 그 맞춤이 시작 시각의 정의를 VAD 쪽으로 옮기는지 보려는 것입니다.
+            moved, meta = realign_subtitles(
+                source, pushed, language="ko", snap=method != "align_nosnap"
+            )
         else:
             moved, meta = sync_subtitles(source, pushed)
         starts = [abs(a.start - b.start) for a, b in zip(moved, truth, strict=True)]
@@ -153,7 +157,7 @@ def evaluate(
             "max_end_error_seconds": round(max(ends), 3),
             "text_preserved": same,
         }
-        if method == "align":
+        if method.startswith("align"):
             found["max_shift_seconds"] = meta["max_shift_seconds"]
         else:
             found["offset_seconds"] = meta["offset_seconds"]
@@ -161,6 +165,19 @@ def evaluate(
         return found
     except (ValueError, RuntimeError) as exc:
         return {"pass": False, "rejected": str(exc)}
+
+
+METHODS = ("shift", "align", "align_nosnap")
+
+
+def pick(value: str, parser: argparse.ArgumentParser) -> tuple[str, ...]:
+    """쉼표로 준 방법 목록. `both`는 예전 이름이라 그대로 받습니다."""
+    if value == "both":
+        return ("shift", "align")
+    chosen = tuple(name.strip() for name in value.split(",") if name.strip())
+    if unknown := set(chosen) - set(METHODS):
+        parser.error(f"모르는 방법입니다: {', '.join(sorted(unknown))}. 쓸 수 있는 값: {METHODS}")
+    return chosen or ("shift",)
 
 
 def summarize(results: list[dict], methods: tuple[str, ...]) -> None:
@@ -193,19 +210,15 @@ def main() -> int:
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--limit", type=float, default=0.5)
     # 같은 조건에서 두 방법을 나란히 잽니다. 손으로 따로 돌려 비교하지 않게 합니다.
-    parser.add_argument("--method", choices=("shift", "align", "both"), default="shift")
+    parser.add_argument("--method", default="shift", help=f"쉼표 구분: {', '.join(METHODS)}")
     # 판정에 넣을 방법. 재기만 하고 아직 보증하지 않는 방법이 있습니다. 재는 것과
     # 보증하는 것을 섞으면, 채택하지도 않은 방법 때문에 CI가 빨개집니다.
-    parser.add_argument("--gate", choices=("shift", "align", "both"), default=None)
+    parser.add_argument("--gate", default=None, help="비우면 --method와 같습니다")
     # 조건이 10가지라 둘 다 재면 오래 걸립니다. 필요한 조건만 고를 수 있게 합니다.
     parser.add_argument("--variants", default="", help="쉼표로 구분한 조건 이름")
     args = parser.parse_args()
-    methods = ("shift", "align") if args.method == "both" else (args.method,)
-    gated = (
-        methods
-        if args.gate is None
-        else (("shift", "align") if args.gate == "both" else (args.gate,))
-    )
+    methods = pick(args.method, parser)
+    gated = methods if args.gate is None else pick(args.gate, parser)
     wanted = [name.strip() for name in args.variants.split(",") if name.strip()]
     known = {spec[0] for spec in VARIANTS}
     if unknown := set(wanted) - known:

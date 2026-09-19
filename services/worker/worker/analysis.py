@@ -60,6 +60,7 @@ def align_text(
     model: str = "small",
     language: str | None = None,
     device: str = "cpu",
+    snap: bool = True,
 ) -> list[Cue]:
     """이미 있는 대본을 오디오에 맞춰 시각을 붙입니다.
 
@@ -90,7 +91,13 @@ def align_text(
     ]
     # 단어 시각이 무음 안쪽으로 당겨지거나 발화 중간으로 밀리는 경우가 있어
     # 자막 시작을 그 자막이 걸친 발화의 시작에 맞춥니다.
-    cues = snap_starts(cues, speech_spans(source))
+    #
+    # 다만 이 맞춤은 시작 시각의 정의를 **VAD 쪽으로** 옮깁니다. VAD가 보는
+    # 발화 시작과 에너지 문턱이 보는 발화 시작은 다릅니다(측정: 같은 음성에서
+    # 1.86초 대 1.08초). `snap=False`로 끄고 재면 그 차이가 얼마나 되는지
+    # 보입니다. 끄는 것은 재기 위해서지 기본값을 바꾸려는 것이 아닙니다.
+    if snap:
+        cues = snap_starts(cues, speech_spans(source))
     if not cues:
         raise RuntimeError("대본을 오디오에 맞추지 못했습니다. 언어와 음성을 확인하세요.")
     return cues
@@ -449,6 +456,7 @@ def realign_subtitles(
     language: str | None = None,
     device: str = "cpu",
     keep_duration: bool = True,
+    snap: bool = True,
 ) -> tuple[list[Cue], dict]:
     """자막을 **단어 단위로** 원본 음성에 다시 맞춥니다(강제 정렬).
 
@@ -476,7 +484,9 @@ def realign_subtitles(
     lines = [" ".join(cue.text.split()) for cue in cues]
     if any(not line for line in lines):
         raise ValueError("글자가 없는 자막이 있어 정렬할 수 없습니다.")
-    aligned = align_text(source, "\n".join(lines), model=model, language=language, device=device)
+    aligned = align_text(
+        source, "\n".join(lines), model=model, language=language, device=device, snap=snap
+    )
     # align_text는 줄을 못 맞추면 정렬기가 나눈 구간으로 돌아갑니다. 그 결과는
     # 우리 자막과 짝이 지어지지 않으므로 여기서는 실패로 봅니다.
     if len(aligned) != len(cues) or [cue.text for cue in aligned] != lines:
@@ -503,6 +513,7 @@ def realign_subtitles(
         "method": "align",
         "count": len(moved),
         "keep_duration": keep_duration,
+        "snap": snap,
         # 자막마다 이동이 다릅니다. 하나의 오프셋으로 요약할 수 없으므로 폭을 남깁니다.
         "max_shift_seconds": round(max(shifts, key=abs), 3),
         "median_shift_seconds": round(shifts[len(shifts) // 2], 3),
