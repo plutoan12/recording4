@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import re
 import subprocess
 from pathlib import Path
@@ -244,7 +245,41 @@ GATED_PAGES = (
 )
 
 
-def gated_hint(detail: str) -> str:
+def diarization_arguments(factory, *, token: str, device: str) -> dict:  # noqa: ANN001
+    """이 whisperx 버전이 받는 이름으로 토큰과 장치를 넘깁니다.
+
+    인자 이름이 버전마다 바뀝니다(측정: 설치된 버전은 `use_auth_token`을 받지
+    않아 화자 분리가 아예 시작되지 못했습니다). 이름을 고정해 두면 다음
+    버전에서 같은 일이 또 납니다. 받는 이름만 골라 넣습니다.
+    """
+    options = supported_options(
+        factory, {"token": token, "use_auth_token": token, "device": device}
+    )
+    # 둘 다 받는 버전이면 하나만 넣습니다. 같은 값을 두 번 넘기지 않습니다.
+    if "token" in options:
+        options.pop("use_auth_token", None)
+    if not options.get("token") and not options.get("use_auth_token"):
+        raise MissingDependency(
+            "이 whisperx 버전에 토큰을 넘길 자리가 없습니다. 받는 인자: "
+            + ", ".join(sorted(inspect.signature(factory).parameters))
+        )
+    return options
+
+
+def default_model_name(factory) -> str | None:  # noqa: ANN001
+    """이 버전이 기본으로 쓰는 모델 이름. 약관 동의는 그 모델 페이지에서 합니다."""
+    try:
+        parameters = inspect.signature(factory).parameters
+    except (TypeError, ValueError):
+        return None
+    for name in ("model_name", "model", "checkpoint"):
+        found = parameters.get(name)
+        if found is not None and isinstance(found.default, str):
+            return found.default
+    return None
+
+
+def gated_hint(detail: str, model: str | None = None) -> str:
     """모델을 못 불러왔을 때 사람이 고칠 수 있는 말로 바꿉니다.
 
     pyannote는 접근이 막히면 예외 대신 빈 모델을 돌려주기도 합니다. 그러면
@@ -252,10 +287,14 @@ def gated_hint(detail: str) -> str:
     토큰이 있어도 두 페이지 중 하나라도 동의가 빠지면 같은 증상이 나므로,
     둘 다 짚어 줍니다.
     """
-    pages = "\n".join(f"  {page}" for page in GATED_PAGES)
+    pages = list(GATED_PAGES)
+    if model and all(model not in page for page in pages):
+        # 버전마다 기본 모델이 다릅니다. 쓰는 모델의 페이지에서 동의해야 합니다.
+        pages.insert(0, f"https://huggingface.co/{model}")
+    listed = "\n".join(f"  {page}" for page in pages)
     return (
         "pyannote 모델을 불러오지 못했습니다. 토큰이 있어도 약관 동의가 빠지면 같은 "
-        f"증상이 납니다. 아래 페이지 모두에서 동의했는지 확인하세요:\n{pages}\n"
+        f"증상이 납니다. 아래 페이지 모두에서 동의했는지 확인하세요:\n{listed}\n"
         f"원래 증상: {detail}"
     )
 
@@ -289,15 +328,26 @@ def diarize(
         raise MissingDependency(
             "화자 분리 의존성이 없습니다. pip install '.[subtitles]'를 실행하세요."
         ) from exc
+    model = default_model_name(DiarizationPipeline)
+    arguments = diarization_arguments(DiarizationPipeline, token=token, device=device)
     try:
-        pipeline = DiarizationPipeline(use_auth_token=token, device=device)
+        pipeline = DiarizationPipeline(**arguments)
+    except TypeError as exc:
+        # 인자 이름이 아니라 개수나 형이 맞지 않는 경우입니다. 약관 문제가
+        # 아니므로 그렇게 말하지 않습니다.
+        raise MissingDependency(
+            f"whisperx 화자 분리 진입점과 호출이 맞지 않습니다: {exc}. "
+            "pyannote.audio와 whisperx 버전을 확인하세요."
+        ) from exc
     except Exception as exc:  # noqa: BLE001 - 어떤 실패든 고칠 수 있는 말로 바꿉니다.
-        raise MissingDependency(gated_hint(f"{type(exc).__name__}: {exc}")) from exc
+        raise MissingDependency(gated_hint(f"{type(exc).__name__}: {exc}", model)) from exc
     # 접근이 막히면 예외 없이 빈 모델이 돌아오기도 합니다. 여기서 잡지 않으면
     # 다음 줄에서 AttributeError로 터지고 원인이 보이지 않습니다.
     inner = getattr(pipeline, "model", _PRESENT)
     if pipeline is None or inner is None:
-        raise MissingDependency(gated_hint("모델이 비어 있습니다(pyannote가 None을 돌려줬습니다)."))
+        raise MissingDependency(
+            gated_hint("모델이 비어 있습니다(pyannote가 None을 돌려줬습니다).", model)
+        )
     frame = pipeline(str(source), min_speakers=min_speakers, max_speakers=max_speakers)
     turns = [
         SpeakerTurn(start=float(row.start), end=float(row.end), speaker=str(row.speaker))

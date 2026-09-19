@@ -271,7 +271,13 @@ jobs:
           docker run --rm -v /tmp/two-speaker:/audio --entrypoint python \
             recording4-worker:ci -c "
           from pathlib import Path
-          from worker.analysis import MissingDependency, diarize
+          from worker.analysis import MissingDependency, default_model_name, diarize
+          try:
+              from whisperx.diarize import DiarizationPipeline
+          except ImportError:
+              from whisperx import DiarizationPipeline
+          # 이 버전이 어떤 모델을 쓰는지 기록합니다. 약관 동의는 그 페이지에서 합니다.
+          print('이 버전이 쓰는 모델:', default_model_name(DiarizationPipeline))
           try:
               diarize(Path('/audio/sample.wav'), token='not-a-real-token', device='cpu')
           except MissingDependency as exc:

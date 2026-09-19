@@ -128,3 +128,51 @@ def test_embedding_diarizer_refuses_a_speaker_count_below_one() -> None:
 
     with pytest.raises(ValueError):
         diarize_by_embedding(Path("/nonexistent.wav"), speakers=0)
+
+
+def test_diarization_arguments_use_the_name_this_version_accepts() -> None:
+    """인자 이름이 버전마다 바뀝니다. 고정해 두면 다음 버전에서 또 막힙니다.
+
+    측정: 설치된 whisperx는 use_auth_token을 받지 않아 화자 분리가 시작조차
+    되지 못했습니다(TypeError). 토큰이 있어도 실패했을 것입니다.
+    """
+    from worker.analysis import diarization_arguments
+
+    class New:  # 새 이름만 받는 버전
+        def __init__(self, token=None, device="cpu"): ...
+
+    class Old:  # 옛 이름만 받는 버전
+        def __init__(self, use_auth_token=None, device="cpu"): ...
+
+    assert diarization_arguments(New, token="t", device="cpu") == {"token": "t", "device": "cpu"}
+    assert diarization_arguments(Old, token="t", device="cpu") == {
+        "use_auth_token": "t",
+        "device": "cpu",
+    }
+
+
+def test_diarization_arguments_refuse_a_version_with_no_token_slot() -> None:
+    """토큰을 넘길 자리가 없으면 조용히 토큰 없이 부르지 않습니다."""
+    import pytest
+
+    from worker.analysis import MissingDependency, diarization_arguments
+
+    class NoToken:
+        def __init__(self, device="cpu"): ...
+
+    with pytest.raises(MissingDependency):
+        diarization_arguments(NoToken, token="t", device="cpu")
+
+
+def test_gated_hint_names_the_model_this_version_uses() -> None:
+    """버전마다 기본 모델이 다릅니다. 쓰는 모델 페이지에서 동의해야 합니다."""
+    from worker.analysis import default_model_name, gated_hint
+
+    class Pipeline:
+        def __init__(self, model_name="pyannote/speaker-diarization-community-1"): ...
+
+    model = default_model_name(Pipeline)
+    assert model == "pyannote/speaker-diarization-community-1"
+    text = gated_hint("무엇", model)
+    assert f"https://huggingface.co/{model}" in text
+    assert "segmentation-3.0" in text
