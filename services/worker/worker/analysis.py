@@ -704,11 +704,11 @@ def sync_subtitles(
 def align_speaker_words(source, cues, *, model="small", language=None, device="cpu"):
     """기존 문구를 자막별로 정렬합니다. 실패한 자막은 빈 목록으로 검수에 남깁니다."""
     if not language:
-        return [[] for _ in cues]
+        raise MissingDependency("단어별 화자 검수에는 원문 음성 언어가 필요합니다.")
     try:
         import stable_whisper
-    except ImportError:
-        return [[] for _ in cues]
+    except ImportError as exc:
+        raise MissingDependency("단어 정렬 의존성이 없습니다. [subtitles]를 설치하세요.") from exc
     engine = stable_whisper.load_faster_whisper(
         model, device=device, compute_type="int8" if device == "cpu" else "float16"
     )
