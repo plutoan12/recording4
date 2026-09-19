@@ -22,6 +22,7 @@
 |---|---|---|
 | stable-ts 2.19.1 | 기존 대본을 오디오에 정렬(`align`), 자막 분할·병합(`split_by_length` 등), 단어 강조 ASS/SRT/VTT 출력 | [GitHub](https://github.com/jianfch/stable-ts), MIT |
 | WhisperX 3.8.6 | wav2vec2 강제 정렬 기반 단어 타이밍, 화자 분리 | [GitHub](https://github.com/m-bain/whisperx), BSD-2-Clause |
+| SpeechBrain 1.1.1 | 목소리 특징(ECAPA) 추출. 토큰 없는 화자 분리 공급자에 씁니다 | [GitHub](https://github.com/speechbrain/speechbrain), Apache-2.0 |
 | kss 6.0.6 | 한국어 문장 분리. 자막 줄바꿈을 어절·문장 경계에 맞춤 | [GitHub](https://github.com/hyunwoongko/kss), BSD-3-Clause |
 
 연결한 범위는 다음과 같습니다.
@@ -87,7 +88,9 @@
   - 사람 목소리 정렬 오차(whisper small, zeroth-korean 3문장): 자막 1 **0.77초**, 자막 2 **0.08초**, 자막 3 **0.07초**. 문장 경계 3/3개가 자막 경계로 남습니다.
   - **이 수치의 한계**: 이 데이터셋에는 단어 시각 정답이 없습니다. "실제 시작"은 우리가 에너지로 재는 값이고, 자막 시작은 Silero VAD가 찾는 값입니다. 둘은 서로 다른 방법이라 값이 맞아떨어지는 것은 교차 확인이 되지만, 외부 정답으로 잰 정확도는 아닙니다. 남은 0.77초도 정렬이 늦은 것인지 정답이 이른 것인지 이 방법으로는 가리지 못합니다. 단어 시각이 있는 한국어 공개 데이터가 필요합니다.
 - **화자 분리 실검증**: `scripts/verify_diarize.py`가 목소리 둘인 음성에 pyannote를 실제로 돌려 화자가 갈리는지 확인합니다. 정답 화자별로 분리 결과가 한 표시로 몰리는지 봅니다. 표시 이름은 공급자가 정하므로 이름이 아니라 묶임만 봅니다.
-  - **저장소 시크릿 `HF_TOKEN`이 있어야 돌아갑니다.** pyannote 화자 분리 모델은 게이트 모델이라 [약관 동의](https://huggingface.co/pyannote/speaker-diarization-3.1)를 마친 계정의 토큰이 필요합니다. 시크릿이 없으면 이 단계는 건너뜁니다.
+  - **토큰 없는 공급자도 있습니다.** `analysis.diarize_by_embedding()`은 공개 목소리 특징 모델(`speechbrain/spkrec-ecapa-voxceleb`)로 같은 일을 합니다. 발화 구간을 VAD로 찾고 겹치는 창으로 잘라 창마다 특징을 뽑은 뒤 코사인 거리로 묶습니다. 묶기·배정 규칙은 `pipeline/speakers.py`의 순수 계산이라 테스트로 고정했습니다. CI가 이 공급자로 화자 분리를 **시크릿 없이 매번** 검증합니다.
+  - **그것이 통과해도 pyannote가 검증된 것은 아닙니다.** 둘은 다른 모델입니다. 토큰 없는 공급자는 겹쳐 말하는 구간을 다루지 못하고 화자 수를 스스로 세지 않습니다(`speakers`로 알려 줘야 합니다). 목소리가 비슷하면 갈리지 않습니다. 그래서 기본 공급자가 아니라 선택지입니다.
+  - **pyannote 실검증에는 저장소 시크릿 `HF_TOKEN`이 있어야 합니다.** pyannote 화자 분리 모델은 게이트 모델이라 [약관 동의](https://huggingface.co/pyannote/speaker-diarization-3.1)를 마친 계정의 토큰이 필요합니다. 시크릿이 없으면 이 단계는 건너뜁니다.
   - 운영에서도 같은 값을 `R4_HF_TOKEN`으로 넣습니다.
 
 ### 검토했으나 추가하지 않은 자막 도구

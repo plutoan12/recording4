@@ -179,8 +179,8 @@ jobs:
       - name: 워커 의존성 임포트 확인
         run: |
           docker run --rm --entrypoint python recording4-worker:ci -c "
-          import torch, stable_whisper, whisperx, kss, pysubs2, faster_whisper
-          from worker.analysis import align_text, diarize
+          import torch, stable_whisper, whisperx, kss, pysubs2, faster_whisper, speechbrain
+          from worker.analysis import align_text, diarize, diarize_by_embedding
           from pipeline.subtitles import apply_rules
           from pipeline.speakers import assign_speakers
           assert '+cpu' in torch.__version__, torch.__version__
@@ -192,6 +192,8 @@ jobs:
               from whisperx import DiarizationPipeline
           print('torch', torch.__version__, '/ 워커 모듈 임포트 ok')
           print('화자 분리 진입점', DiarizationPipeline.__module__)
+          from speechbrain.inference.speaker import EncoderClassifier
+          print('목소리 특징 진입점', EncoderClassifier.__module__)
           "
 
       - name: API 이미지 빌드
@@ -241,19 +243,32 @@ jobs:
             --entrypoint python recording4-worker:ci /work/verify_transcribe.py \
             --directory /audio --model small
 
-      # pyannote는 게이트 모델이라 토큰이 있어야 돌아갑니다. 저장소 시크릿에
-      # HF_TOKEN을 넣으면 이 단계가 켜집니다. 없으면 건너뜁니다.
-      - name: 화자 분리 검증
-        if: ${{ env.HF_TOKEN != '' }}
-        env:
-          R4_HF_TOKEN: ${{ env.HF_TOKEN }}
+      # 화자 분리를 토큰 없이도 한 번은 잽니다. 공개 목소리 특징 모델로 도는
+      # 공급자라 시크릿이 필요 없습니다. 이게 통과해도 pyannote가 검증된 것은
+      # 아닙니다. 둘은 다른 모델입니다. 우리 쪽 묶기·배정 규칙과 "두 목소리가
+      # 실제로 갈리는가"를 실제 음성으로 확인하는 것입니다.
+      - name: 화자 분리 검증 (토큰 없는 공급자)
+        if: |
+          contains(github.event.pull_request.labels.*.name, 'verify-align') ||
+          contains(github.event.head_commit.message, '[verify-align]')
         run: |
           sudo apt-get update && sudo apt-get install -y espeak-ng ffmpeg
           python3 scripts/make_two_speaker_sample.py --out /tmp/two-speaker \
             --human /tmp/human-sample
           docker run --rm -v /tmp/two-speaker:/audio -v "$PWD/scripts:/work:ro" \
+            --entrypoint python recording4-worker:ci \
+            /work/verify_diarize.py --directory /audio --provider embedding --max-speakers 2
+
+      # pyannote는 게이트 모델이라 토큰이 있어야 돌아갑니다. 저장소 시크릿에
+      # HF_TOKEN을 넣으면 이 단계가 켜집니다. 없으면 건너뜁니다.
+      - name: 화자 분리 검증 (pyannote)
+        if: ${{ env.HF_TOKEN != '' }}
+        env:
+          R4_HF_TOKEN: ${{ env.HF_TOKEN }}
+        run: |
+          docker run --rm -v /tmp/two-speaker:/audio -v "$PWD/scripts:/work:ro" \
             -e R4_HF_TOKEN --entrypoint python recording4-worker:ci \
-            /work/verify_diarize.py --directory /audio --max-speakers 2
+            /work/verify_diarize.py --directory /audio --provider pyannote --max-speakers 2
 
       # 자막 기본값이 실제 세로 화면에서 여백 안에 한 줄로 들어가는지 렌더해서 잽니다.
       # 폰트 메트릭 계산이 아니라 libass 렌더 결과를 FFmpeg cropdetect로 측정합니다.
