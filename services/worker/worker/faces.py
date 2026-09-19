@@ -10,14 +10,15 @@
 검출기는 OpenCV의 Haar 캐스케이드입니다. **정면 얼굴만** 그럭저럭 찾습니다.
 옆얼굴·가린 얼굴·작은 얼굴은 놓칩니다. 바꿀 자리는 `detect_faces` 하나입니다.
 
-OpenCV 버전을 4.x로 못 박아 둡니다. 5.0.0 휠에는 `cv2.CascadeClassifier`
-자체가 없습니다(CI 실측). 5로 올리려면 얼굴 검출을 다른 것으로 갈아야 합니다.
+OpenCV 버전을 4.x로 못 박아 둡니다(`pyproject.toml`의 `analysis`). 5.0.0
+휠에는 `cv2.CascadeClassifier` 자체가 없습니다(CI 실측). 5로 올리려면 얼굴
+검출을 다른 것으로 갈아야 합니다.
 
-캐스케이드 XML은 `opencv-python-headless` **5.0.0** 휠에 들어 있지
-않았습니다(CI 실측: `cv2.data` 경로는 있는데 파일이 없습니다). 4.x가 싣고
-있는지는 아직 재지 않았습니다. 그래서 워커 이미지가 빌드할 때 버전·체크섬을
-고정해 받아 두고 `R4_FACE_CASCADE`로 그 자리를 먼저 봅니다. 파일이 없으면
-조용히 "얼굴 없음"으로 넘어가지 않고 무엇이 없는지 말합니다.
+캐스케이드 XML은 4.x 휠이 `cv2/data/`에 싣고 있습니다(실측: 4.14.0.94 휠에
+XML 17개, `haarcascade_frontalface_default.xml` 포함. CI에서도 `cv2.data`에
+파일 19개). 없던 것은 5.0.0 휠이었습니다. 다른 파일을 쓰려면
+`R4_FACE_CASCADE`로 자리를 알려 줍니다. 못 찾으면 조용히 "얼굴 없음"으로
+넘어가지 않고 어디를 찾아봤는지 말합니다.
 """
 
 from __future__ import annotations
@@ -38,17 +39,14 @@ class MissingDependency(RuntimeError):
 
 
 CASCADE_NAME = "haarcascade_frontalface_default.xml"
-# 워커 이미지가 빌드할 때 받아 두는 자리입니다.
-IMAGE_CASCADE = Path("/opt/opencv-data") / CASCADE_NAME
 
 
 def cascade_path() -> Path:
-    """캐스케이드 XML 자리. 설정 → 이미지에 받아 둔 자리 → OpenCV 기본 순서입니다."""
+    """캐스케이드 XML 자리. 설정(R4_FACE_CASCADE) → OpenCV가 싣고 있는 것 순서입니다."""
     places: list[Path] = []
     configured = os.environ.get("R4_FACE_CASCADE")
     if configured:
         places.append(Path(configured))
-    places.append(IMAGE_CASCADE)
     try:
         import cv2
 
@@ -59,9 +57,9 @@ def cascade_path() -> Path:
         if place.is_file():
             return place
     raise MissingDependency(
-        "얼굴 검출기 파일을 찾지 못했습니다. opencv-python-headless 5.0.0 휠에는 "
-        "들어 있지 않았습니다. infra/fetch_face_model.py로 받아 두고 R4_FACE_CASCADE로 "
-        "알려 주세요. 찾아본 자리: " + ", ".join(str(p) for p in places)
+        "얼굴 검출기 파일을 찾지 못했습니다. 4.x 휠은 cv2/data/에 싣고 있습니다. "
+        "다른 자리를 쓰려면 R4_FACE_CASCADE로 알려 주세요. 찾아본 자리: "
+        + ", ".join(str(p) for p in places)
     )
 
 

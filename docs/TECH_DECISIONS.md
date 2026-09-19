@@ -45,6 +45,7 @@
 | 2026-09-18 | 제안 | Python API·워커 + 객체 저장소 + PostgreSQL | 영상 처리와 상태 관리를 분리 |
 | 2026-09-19 | 구현 | 얼굴 검출은 OpenCV Haar 캐스케이드로 하고, 결과는 `focus_x` **제안**까지만 한다 | 정면 얼굴만 그럭저럭 찾으므로 자동 적용하면 사람이 맞춘 값을 망친다. 더 나은 검출기(YuNet)는 별도 모델이 필요해 미뤘고, 바꿀 자리는 `worker/faces.py:detect_faces` 하나다 |
 | 2026-09-19 | 정정 | 캐스케이드 XML은 워커 이미지가 빌드할 때 **버전·체크섬을 고정해 받는다**(`infra/fetch_face_model.py`) | "OpenCV가 함께 실으니 받을 것이 없다"고 적었는데 **틀렸다**. `opencv-python-headless` 휠에는 XML이 없다(CI 실측: `cv2.data` 경로는 있는데 파일이 없음). 저장소에 900KB짜리 남의 데이터를 넣는 대신 받되, 체크섬이 다르면 빌드가 멈춘다 |
+| 2026-09-19 | 재정정 | OpenCV를 `opencv-python-headless==4.14.0.94`로 **못 박고**, 받아 두던 단계를 **지웠다** | 위 "휠에 XML이 없다"는 **5.0.0을 재고 한 말**이었다. `scenedetect[opencv-headless]`가 버전을 안 박아 두어 새로 나온 5가 들어왔고, 5에는 `cv2.CascadeClassifier` 자체가 없다(CI 실측). 4.14.0.94 휠을 직접 열어 보니 XML 17개가 들어 있고 `haarcascade_frontalface_default.xml`도 있다. 휠 버전을 고정하면 그 안의 XML도 고정되므로 따로 받을 이유가 없다. **5로 올리려면 얼굴 검출을 갈아야 한다** |
 | 2026-09-19 | 구현 | 배경음 분리는 torchaudio가 싣고 있는 Hybrid Demucs(`HDEMUCS_HIGH_MUSDB_PLUS`)를 쓴다 | PyPI `demucs` 4.0.1은 `torchaudio<2.1`을 요구하는데 워커 이미지는 2.8이라 함께 설치되지 않는다. torchaudio는 이미 들어 있어 새 의존성이 늘지 않는다. 대신 이 번들이 빠진 torchaudio에서는 못 쓰므로 CI가 매번 존재를 확인한다 |
 | 2026-09-18 | 제안 | 외부 AI API 우선, 립싱크는 확장 단계 | 먼저 기본 파이프라인과 품질·비용을 검증 |
 | 2026-09-18 | 확정된 요청 | 현 단계는 문서화만 수행 | 사용자가 구조·기술 선택·구현 계획만 요청 |

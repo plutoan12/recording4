@@ -28,14 +28,6 @@ RUN pip install --no-cache-dir ".[analysis,providers,imports,subtitles]"
 
 COPY services ./services
 
-# opencv-python-headless 5.0.0 휠에는 Haar 캐스케이드 XML이 없었습니다(CI 실측).
-# 4.x가 싣고 있는지는 아직 재지 않아 그대로 받아 둡니다.
-# 얼굴 검출은 이 파일이 있어야 돕니다. 버전·체크섬을 고정해 받고, 검출기는
-# R4_FACE_CASCADE로 이 자리를 먼저 봅니다.
-ENV R4_FACE_CASCADE=/opt/opencv-data/haarcascade_frontalface_default.xml
-COPY infra/fetch_face_model.py /tmp/fetch_face_model.py
-RUN python /tmp/fetch_face_model.py /opt/opencv-data && rm /tmp/fetch_face_model.py
-
 RUN useradd --create-home --uid 10001 appuser \
     && mkdir -p /home/appuser/.cache \
     && chown -R appuser:appuser /home/appuser/.cache
