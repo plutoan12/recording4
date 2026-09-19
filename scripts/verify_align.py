@@ -16,6 +16,9 @@ make_speech_sample.py가 만든 음성은 문장 시작 시각을 우리가 알�
 - 자막이 시간순이고 서로 겹치지 않을 것.
 - 자막마다 시작 시각 오차가 한계(기본 1초) 안일 것. 실제 오차는 항상 출력합니다.
 - 문장 경계가 자막 경계로 남을 것. 여러 문장이 한 자막으로 합쳐지면 보고합니다.
+- 자막이 다음 문장 발화를 침범하지 않을 것. 끝이 밀리면 다음 말이 시작된 뒤에도
+  앞 자막이 남습니다.
+- 표시 규칙(`apply_rules`)을 거친 뒤에도 줄 수와 겹침이 규칙 안일 것.
 """
 
 from __future__ import annotations
@@ -27,6 +30,8 @@ import sys
 from pathlib import Path
 
 from pipeline.alignment import cues_for_lines, merge_spans
+from pipeline.editing import Cue
+from pipeline.subtitles import DEFAULT_RULES, apply_rules, check, normalize, text_width
 from worker.analysis import align_text, silence_spans, vad_spans, word_timings
 
 _SPACE = re.compile(r"\s+")
@@ -109,6 +114,69 @@ def diagnose(audio: Path, script: str, starts: list[float], *, model: str, langu
         )
 
 
+def report_ends(cues: list[Cue], sentences: list[dict]) -> list[str]:
+    """자막 끝 시각을 잽니다. 시작만 재면 자막이 언제 사라지는지 아무도 모릅니다.
+
+    끝의 정답은 시작만큼 또렷하지 않습니다. 사람 녹음은 말끝에 숨소리와 잔향이
+    남아, 같은 문턱으로 잰 끝이 실제 말끝보다 늦습니다(측정: 자막 1의 정답 끝
+    11.93초, VAD가 본 발화 끝 10.46초). 그래서 정답과의 차이는 찍기만 하고,
+    판정은 자막이 지켜야 할 것으로 합니다: 다음 문장이 시작된 뒤까지 앞 자막이
+    남아 있으면 안 됩니다.
+    """
+    problems: list[str] = []
+    ends = [item["end"] for item in sentences]
+    starts = [item["start"] for item in sentences]
+    print(f"\n{'자막':>4} {'정렬 끝':>10} {'가장 가까운 실제':>16} {'차이':>8} {'표시 시간':>10}")
+    for index, cue in enumerate(cues, start=1):
+        nearest = min(ends, key=lambda value: abs(value - cue.end))
+        print(
+            f"{index:>4} {cue.end:>9.2f}초 {nearest:>15.2f}초 "
+            f"{abs(nearest - cue.end):>7.2f}초 {cue.end - cue.start:>9.2f}초"
+        )
+    for cue in cues:
+        # 이 자막이 끝나기 전에 시작하는 다음 문장. 자기 문장은 빼야 하므로
+        # 자막 시작 뒤에 오는 문장만 봅니다.
+        later = [value for value in starts if value > cue.start + 0.001]
+        intruded = [value for value in later if cue.end > value + 0.001]
+        if intruded:
+            problems.append(
+                f"자막이 다음 문장 발화를 침범합니다: {cue.start:.2f}~{cue.end:.2f}초 자막이 "
+                f"{intruded[0]:.2f}초에 시작하는 문장까지 남습니다."
+            )
+            break
+    return problems
+
+
+def report_rules(cues: list[Cue]) -> list[str]:
+    """표시 규칙을 거친 뒤의 자막을 봅니다. 화면에 뜨는 것은 이쪽입니다.
+
+    정렬 결과는 그대로 화면에 가지 않습니다. `apply_rules`가 줄을 나누고 긴
+    자막을 쪼갠 뒤에야 렌더됩니다. 정렬 시각이 맞아도 그 뒤에서 깨지면 본
+    사람에게는 똑같이 깨진 자막입니다.
+
+    읽기 속도(CPS)와 너무 긴 표시 시간은 보고만 합니다. CPS는 나눈다고 줄지
+    않고(같은 글자를 같은 시간에 읽습니다) 말이 빠른 대본의 성질이지 정렬의
+    결함이 아닙니다. 줄 수와 겹침은 규칙이 지켜져야 하므로 실패로 봅니다.
+    """
+    shaped = apply_rules(cues, DEFAULT_RULES)
+    print(f"\n표시 규칙 적용 뒤 자막 {len(shaped)}개 (정렬 결과 {len(cues)}개)")
+    for cue in shaped:
+        width = text_width(normalize(cue.text.replace("\n", " ")))
+        duration = cue.end - cue.start
+        speed = width / duration if duration > 0 else 0.0
+        shown = cue.text.replace("\n", " / ")
+        print(f"  {cue.start:>6.2f} ~ {cue.end:>6.2f} ({speed:>5.1f}자/초)  {shown}")
+
+    problems: list[str] = []
+    for violation in check(shaped, DEFAULT_RULES):
+        line = f"자막 {violation.index + 1}: {violation.detail}"
+        if violation.kind in ("lines", "overlap"):
+            problems.append(f"표시 규칙을 지키지 못했습니다. {line}")
+        else:
+            print(f"  보고: {line}")
+    return problems
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--directory", type=Path, required=True)
@@ -167,6 +235,9 @@ def main() -> int:
             "줄바꿈이 있는 대본인데도 합쳐졌다면 단어 시각 묶기가 포기한 것입니다."
         )
 
+    problems.extend(report_ends(cues, sentences))
+    problems.extend(report_rules(cues))
+
     if not args.no_diagnose:
         diagnose(audio, script, starts, model=args.model, language=args.language)
 
@@ -175,7 +246,10 @@ def main() -> int:
         for problem in problems:
             print(f"- {problem}")
         return 1
-    print("\n정렬이 글자를 지키고 문장 시각을 한계 안에서 맞췄습니다.")
+    print(
+        "\n정렬이 글자를 지키고 문장 시각을 한계 안에서 맞췄습니다. "
+        "끝 시각도 다음 문장을 침범하지 않았습니다."
+    )
     return 0
 
 
