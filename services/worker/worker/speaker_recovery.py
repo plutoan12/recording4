@@ -36,8 +36,10 @@ def merge_agreed(base, left, right, *, reconsider=False):
         squeeze("".join(w["text"] for w in candidate["words"])) != squeeze(base["text"])
         for candidate in (left, right)
     ):
+        result.setdefault("recovery_rejections", []).append("candidate_text_mismatch")
         return result
     if len(a) != length or len(b) != length:
+        result.setdefault("recovery_rejections", []).append("candidate_length_mismatch")
         return result
     if not result["words"]:
         result["words"] = [
@@ -54,9 +56,13 @@ def merge_agreed(base, left, right, *, reconsider=False):
     output, cursor = [], 0
     for original in result["words"]:
         size = len(squeeze(original["text"]))
-        can_reconsider = reconsider and any(
-            min(original["end"], span["end"]) > max(original["start"], span["start"])
-            for span in base["overlaps"]
+        can_reconsider = (
+            reconsider
+            and original.get("timing_valid", False)
+            and any(
+                min(original["end"], span["end"]) > max(original["start"], span["start"])
+                for span in base["overlaps"]
+            )
         )
         if original["speaker"] not in (None, MULTIPLE_SPEAKERS) and not can_reconsider:
             output.append(original)
@@ -128,6 +134,8 @@ def whisperx_words(source, cues, language, device="cpu"):
 def recover_speaker_reviews(
     source, cues, turns, words, *, language, stage=3, device="cpu", audit_dir=None, reconsider=False
 ):
+    if stage not in (3, 4) or (reconsider and stage != 4):
+        raise ValueError("Recovery requires stage 3 or 4; reconsideration requires stage 4")
     base = review_speakers(cues, turns, words, stage=2)
     if not language or not any(r["needs_review"] for r in base):
         return base
@@ -377,6 +385,7 @@ def separated_reviews(
             unresolved = copy.deepcopy(review)
             unresolved["words"] = []
             accepted = merge_agreed(unresolved, review, stable_review)
+            evidence["merge_rejections"] = accepted.get("recovery_rejections", [])
             evidence["accepted_words"] = sum(
                 w["speaker"] not in (None, MULTIPLE_SPEAKERS) for w in accepted["words"]
             )
@@ -402,6 +411,7 @@ def separated_reviews(
             )
         elif len(available) > 1:
             audit.setdefault("ambiguous_cues", []).append(i)
+            base[i]["needs_review"] = True
     audit["status"] = "completed"
     audit["changed_assignments"] = sum("previous_speaker" in w for r in base for w in r["words"])
     save_audit()

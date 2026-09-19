@@ -8,6 +8,7 @@ same energy proxy as measure_diarization_stress, not manually annotated DER.
 
 import argparse
 import hashlib
+import io
 import itertools
 import json
 import os
@@ -15,12 +16,25 @@ from dataclasses import asdict
 from pathlib import Path
 
 import numpy as np
-from measure_diarization_stress import sample, score
+from measure_diarization_stress import render_case, score
 
 from pipeline.alignment import WordTiming, squeeze
 from pipeline.editing import Cue
 from pipeline.speakers import MULTIPLE_SPEAKERS, SpeakerTurn, assign_speakers, review_speakers
 from worker.analysis import align_speaker_words, diarize
+
+
+def verify_fixture(path, rendered, case):
+    import soundfile as sf
+
+    x = rendered
+    with io.BytesIO() as buffer:
+        sf.write(buffer, x, 16000, format="WAV", subtype="PCM_16")
+        buffer.seek(0)
+        regenerated, _ = sf.read(buffer, dtype="int16")
+    actual, rate = sf.read(path, dtype="int16")
+    if rate != 16000 or not np.array_equal(actual, regenerated):
+        raise ValueError(f"Source/recipe no longer describes fixture: {case['case']}")
 
 
 def main():
@@ -34,6 +48,8 @@ def main():
     parser.add_argument("--cache", type=Path)
     parser.add_argument("--reconsider", action="store_true")
     args = parser.parse_args()
+    if args.reconsider and args.stage != 4:
+        parser.error("--reconsider requires --stage 4")
     pieces = []
     for name in ["mono-a0.wav", "mono-b0.wav", "mono-a1.wav", "mono-b1.wav"]:
         x, sr = sf.read(args.directory / name, dtype="float32")
@@ -48,7 +64,10 @@ def main():
     for case in cases:
         path = args.fixtures / (case["case"] + ".wav")
         before = hashlib.sha256(path.read_bytes()).hexdigest()
-        _, truth, active = sample(pieces, case["overlap_fraction_of_shorter_clip"])
+        mixture, truth, active = render_case(
+            pieces, case["overlap_fraction_of_shorter_clip"], case["snr_db"], case["seed"]
+        )
+        verify_fixture(path, mixture, case)
         cues = [
             Cue(start=t["start"], end=t["end"], text=text)
             for t, text in zip(truth, texts, strict=True)
@@ -118,7 +137,7 @@ def main():
             counts["total_characters"] += total
             counts[
                 "legacy_unresolved"
-                if legacy is None
+                if legacy in (None, MULTIPLE_SPEAKERS)
                 else "legacy_correct"
                 if legacy == expected
                 else "legacy_wrong"
@@ -141,6 +160,11 @@ def main():
         )
         r = {
             "case": case["case"],
+            "requested_stage": args.stage,
+            "oracle_cue_text_and_boundaries": True,
+            "recovery_rejections": [
+                reason for r in reviews for reason in r.get("recovery_rejections", [])
+            ],
             "sha256": before,
             "baseline": score(turns, truth, active),
             "review_segments": sum(r["needs_review"] for r in reviews),

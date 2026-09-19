@@ -16,13 +16,14 @@ import numpy as np
 from verify_transcribe import distance, squeeze
 
 
-def stno_mask(turns, target, frames, start=0.0):
+def stno_mask(turns, target, frames, start=0.0, duration=None):
+    active_frames = frames if duration is None else min(frames, max(0, round(duration * 50)))
     activity = {}
     for turn in turns:
         label = turn["speaker"]
         active = activity.setdefault(label, np.zeros(frames, dtype=bool))
         a = max(0, round((turn["start"] - start) * 50))
-        b = min(frames, round((turn["end"] - start) * 50))
+        b = min(active_frames, round((turn["end"] - start) * 50))
         if b > a:
             active[a:b] = True
     own = activity.get(target, np.zeros(frames, dtype=bool))
@@ -90,7 +91,19 @@ def main():
         model.set_tokenizer(tokenizer)
     rows = json.loads(args.output.read_text()) if args.output.exists() else []
     revision = (args.model / "revision.txt").read_text().strip()
-    for item in json.loads(args.manifest.read_text()):
+    items = json.loads(args.manifest.read_text())
+    if len({row["id"] for row in rows}) != len(rows):
+        raise ValueError("Duplicate prior evidence ID")
+    # Validate the whole batch before generating or replacing any row.
+    for item in items:
+        prior = next((r for r in rows if r["id"] == item["id"]), None)
+        if prior and (
+            prior.get("run_fingerprint")
+            != run_fingerprint(item, revision, args.quantize, args.ctc_weight)
+            or prior.get("sha256") != hashlib.sha256(Path(item["audio"]).read_bytes()).hexdigest()
+        ):
+            raise ValueError("Existing evidence differs; use a new output file to preserve it")
+    for item in items:
         fingerprint = run_fingerprint(item, revision, args.quantize, args.ctc_weight)
         path = Path(item["audio"])
         previous = next((r for r in rows if r["id"] == item["id"]), None)
@@ -100,6 +113,8 @@ def main():
             and previous["sha256"] == hashlib.sha256(path.read_bytes()).hexdigest()
         ):
             continue
+        if previous:
+            raise ValueError("Existing evidence differs; use a new output file to preserve it")
         audio = decode_audio(str(path), sampling_rate=16000)
         start = item.get("start", 0.0)
         end = item.get("end", len(audio) / 16000)
@@ -110,7 +125,11 @@ def main():
             audio, sampling_rate=16000, return_tensors="pt", return_attention_mask=True
         )
         mask = stno_mask(
-            item["turns"], item["target"], features.input_features.shape[-1] // 2, start
+            item["turns"],
+            item["target"],
+            features.input_features.shape[-1] // 2,
+            start,
+            len(audio) / 16000,
         )
         with torch.inference_mode():
             tokens = model.generate(
@@ -141,6 +160,8 @@ def main():
             ctc_weight=args.ctc_weight,
             model_revision=revision,
             run_fingerprint=fingerprint,
+            target=item["target"],
+            generation_possibly_truncated=int(tokens[0, -1]) != tokenizer.eos_token_id,
         )
         rows = [r for r in rows if r["id"] != item["id"]]
         rows.append(row)
@@ -155,7 +176,10 @@ def main():
         gc.collect()
         import ctypes
 
-        ctypes.CDLL("libc.so.6").malloc_trim(0)
+        try:
+            ctypes.CDLL("libc.so.6").malloc_trim(0)
+        except (OSError, AttributeError):
+            pass  # Best effort; macOS and musl do not provide glibc malloc_trim.
 
 
 if __name__ == "__main__":

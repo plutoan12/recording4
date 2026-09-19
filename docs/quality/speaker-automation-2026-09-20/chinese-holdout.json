@@ -1,0 +1,32 @@
+{
+  "schema": 1,
+  "opencc_version": "1.4.2",
+  "config": "t2s.json",
+  "reference_changed": false,
+  "exploratory": true,
+  "rows": [
+    {
+      "id": "holdout-zh-0",
+      "reference_characters": 15,
+      "raw_errors": 3,
+      "simplified_output_errors": 1
+    },
+    {
+      "id": "holdout-zh-1",
+      "reference_characters": 60,
+      "raw_errors": 22,
+      "simplified_output_errors": 3
+    },
+    {
+      "id": "holdout-zh-2",
+      "reference_characters": 29,
+      "raw_errors": 6,
+      "simplified_output_errors": 0
+    }
+  ],
+  "totals": {
+    "reference_characters": 104,
+    "raw_errors": 31,
+    "simplified_output_errors": 4
+  }
+}

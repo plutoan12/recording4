@@ -39,3 +39,13 @@ def test_resume_requires_same_reference_masks_and_decoder(monkeypatch):
         assert original != run_fingerprint(changed, "rev1", True, 0.0)
     assert original != run_fingerprint(item, "rev1", True, 0.3)
     assert original != run_fingerprint(item, "rev2", True, 0.0)
+
+
+def test_crop_padding_is_silence_even_when_recording_turn_continues(monkeypatch):
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[1] / "scripts"))
+    from benchmark_target_asr import stno_mask
+
+    mask = stno_mask([dict(start=0, end=60, speaker="A")], "A", 1500, start=10, duration=2)
+    assert mask[1, :100].all()
+    assert not mask[1:, 100:].any()
+    assert mask[0, 100:].all()
