@@ -1,0 +1,202 @@
+{
+  "read_speech": [
+    {
+      "id": "fleurs-ko-new-0",
+      "language": "ko",
+      "reference_characters": 57,
+      "errors": 3,
+      "cer": 0.05263157894736842
+    },
+    {
+      "id": "fleurs-ko-new-1",
+      "language": "ko",
+      "reference_characters": 49,
+      "errors": 1,
+      "cer": 0.02040816326530612
+    },
+    {
+      "id": "fleurs-ko-new-2",
+      "language": "ko",
+      "reference_characters": 65,
+      "errors": 16,
+      "cer": 0.24615384615384617
+    },
+    {
+      "id": "fleurs-en-new-0",
+      "language": "en",
+      "reference_characters": 78,
+      "errors": 0,
+      "cer": 0.0
+    },
+    {
+      "id": "fleurs-en-new-1",
+      "language": "en",
+      "reference_characters": 76,
+      "errors": 1,
+      "cer": 0.013157894736842105
+    },
+    {
+      "id": "fleurs-en-new-2",
+      "language": "en",
+      "reference_characters": 57,
+      "errors": 0,
+      "cer": 0.0
+    },
+    {
+      "id": "fleurs-ja-new-0",
+      "language": "ja",
+      "reference_characters": 41,
+      "errors": 3,
+      "cer": 0.07317073170731707
+    },
+    {
+      "id": "fleurs-ja-new-1",
+      "language": "ja",
+      "reference_characters": 56,
+      "errors": 11,
+      "cer": 0.19642857142857142
+    },
+    {
+      "id": "fleurs-ja-new-2",
+      "language": "ja",
+      "reference_characters": 30,
+      "errors": 9,
+      "cer": 0.3
+    },
+    {
+      "id": "fleurs-zh-new-0",
+      "language": "zh",
+      "reference_characters": 30,
+      "errors": 3,
+      "cer": 0.1
+    },
+    {
+      "id": "fleurs-zh-new-1",
+      "language": "zh",
+      "reference_characters": 35,
+      "errors": 2,
+      "cer": 0.05714285714285714
+    },
+    {
+      "id": "fleurs-zh-new-2",
+      "language": "zh",
+      "reference_characters": 56,
+      "errors": 15,
+      "cer": 0.26785714285714285
+    }
+  ],
+  "real_conversation": {
+    "missed detection": 7.436531249999996,
+    "correct": 26.61637500000002,
+    "total": 38.92,
+    "confusion": 4.867093749999988,
+    "false alarm": 1.1190312499999848,
+    "diarization error rate": 0.3448781153648502,
+    "reference_speakers": 4,
+    "predicted_speakers": 2,
+    "duration": 120,
+    "source": "diarizers-community/ami ihm test row0",
+    "collar": 0,
+    "skip_overlap": false,
+    "audio_sha256": "50e2c8e4737850c4bf3cc24e7087c755e1c733cd91822106afd0df485ba64893",
+    "annotation_sha256": "e92de3f3fe90c58e94ff55a65773e6b84ba460dc1bef60ad7e1b3fdcfd4fd518"
+  },
+  "sources": {
+    "ko": {
+      "dataset": "google/fleurs",
+      "revision": "70bb2e84b976b7e960aa89f1c648e09c59f894dd",
+      "license": "CC-BY-4.0",
+      "language": "ko",
+      "config": "ko_kr",
+      "split": "validation",
+      "selection": "first matching regular files in dev.tar.gz",
+      "skipped_matching_files": 30,
+      "clips": [
+        {
+          "filename": "13528031056339622735.wav",
+          "sha256": "16e43deb35197def0f16183af7faeaba34f8e83da03c50a9902458d75ccab8e3"
+        },
+        {
+          "filename": "13561223640328199128.wav",
+          "sha256": "0c00af715a91ea340cab270dcad3e4860db231264bd0f8379d84f7c93e4852d0"
+        },
+        {
+          "filename": "13739283558221213629.wav",
+          "sha256": "a795d8d837b992ed43239601ca997ffce89ea273c780546d18925259f06aa849"
+        }
+      ]
+    },
+    "en": {
+      "dataset": "google/fleurs",
+      "revision": "70bb2e84b976b7e960aa89f1c648e09c59f894dd",
+      "license": "CC-BY-4.0",
+      "language": "en",
+      "config": "en_us",
+      "split": "validation",
+      "selection": "first matching regular files in dev.tar.gz",
+      "skipped_matching_files": 30,
+      "clips": [
+        {
+          "filename": "10927605878527486298.wav",
+          "sha256": "a043fab2fffba982748b7cd3f74042cac7df8306c020cdd861d075c79754ce7e"
+        },
+        {
+          "filename": "11030046932175288954.wav",
+          "sha256": "3f5c0411675dc52be329d9fb9da5d971220a15d60b41e99f775a7170af3c062c"
+        },
+        {
+          "filename": "1105184381995491301.wav",
+          "sha256": "389268653cff3992a38fc7619df1a6e1c9a4c6f4b0650217e2071e4f5bd30f30"
+        }
+      ]
+    },
+    "ja": {
+      "dataset": "google/fleurs",
+      "revision": "70bb2e84b976b7e960aa89f1c648e09c59f894dd",
+      "license": "CC-BY-4.0",
+      "language": "ja",
+      "config": "ja_jp",
+      "split": "validation",
+      "selection": "first matching regular files in dev.tar.gz",
+      "skipped_matching_files": 30,
+      "clips": [
+        {
+          "filename": "1204968976973295146.wav",
+          "sha256": "a548ddfc95de96b390e9b491cef0884ecb3aaec0ea773085baa40c16450b019d"
+        },
+        {
+          "filename": "12082134382056678972.wav",
+          "sha256": "2b2399779a1a7a784db112f3aab2913fb9ce1fd0b33aa600860f6cf74eb0c825"
+        },
+        {
+          "filename": "12090560248408007785.wav",
+          "sha256": "7febcf1f6be4b3fd4e656c43af833a9b7c12bf27a945b448329805f67521018d"
+        }
+      ]
+    },
+    "zh": {
+      "dataset": "google/fleurs",
+      "revision": "70bb2e84b976b7e960aa89f1c648e09c59f894dd",
+      "license": "CC-BY-4.0",
+      "language": "zh",
+      "config": "cmn_hans_cn",
+      "split": "validation",
+      "selection": "first matching regular files in dev.tar.gz",
+      "skipped_matching_files": 30,
+      "clips": [
+        {
+          "filename": "1172399942256429984.wav",
+          "sha256": "4005afd00f73918473062de0bd81a10354a03bd959570dc4f566834a0b5eb68a"
+        },
+        {
+          "filename": "11760420660270846757.wav",
+          "sha256": "33f3e74e6b925663a51a928fece4e1514db059e22bf7be008f5e599c5a174d16"
+        },
+        {
+          "filename": "11788433184081135999.wav",
+          "sha256": "ef0931ac266bccb75ec5e4fb9232030785c9f5e0b530bdc11aa269e16bb491a2"
+        }
+      ]
+    }
+  }
+}

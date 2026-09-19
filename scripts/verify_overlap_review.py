@@ -32,6 +32,7 @@ def main():
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--stage", type=int, choices=[1, 2, 3, 4], default=1)
     parser.add_argument("--cache", type=Path)
+    parser.add_argument("--reconsider", action="store_true")
     args = parser.parse_args()
     pieces = []
     for name in ["mono-a0.wav", "mono-b0.wav", "mono-a1.wav", "mono-b1.wav"]:
@@ -78,7 +79,14 @@ def main():
             from worker.speaker_recovery import recover_speaker_reviews
 
             reviews = recover_speaker_reviews(
-                path, cues, turns, words, language="en", stage=args.stage
+                path,
+                cues,
+                turns,
+                words,
+                language="en",
+                stage=args.stage,
+                audit_dir=args.output / (case["case"] + "-audit"),
+                reconsider=args.reconsider,
             )
         labs = sorted({t.speaker for t in turns})
         n = active.shape[1]

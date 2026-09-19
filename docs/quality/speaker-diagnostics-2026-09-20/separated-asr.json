@@ -1,0 +1,18 @@
+[
+  {
+    "id": "overlap_25pct-0",
+    "method": "separator_stem",
+    "reference_characters": 227,
+    "errors": 7,
+    "cer": 0.030837004405286344,
+    "sha256": "f6010f3d09cedfb2b0f1bf00f0ddc7f0776dcf67691a6dac79fd9c5a53a8788c"
+  },
+  {
+    "id": "overlap_25pct-1",
+    "method": "separator_stem",
+    "reference_characters": 172,
+    "errors": 103,
+    "cer": 0.5988372093023255,
+    "sha256": "7d04ca8b9d96dd51316557578ff4c8b49276e7b4fa11e9e2f41868e8a7b323d2"
+  }
+]

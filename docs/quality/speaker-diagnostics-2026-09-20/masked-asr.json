@@ -1,0 +1,34 @@
+[
+  {
+    "id": "overlap_25pct-0",
+    "method": "target_activity_mask",
+    "reference_characters": 227,
+    "errors": 77,
+    "cer": 0.3392070484581498,
+    "sha256": "e28fb61739f5c602d918abd48b0f54df5cb5c1b835df845317c0e54d5ae82904"
+  },
+  {
+    "id": "overlap_25pct-1",
+    "method": "target_activity_mask",
+    "reference_characters": 172,
+    "errors": 3,
+    "cer": 0.01744186046511628,
+    "sha256": "e28fb61739f5c602d918abd48b0f54df5cb5c1b835df845317c0e54d5ae82904"
+  },
+  {
+    "id": "overlap_50pct-0",
+    "method": "target_activity_mask",
+    "reference_characters": 227,
+    "errors": 63,
+    "cer": 0.2775330396475771,
+    "sha256": "1bca3b6a07d4218748bf73caadcc4201a020ed3c06e1de38f3ffb75dd44c473e"
+  },
+  {
+    "id": "overlap_50pct-1",
+    "method": "target_activity_mask",
+    "reference_characters": 172,
+    "errors": 92,
+    "cer": 0.5348837209302325,
+    "sha256": "1bca3b6a07d4218748bf73caadcc4201a020ed3c06e1de38f3ffb75dd44c473e"
+  }
+]

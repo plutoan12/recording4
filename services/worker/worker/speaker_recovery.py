@@ -2,12 +2,15 @@
 
 Stage 3 requires two aligners to agree before filling an unresolved word.
 Stage 4 separates two voices for analysis, then requires voice and text evidence.
-Original media and already-resolved assignments are never changed.
+Original media is never changed. Resolved assignments are preserved by default;
+explicit reconsideration requires overlap and independently checked evidence.
 """
 
 from __future__ import annotations
 
 import copy
+import json
+import shutil
 import subprocess
 import tempfile
 from pathlib import Path
@@ -24,7 +27,7 @@ def _indexed(review):
     return indexed
 
 
-def merge_agreed(base, left, right):
+def merge_agreed(base, left, right, *, reconsider=False):
     """Keep the source denominator and only recover words supported by both paths."""
     result = copy.deepcopy(base)
     a, b = _indexed(left), _indexed(right)
@@ -51,7 +54,11 @@ def merge_agreed(base, left, right):
     output, cursor = [], 0
     for original in result["words"]:
         size = len(squeeze(original["text"]))
-        if original["speaker"] not in (None, MULTIPLE_SPEAKERS):
+        can_reconsider = reconsider and any(
+            min(original["end"], span["end"]) > max(original["start"], span["start"])
+            for span in base["overlaps"]
+        )
+        if original["speaker"] not in (None, MULTIPLE_SPEAKERS) and not can_reconsider:
             output.append(original)
             cursor += size
             continue
@@ -73,6 +80,12 @@ def merge_agreed(base, left, right):
             word["text"] = squeeze(base["text"])[cursor : cursor + n]
             if accepted:
                 word["recovered"] = True
+                if (
+                    original["speaker"] not in (None, MULTIPLE_SPEAKERS)
+                    and original["speaker"] != word["speaker"]
+                ):
+                    word["previous_speaker"] = original["speaker"]
+                    word["needs_review"] = True
             output.append(word)
             cursor += n
     result["words"] = output
@@ -112,46 +125,61 @@ def whisperx_words(source, cues, language, device="cpu"):
     return results
 
 
-def recover_speaker_reviews(source, cues, turns, words, *, language, stage=3, device="cpu"):
+def recover_speaker_reviews(
+    source, cues, turns, words, *, language, stage=3, device="cpu", audit_dir=None, reconsider=False
+):
     base = review_speakers(cues, turns, words, stage=2)
     if not language or not any(r["needs_review"] for r in base):
         return base
     with tempfile.TemporaryDirectory(prefix="r4-speaker-recovery-") as tmp:
-        clean = Path(tmp) / "analysis.wav"
-        subprocess.run(
-            [
-                ffmpeg_binary(),
-                "-v",
-                "error",
-                "-y",
-                "-i",
-                str(source),
-                "-af",
-                "afftdn=nf=-25",
-                "-ac",
-                "1",
-                "-ar",
-                "16000",
-                str(clean),
-            ],
-            capture_output=True,
-            check=True,
-            timeout=600,
-        )
-        pending = [i for i, r in enumerate(base) if r["needs_review"]]
-        selected = [cues[i] for i in pending]
-        retry = align_speaker_words(clean, selected, language=language, device=device)
-        phonemes = whisperx_words(source, selected, language, device)
-        left = review_speakers(selected, turns, retry, stage=2)
-        right = review_speakers(selected, turns, phonemes, stage=2)
-        for i, first, second in zip(pending, left, right, strict=True):
-            base[i] = merge_agreed(base[i], first, second)
+        if not reconsider:
+            clean = Path(tmp) / "analysis.wav"
+            subprocess.run(
+                [
+                    ffmpeg_binary(),
+                    "-v",
+                    "error",
+                    "-y",
+                    "-i",
+                    str(source),
+                    "-af",
+                    "afftdn=nf=-25",
+                    "-ac",
+                    "1",
+                    "-ar",
+                    "16000",
+                    str(clean),
+                ],
+                capture_output=True,
+                check=True,
+                timeout=600,
+            )
+            pending = [i for i, r in enumerate(base) if r["needs_review"]]
+            selected = [cues[i] for i in pending]
+            retry = align_speaker_words(clean, selected, language=language, device=device)
+            phonemes = whisperx_words(source, selected, language, device)
+            left = review_speakers(selected, turns, retry, stage=2)
+            right = review_speakers(selected, turns, phonemes, stage=2)
+            for i, first, second in zip(pending, left, right, strict=True):
+                base[i] = merge_agreed(base[i], first, second)
         if stage >= 4 and any(r["overlaps"] for r in base):
-            base = separated_reviews(source, cues, turns, base, language, Path(tmp), device)
+            base = separated_reviews(
+                source,
+                cues,
+                turns,
+                base,
+                language,
+                Path(tmp),
+                device,
+                audit_dir=audit_dir,
+                reconsider=reconsider,
+            )
     return base
 
 
-def separated_reviews(source, cues, turns, base, language, directory, device):
+def separated_reviews(
+    source, cues, turns, base, language, directory, device, *, audit_dir=None, reconsider=False
+):
     """Experimental two-speaker recovery; no oracle stems or true labels used."""
     from difflib import SequenceMatcher
 
@@ -163,8 +191,26 @@ def separated_reviews(source, cues, turns, base, language, directory, device):
     from speechbrain.inference.separation import SepformerSeparation
     from speechbrain.inference.speaker import EncoderClassifier
 
+    audit = {
+        "schema": 1,
+        "chunks": [],
+        "cues": [],
+        "status": "started",
+        "model": "speechbrain/sepformer-whamr",
+        "reconsider": reconsider,
+    }
+
+    def save_audit():
+        if audit_dir is not None:
+            Path(audit_dir).mkdir(parents=True, exist_ok=True)
+            (Path(audit_dir) / "separation.json").write_text(
+                json.dumps(audit, ensure_ascii=False, indent=2)
+            )
+
     labels = sorted({t.speaker for t in turns})
     if len(labels) != 2:
+        audit["status"] = "unsupported_speaker_count"
+        save_audit()
         return base
     audio = decode_audio(str(source), sampling_rate=16000)
     encoder = EncoderClassifier.from_hparams(
@@ -200,6 +246,8 @@ def separated_reviews(source, cues, turns, base, language, directory, device):
                 audio[int(a * 16000) : int(b * 16000)] for a, b in intervals if b - a >= 0.5
             )
         if not fragments:
+            audit["status"] = "missing_clean_anchor"
+            save_audit()
             return base
         anchors[label] = embedding(np.concatenate(fragments))
     mixed = directory / "mixed8.wav"
@@ -240,6 +288,19 @@ def separated_reviews(source, cues, turns, base, language, directory, device):
         direct = sum(float(np.dot(vectors[c], anchors[labels[c]])) for c in range(2))
         reverse = sum(float(np.dot(vectors[c], anchors[labels[1 - c]])) for c in range(2))
         order = [0, 1] if direct >= reverse else [1, 0]
+        audit["chunks"].append(
+            dict(
+                start=offset / 8000,
+                direct=direct,
+                reverse=reverse,
+                permutation_margin=abs(direct - reverse),
+                order=order,
+                channel_correlation=float(np.corrcoef(chunk.T)[0, 1])
+                if np.all(np.std(chunk, axis=0) > 0)
+                else None,
+            )
+        )
+        save_audit()
         count = min(chunk_size, len(mixture) - offset)
         for channel, chosen in enumerate(order):
             signals[offset : offset + count, channel] = chunk[
@@ -258,12 +319,25 @@ def separated_reviews(source, cues, turns, base, language, directory, device):
             check=True,
             capture_output=True,
         )
+        if audit_dir is not None:
+            shutil.copy2(path, Path(audit_dir) / path.name)
         separated = decode_audio(str(path), sampling_rate=16000)
         aligned = whisperx_words(path, cues, language, device)
         reviews = review_speakers(cues, turns, aligned, stage=2)
-        for cue, review in zip(cues, reviews, strict=True):
+        for cue_index, (cue, review) in enumerate(zip(cues, reviews, strict=True)):
             piece = separated[int(cue.start * 16000) : int(cue.end * 16000)]
+            evidence = dict(
+                channel=channel,
+                cue=cue_index,
+                start=cue.start,
+                end=cue.end,
+                reasons=[],
+                accepted_words=0,
+            )
+            audit["cues"].append(evidence)
             if len(piece) < 8000:
+                evidence["reasons"].append("too_short")
+                save_audit()
                 review["words"] = []
                 continue
             vector = embedding(piece)
@@ -275,7 +349,20 @@ def separated_reviews(source, cues, turns, base, language, directory, device):
             similarity = SequenceMatcher(
                 None, squeeze(actual).casefold(), squeeze(cue.text).casefold()
             ).ratio()
-            if scores[0][0] < 0.6 or scores[0][0] - scores[1][0] < 0.15 or similarity < 0.85:
+            evidence.update(
+                voice_scores=scores,
+                voice_margin=scores[0][0] - scores[1][0],
+                text_similarity=similarity,
+                recognized_text=actual,
+            )
+            if scores[0][0] < 0.6:
+                evidence["reasons"].append("voice_match_below_threshold")
+            if scores[0][0] - scores[1][0] < 0.15:
+                evidence["reasons"].append("ambiguous_voice_identity")
+            if similarity < 0.85:
+                evidence["reasons"].append("transcript_mismatch")
+            save_audit()
+            if evidence["reasons"]:
                 review["words"] = []
                 continue
             # Independent stable-ts alignment on the same stem must agree in time.
@@ -289,7 +376,14 @@ def separated_reviews(source, cues, turns, base, language, directory, device):
                         )
             unresolved = copy.deepcopy(review)
             unresolved["words"] = []
-            reviews[reviews.index(review)] = merge_agreed(unresolved, review, stable_review)
+            accepted = merge_agreed(unresolved, review, stable_review)
+            evidence["accepted_words"] = sum(
+                w["speaker"] not in (None, MULTIPLE_SPEAKERS) for w in accepted["words"]
+            )
+            if not evidence["accepted_words"]:
+                evidence["reasons"].append("alignment_disagreement_or_missing")
+            save_audit()
+            reviews[cue_index] = accepted
         candidates.append(reviews)
     # One stem alone is not enough when both claim the same text with different voices.
     for i, original in enumerate(base):
@@ -300,5 +394,15 @@ def separated_reviews(source, cues, turns, base, language, directory, device):
             if any(w["speaker"] not in (None, MULTIPLE_SPEAKERS) for w in r["words"])
         ]
         if len(available) == 1:
-            base[i] = merge_agreed(original, available[0], available[0])
+            base[i] = merge_agreed(
+                original,
+                available[0],
+                available[0],
+                reconsider=reconsider and bool(original["overlaps"]),
+            )
+        elif len(available) > 1:
+            audit.setdefault("ambiguous_cues", []).append(i)
+    audit["status"] = "completed"
+    audit["changed_assignments"] = sum("previous_speaker" in w for r in base for w in r["words"])
+    save_audit()
     return base

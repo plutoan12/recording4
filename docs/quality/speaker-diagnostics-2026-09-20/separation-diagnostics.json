@@ -1,0 +1,138 @@
+[
+  {
+    "case": "overlap_25pct",
+    "status": "completed",
+    "chunk_count": 7,
+    "rejection_counts": {
+      "voice_match_below_threshold": 8,
+      "ambiguous_voice_identity": 4,
+      "transcript_mismatch": 4
+    },
+    "voice_scores": [
+      0.3723020553588867,
+      0.22386027872562408,
+      0.5595543384552002,
+      0.1621396541595459,
+      0.18108749389648438,
+      0.5708845853805542,
+      0.2622884213924408,
+      0.5271352529525757
+    ],
+    "voice_margins": [
+      0.26808780431747437,
+      0.05006973445415497,
+      0.3841366022825241,
+      0.006246834993362427,
+      0.031605541706085205,
+      0.591697808355093,
+      0.12494935095310211,
+      0.5876614972949028
+    ],
+    "text_similarities": [
+      0.8809523809523809,
+      0.3058823529411765,
+      0.9655172413793104,
+      0.16417910447761194,
+      0.4225352112676056,
+      0.9747899159663865,
+      0.08121827411167512,
+      0.9741379310344828
+    ],
+    "accepted_words": 0,
+    "changed_assignments": 0,
+    "stems": [
+      {
+        "channel": 0,
+        "dominant_reference": 0,
+        "target_to_other_db": 27.979952538176466,
+        "unexplained_energy_fraction": 0.9942195122567724
+      },
+      {
+        "channel": 1,
+        "dominant_reference": 1,
+        "target_to_other_db": 14.056583209634459,
+        "unexplained_energy_fraction": 0.4095279788242084
+      }
+    ]
+  },
+  {
+    "case": "overlap_25pct_noise10db",
+    "status": "completed",
+    "chunk_count": 7,
+    "rejection_counts": {
+      "voice_match_below_threshold": 8,
+      "ambiguous_voice_identity": 3,
+      "transcript_mismatch": 4
+    },
+    "voice_scores": [
+      0.3472321927547455,
+      0.11529451608657837,
+      0.42498457431793213,
+      0.12237493693828583,
+      0.14341910183429718,
+      0.520987868309021,
+      0.28791841864585876,
+      0.4255548119544983
+    ],
+    "voice_margins": [
+      0.33831512928009033,
+      0.019673608243465424,
+      0.39045460894703865,
+      0.0017831921577453613,
+      0.07415244728326797,
+      0.5215008743107319,
+      0.2178376242518425,
+      0.5040671229362488
+    ],
+    "text_similarities": [
+      0.8536585365853658,
+      0.3132530120481928,
+      0.9016393442622951,
+      0.16417910447761194,
+      0.3880597014925373,
+      0.9747899159663865,
+      0.2081447963800905,
+      0.9380530973451328
+    ],
+    "accepted_words": 0,
+    "changed_assignments": 0,
+    "stems": [
+      {
+        "channel": 0,
+        "dominant_reference": 0,
+        "target_to_other_db": 16.64493596777066,
+        "unexplained_energy_fraction": 0.9993555101451103
+      },
+      {
+        "channel": 1,
+        "dominant_reference": 1,
+        "target_to_other_db": 13.020451238980629,
+        "unexplained_energy_fraction": 0.44924353481481744
+      }
+    ]
+  },
+  {
+    "case": "overlap_50pct",
+    "status": "missing_clean_anchor",
+    "chunk_count": 0,
+    "rejection_counts": {},
+    "voice_scores": [],
+    "voice_margins": [],
+    "text_similarities": [],
+    "accepted_words": 0,
+    "changed_assignments": 0,
+    "stems": []
+  },
+  {
+    "case": "overlap_50pct_noise10db",
+    "status": "missing_clean_anchor",
+    "chunk_count": 0,
+    "rejection_counts": {},
+    "voice_scores": [],
+    "voice_margins": [],
+    "text_similarities": [],
+    "accepted_words": 0,
+    "changed_assignments": 0,
+    "stems": []
+  }
+]
