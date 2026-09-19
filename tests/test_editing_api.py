@@ -169,3 +169,75 @@ def test_subtitle_export_rejects_unknown_clip_format_and_empty_captions(
     )
     empty = client.get(f"/clips/{clip_id}/subtitles", headers=auth_headers)
     assert empty.status_code == 409 and "자막이 없습니다" in empty.json()["detail"]
+
+
+def test_subtitle_export_uses_the_rules_the_render_used(client, auth_headers, asset, monkeypatch):
+    """설정을 렌더 뒤에 바꿔도 영상에 구워진 자막과 같은 줄로 내보냅니다.
+
+    표시 규칙이 바뀌면 줄바꿈과 분할이 달라집니다. 지금 설정으로 다시 계산하면
+    사람은 영상과 같은 자막이라고 믿고 다른 파일을 올립니다.
+    """
+    import worker.media_tasks as worker_module
+    from adminapi.routers import editing
+    from pipeline.subtitles import SubtitleRules
+
+    used: dict = {}
+
+    class Storage:
+        def download_file(self, key, path):
+            path.write_bytes(b"input")
+
+        def upload_file(self, key, path, content_type):
+            pass
+
+    def fake_render(source, output, spec, **kwargs):
+        used["rules"] = kwargs["rules"]
+        output.write_bytes(b"rendered")
+
+    monkeypatch.setattr(worker_module, "get_storage", lambda: Storage())
+    monkeypatch.setattr(worker_module, "render_clip", fake_render)
+
+    cues = [{"start": 0, "end": 8, "text": "가나다 라마바 사아자 차카타 파하가 나다라"}]
+    created = client.post(
+        "/clips",
+        headers=auth_headers,
+        json={"source_asset_id": str(asset.id), "start": 0, "end": 10, "cues": cues},
+    ).json()
+    assert worker_module.run_media.run(created["id"])["status"] == "succeeded"
+    assert used["rules"].max_chars_per_line == 16
+
+    # 렌더가 끝난 뒤 설정을 바꿉니다. 이 편집본은 다시 렌더하지 않았습니다.
+    monkeypatch.setattr(editing, "subtitle_rules", lambda: SubtitleRules(max_chars_per_line=6))
+    srt = client.get(f"/clips/{created['clip_edit_id']}/subtitles", headers=auth_headers)
+    assert srt.status_code == 200
+    assert srt.headers["x-subtitle-rules"] == "rendered"
+    # 바뀐 설정(6자)이었다면 한 자막이 여러 개로 쪼개집니다.
+    assert srt.text.count("-->") == 1
+
+
+def test_subtitle_export_says_when_the_rendered_rules_are_unknown(client, auth_headers, asset):
+    """이 기능 전에 렌더한 기록에는 그때 쓴 규칙이 없습니다. 아는 척하지 않습니다."""
+    cues = [{"start": 0, "end": 8, "text": "규칙 기록이 없는 옛 편집본"}]
+    created = client.post(
+        "/clips",
+        headers=auth_headers,
+        json={"source_asset_id": str(asset.id), "start": 0, "end": 10, "cues": cues},
+    ).json()
+    srt = client.get(f"/clips/{created['clip_edit_id']}/subtitles", headers=auth_headers)
+    assert srt.status_code == 200
+    assert srt.headers["x-subtitle-rules"] == "settings"
+
+
+def test_broken_rules_record_falls_back_instead_of_failing() -> None:
+    """기록이 깨졌다고 자막 내려받기가 막히면 안 됩니다. 설정으로 내려주고 알립니다."""
+    from adminapi.models import MediaTask
+    from adminapi.routers.editing import rules_used
+
+    for saved in ({"max_chars_per_line": 0}, {"max_cps": "여섯"}, "규칙 아님", None):
+        task = MediaTask(kind="render", result={"subtitle_rules": saved})
+        rules, source = rules_used(task)
+        assert source == "settings" and rules.max_chars_per_line == 16
+
+    task = MediaTask(kind="render", result={"subtitle_rules": {"max_chars_per_line": 9}})
+    rules, source = rules_used(task)
+    assert source == "rendered" and rules.max_chars_per_line == 9
