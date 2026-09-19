@@ -58,6 +58,10 @@ dev = [
     "pytest==8.3.4",
     "httpx==0.28.1",
     "ruff==0.8.4",
+    # scripts/verify_sync_matrix.py가 numpy로 음성을 만듭니다. 그 시험이 스크립트를
+    # 통째로 불러오므로 시험에도 필요합니다(CI 실측: ModuleNotFoundError). 워커
+    # 이미지는 torch·opencv가 각자 끌어오므로 여기 고정과 섞이지 않습니다.
+    "numpy==2.4.6",
 ]
 
 [tool.setuptools]
