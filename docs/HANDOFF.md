@@ -982,7 +982,16 @@ PyPI의 `demucs` 4.0.1은 `torchaudio>=0.8,<2.1`을 요구하는데 워커 이�
 
 ### 검출기
 
-OpenCV가 함께 싣는 **Haar 캐스케이드**입니다. 내려받을 것이 없어 새 의존성이 늘지 않습니다(OpenCV는 scenedetect로 이미 있습니다).
+OpenCV의 **Haar 캐스케이드**입니다.
+
+**여기서 제가 틀렸습니다.** "OpenCV가 함께 실으니 받을 것이 없다"고 보고 그렇게 적었는데, `opencv-python-headless` 휠에는 캐스케이드 XML이 **들어 있지 않습니다.** CI가 잡았습니다:
+
+```
+얼굴 검출기 파일이 없습니다:
+/usr/local/lib/python3.11/site-packages/cv2/data/haarcascade_frontalface_default.xml
+```
+
+`cv2.data` 경로는 있는데 파일이 없습니다. 지금은 워커 이미지가 빌드할 때 **버전(4.10.0)과 sha256을 고정해** 받고(`infra/fetch_face_model.py`), `R4_FACE_CASCADE`로 그 자리를 알려 줍니다. 체크섬이 다르면 빌드가 거기서 멈춥니다. 저장소에 900KB짜리 남의 데이터 파일을 넣지 않으려고 이렇게 했습니다.
 
 **정면 얼굴만 그럭저럭 찾습니다.** 옆얼굴·가린 얼굴·작은 얼굴은 놓칩니다. 더 나은 검출기(YuNet)는 모델 파일을 받아야 해서 미뤘습니다. 바꿀 자리는 `detect_faces` 하나입니다.
 

@@ -7,14 +7,18 @@
 **제안일 뿐입니다.** 자동으로 적용하지 않습니다. 검출기가 틀리면 사람이
 맞춘 값을 망치기 때문입니다.
 
-검출기는 OpenCV가 함께 싣는 Haar 캐스케이드입니다. 내려받을 것이 없어서
-고른 것이고, **정면 얼굴만** 그럭저럭 찾습니다. 옆얼굴·가린 얼굴·작은
-얼굴은 놓칩니다. 더 나은 검출기(YuNet 등)는 모델 파일을 받아야 해서 여기서는
-쓰지 않았습니다. 바꿀 자리는 `detect_faces` 하나입니다.
+검출기는 OpenCV의 Haar 캐스케이드입니다. **정면 얼굴만** 그럭저럭 찾습니다.
+옆얼굴·가린 얼굴·작은 얼굴은 놓칩니다. 바꿀 자리는 `detect_faces` 하나입니다.
+
+캐스케이드 XML은 `opencv-python-headless` 휠에 **들어 있지 않습니다**(CI 실측:
+`cv2.data` 경로는 있는데 파일이 없습니다). 워커 이미지가 빌드할 때 체크섬을
+확인하며 받아 두고 `R4_FACE_CASCADE`로 그 자리를 알려 줍니다. 파일이 없으면
+조용히 "얼굴 없음"으로 넘어가지 않고 무엇이 없는지 말합니다.
 """
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from pipeline.framing import Box, Suggestion, suggest_focus
@@ -29,6 +33,34 @@ class MissingDependency(RuntimeError):
     """얼굴 검출에 필요한 것이 없을 때."""
 
 
+CASCADE_NAME = "haarcascade_frontalface_default.xml"
+# 워커 이미지가 빌드할 때 받아 두는 자리입니다.
+IMAGE_CASCADE = Path("/opt/opencv-data") / CASCADE_NAME
+
+
+def cascade_path() -> Path:
+    """캐스케이드 XML 자리. 설정 → 이미지에 받아 둔 자리 → OpenCV 기본 순서입니다."""
+    places: list[Path] = []
+    configured = os.environ.get("R4_FACE_CASCADE")
+    if configured:
+        places.append(Path(configured))
+    places.append(IMAGE_CASCADE)
+    try:
+        import cv2
+
+        places.append(Path(cv2.data.haarcascades) / CASCADE_NAME)
+    except (ImportError, AttributeError):
+        pass
+    for place in places:
+        if place.is_file():
+            return place
+    raise MissingDependency(
+        "얼굴 검출기 파일을 찾지 못했습니다. opencv-python-headless에는 들어 있지 "
+        "않습니다. infra/fetch_face_model.py로 받아 두고 R4_FACE_CASCADE로 "
+        "알려 주세요. 찾아본 자리: " + ", ".join(str(p) for p in places)
+    )
+
+
 def _cascade():  # noqa: ANN202 - cv2 타입을 여기서 들이지 않습니다.
     try:
         import cv2
@@ -36,9 +68,7 @@ def _cascade():  # noqa: ANN202 - cv2 타입을 여기서 들이지 않습니다
         raise MissingDependency(
             "OpenCV가 없습니다. pip install '.[analysis]'를 실행하세요."
         ) from exc
-    path = Path(cv2.data.haarcascades) / "haarcascade_frontalface_default.xml"
-    if not path.is_file():
-        raise MissingDependency(f"얼굴 검출기 파일이 없습니다: {path}")
+    path = cascade_path()
     found = cv2.CascadeClassifier(str(path))
     if found.empty():
         raise MissingDependency(f"얼굴 검출기를 읽지 못했습니다: {path}")

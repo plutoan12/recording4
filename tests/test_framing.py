@@ -84,3 +84,21 @@ def test_sample_times_stay_inside_the_clip() -> None:
     assert sample_times(0.0) == []
     # 아주 짧은 영상도 한 장은 봐야 합니다.
     assert len(sample_times(0.4, step=1.0)) == 1
+
+
+def test_the_cascade_file_is_looked_for_where_the_image_puts_it(tmp_path, monkeypatch) -> None:
+    """opencv-python-headless에는 이 파일이 없습니다(CI 실측). 어디를 보는지 고정합니다."""
+    from worker.faces import CASCADE_NAME, MissingDependency, cascade_path
+
+    placed = tmp_path / CASCADE_NAME
+    placed.write_text("<opencv_storage/>", encoding="utf-8")
+    monkeypatch.setenv("R4_FACE_CASCADE", str(placed))
+    assert cascade_path() == placed
+
+    # 없으면 조용히 "얼굴 없음"이 아니라 무엇이 없는지 말해야 합니다. 그래야
+    # 설정을 켜 놓고도 왜 안 되는지 알 수 있습니다.
+    monkeypatch.setenv("R4_FACE_CASCADE", str(tmp_path / "없는파일.xml"))
+    monkeypatch.setattr("worker.faces.IMAGE_CASCADE", tmp_path / "역시없음.xml")
+    with pytest.raises(MissingDependency) as failure:
+        cascade_path()
+    assert "headless" in str(failure.value)
