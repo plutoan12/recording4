@@ -1,3 +1,10 @@
+## 2026-09-19: 실제 다국어 품질 검사 (Codex)
+
+- PR #24 병합 확인, 운영 체크아웃을 main c1c8827로 fast-forward. 이번 변경은 보고서뿐이며 애플리케이션 코드 수정 없음.
+- 실제 번역 12방향/48문장, 원음·시각 보존, SRT/VTT, 12개 영상 디코딩 확인. 내부 예산 정산 $0.0279. 결과물은 검수 대기이며 게시하지 않음.
+- 발견: 중국어 숫자 중간 줄바꿈, ko/ja→zh 녹화→녹음 용어 오역, 문체 불일치. ffsubsync 실제 음성 보정은 계속 실패; stable-ts는 시작 최대 오차 0.773초로 기존 1초 기준 통과.
+- [상세 보고서와 증거](quality/subtitles-2026-09-19/REPORT.md). 무검수 게시 품질 통과로 해석하지 말 것.
+
 ## 2026-09-19: 다국어 자막 전용 번역 (Codex)
 
 - PR: https://github.com/plutoan12/recording4/pull/24 . 로컬 운영 서버에 반영 완료(같은 영구 체크아웃). API·worker·dispatcher·monitor·web 재빌드/재시작, 모든 서비스 healthy. 네 언어 실제 FFmpeg 자막 렌더 및 오디오/비디오 디코딩 통과. GitHub Python/Web 검사 통과, 이미지/스택 CI는 기록 시점 진행 중으로 PR은 아직 미병합.
