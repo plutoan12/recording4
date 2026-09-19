@@ -30,7 +30,9 @@ import sys
 import wave
 from pathlib import Path
 
-import numpy as np
+# numpy는 **재는 쪽**에서만 씁니다. 표본 만들기(--make)는 러너에서 도는데
+# 거기에는 numpy가 없습니다. 맨 위에서 들이면 표본도 못 만듭니다(CI 실측:
+# ModuleNotFoundError: No module named 'numpy').
 
 TONE_HZ = 440.0
 RATE = 44100
@@ -84,8 +86,10 @@ def mix(voice: Path, music: Path, path: Path) -> Path:
     return path
 
 
-def samples(path: Path) -> np.ndarray:
+def samples(path: Path):  # noqa: ANN201 - numpy를 여기서만 들입니다.
     """WAV를 -1~1 사이 한 갈래 소리로 읽습니다."""
+    import numpy as np
+
     with wave.open(str(path), "rb") as handle:
         raw = handle.readframes(handle.getnframes())
         channels, width = handle.getnchannels(), handle.getsampwidth()
@@ -95,8 +99,10 @@ def samples(path: Path) -> np.ndarray:
     return data.reshape(-1, channels).mean(axis=1) if channels > 1 else data
 
 
-def powers(data: np.ndarray, rate: int) -> tuple[float, float]:
+def powers(data, rate: int) -> tuple[float, float]:  # noqa: ANN001
     """(순음 칸의 힘, 그 밖의 힘). 둘을 나눠 보면 무엇이 남았는지 보입니다."""
+    import numpy as np
+
     if not data.size:
         return 0.0, 0.0
     spectrum = np.abs(np.fft.rfft(data * np.hanning(data.size))) ** 2

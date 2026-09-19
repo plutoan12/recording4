@@ -211,6 +211,13 @@ jobs:
               'torchaudio에 HDEMUCS_HIGH_MUSDB_PLUS가 없습니다. worker/separation.py를 고쳐야 합니다.'
           )
           print('분리 갈래', bundle.sources if hasattr(bundle, 'sources') else '(모델을 받아야 알 수 있음)')
+          # 얼굴 검출이 cv2의 어느 부분을 쓰는지 매번 찍습니다. 캐스케이드 XML이
+          # 휠에 없던 것처럼, 있는 줄 알았던 것이 없을 수 있습니다.
+          import cv2
+          print('cv2', cv2.__version__, cv2.__file__)
+          print('CascadeClassifier 있음', hasattr(cv2, 'CascadeClassifier'))
+          print('FaceDetectorYN 있음', hasattr(cv2, 'FaceDetectorYN'))
+          print('얼굴 관련 이름', sorted(n for n in dir(cv2) if 'ascade' in n or 'FaceDetector' in n))
           "
 
       - name: API 이미지 빌드

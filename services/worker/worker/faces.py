@@ -68,6 +68,14 @@ def _cascade():  # noqa: ANN202 - cv2 타입을 여기서 들이지 않습니다
         raise MissingDependency(
             "OpenCV가 없습니다. pip install '.[analysis]'를 실행하세요."
         ) from exc
+    if not hasattr(cv2, "CascadeClassifier"):
+        # 설치된 cv2에 얼굴 검출(objdetect)이 빠져 있습니다. 파일을 받아 둬도
+        # 읽을 수가 없습니다. 무엇이 깔려 있는지 함께 적습니다.
+        raise MissingDependency(
+            f"이 cv2에는 CascadeClassifier가 없습니다(objdetect 없음). "
+            f"버전 {getattr(cv2, '__version__', '?')}, 자리 {getattr(cv2, '__file__', '?')}. "
+            "얼굴 검출을 쓰려면 objdetect가 든 OpenCV가 필요합니다."
+        )
     path = cascade_path()
     found = cv2.CascadeClassifier(str(path))
     if found.empty():
