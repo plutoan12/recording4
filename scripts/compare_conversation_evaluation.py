@@ -53,7 +53,7 @@ def compare(lock, baseline, candidate):
                 failures.append(dict(report=label, case=name, status=row["status"]))
         checked.append(rows)
     result = evaluate(baseline["cases"], candidate["cases"])
-    if failures:
+    if any(failure["report"] == "candidate" for failure in failures):
         result["verdict"] = "reject"
         result["reasons"].append("failed_or_rejected_cases_present")
     languages = {}

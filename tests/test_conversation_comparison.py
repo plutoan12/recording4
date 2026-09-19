@@ -168,3 +168,14 @@ def test_cli_revalidates_files_and_preserves_previous_evidence(corpus):  # noqa:
     assert result.returncode == 1
     assert "Traceback" not in result.stderr
     assert output.read_bytes() == before
+
+
+def test_recovered_baseline_failure_counts_as_gain(scores):
+    lock, baseline, candidate = scores
+    baseline["cases"][0].update(status="failed", word_correct=0, word_wrong=0, word_unresolved=10)
+    candidate["cases"][0].update(word_correct=8, word_wrong=0, word_unresolved=2)
+    result = module.compare(lock, baseline, candidate)
+    assert result["verdict"] == "improved_on_this_corpus"
+    assert result["failures"] == [{"report": "baseline", "case": "ko", "status": "failed"}]
+    assert result["languages"]["ko"]["total_characters"] == 10
+    assert result["delta"]["word_correct"] == 8

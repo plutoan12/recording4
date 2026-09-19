@@ -87,6 +87,8 @@ def prepare(manifest, root):
         if audio_sha in audio_digests:
             raise ValueError("Duplicate audio cannot count as a fresh case")
         with wave.open(str(audio), "rb") as wav:
+            if wav.getframerate() <= 0:
+                raise ValueError("Invalid WAV sample rate")
             duration = wav.getnframes() / wav.getframerate()
             if wav.getcomptype() != "NONE" or duration <= 0:
                 raise ValueError("Expected nonempty PCM WAV")
@@ -138,7 +140,7 @@ def prepare(manifest, root):
     return dict(
         schema=1,
         manifest_sha256=hashlib.sha256(encoded).hexdigest(),
-        policy=POLICY,
+        policy=dict(POLICY),
         ready_for_multilingual_evaluation=not missing,
         missing_languages=missing,
         deploy_allowed=False,

@@ -265,3 +265,29 @@ def test_extreme_json_number_is_rejected_as_invalid_interval(corpus):
     manifest["cases"][0]["evaluation_end"] = 10**400
     with pytest.raises(ValueError, match="interval"):
         module.prepare(manifest, root)
+
+
+def test_returned_lock_cannot_mutate_global_policy(corpus):
+    root, manifest = corpus
+    result = module.prepare(manifest, root)
+    result["policy"]["der_collar"] = 0.25
+    assert module.POLICY["der_collar"] == 0
+    assert module.prepare(manifest, root)["policy"]["der_collar"] == 0
+
+
+def test_zero_sample_rate_rejected_before_division(corpus, monkeypatch):
+    root, manifest = corpus
+
+    class BadWave:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+        def getframerate(self):
+            return 0
+
+    monkeypatch.setattr(module.wave, "open", lambda *args: BadWave())
+    with pytest.raises(ValueError, match="sample rate"):
+        module.prepare(manifest, root)
