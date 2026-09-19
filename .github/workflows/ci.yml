@@ -41,8 +41,10 @@ jobs:
           python-version: '3.11'
           cache: pip
 
+      # providers를 함께 설치합니다. 업로드 재개 규약 테스트가 실제 Google SDK를
+      # 가짜 서버에 붙여 돌기 때문입니다. torch를 끌어오지 않아 가볍습니다.
       - name: 의존성 설치
-        run: pip install -e ".[dev]"
+        run: pip install -e ".[dev,providers]"
 
       - name: 린트
         run: ruff check .
