@@ -228,6 +228,12 @@ jobs:
           place = getattr(getattr(cv2, 'data', None), 'haarcascades', None)
           names = sorted(os.listdir(place)) if place and os.path.isdir(place) else []
           print('cv2.data 자리', place, '/ 파일', len(names), names[:3])
+          # 하이라이트 추천은 이 SDK로 부릅니다. 깔렸다고 임포트되는 것은
+          # 아닙니다(cv2에 CascadeClassifier가 없던 일이 있었습니다). 부르지는
+          # 않습니다. 키가 없으면 대역 없이 아무것도 나가지 않습니다.
+          import anthropic
+          from worker.providers import HIGHLIGHT_MODEL
+          print('anthropic', anthropic.__version__, '/ 추천 모델', HIGHLIGHT_MODEL)
           " 2>&1 | tee -a "$RUNNER_TEMP/verify/deps.log"
 
       - name: API 이미지 빌드
