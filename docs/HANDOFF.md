@@ -72,6 +72,12 @@ Codex의 조건별 측정에서 남은 오차는 **한곳에 몰려 있습니다
 - `pytest -q`: **405 통과 / 2 skip**(SQLite). `ruff check`·`format --check`, `npm run typecheck`·`build` 통과.
 - **정렬 품질 자체는 이 환경에서 재지 못했습니다.** 프록시가 `download.pytorch.org`를 막아 CPU torch를 설치할 수 없고(PyPI 기본 휠은 CUDA 빌드라 `libcudart.so.13`이 없어 못 씁니다), `huggingface.co`도 막혀 한국어 표본을 받지 못합니다. 대역으로 배선만 확인했습니다.
 
+### main이 빨간불이던 것도 여기서 고칩니다
+
+PR #27 병합 뒤 main CI(run #248)가 **빨간불입니다.** `scripts/verify_sync_matrix.py`가 numpy를 모듈 수준에서 불러오는데 CI의 파이썬 잡은 `.[dev,providers]`만 설치해 numpy가 없습니다. `tests/test_verify_sync_matrix.py`의 검사 6개가 통째로 오류였습니다(제 새 검사 2개 포함).
+
+`dev` extra에 `numpy==2.4.6`을 넣었습니다. 건너뛰게 만들지 않았습니다 — 그러면 안 돌고도 초록불이 됩니다. CI와 같은 방식(`pip install -e ".[dev,providers]"`)으로 새 가상환경을 만들어 재현하고 고친 것을 확인했습니다.
+
 ### 남은 작업 — 기본값을 정하려면 이것부터
 
 **기본값은 아직 `shift`입니다.** align이 더 낫다는 근거가 없기 때문입니다. 지금 있는 한국어 숫자는 서로 다른 검사에서 나온 것이라 나란히 둘 수 없습니다(align 0.77/0.08/0.07초는 문장 3개·시작 시각만, shift 최대 0.50초는 조건 10종·시작과 끝 모두). **align의 최악값이 shift의 최악값보다 나쁩니다.**

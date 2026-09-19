@@ -40,6 +40,9 @@ dev = [
     "pytest==8.3.4",
     "httpx==0.28.1",
     "ruff==0.8.4",
+    # scripts/verify_sync_matrix.py가 씁니다. 없으면 그 테스트가 CI에서 통째로
+    # 오류가 납니다(건너뛰게 만들면 안 돌고도 초록불이 됩니다).
+    "numpy==2.4.6",
 ]
 
 [tool.setuptools]
