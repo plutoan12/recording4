@@ -6,7 +6,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 
@@ -26,6 +26,7 @@ from adminapi.outbox import enqueue
 from adminapi.storage import ObjectStorage, get_storage
 from pipeline.editing import Cue, EditSpec, suggest_clips
 from pipeline.states import JobState
+from pipeline.subtitle_files import MEDIA_TYPES, SubtitleFormat, subtitle_file
 from pipeline.subtitles import SubtitleRules, check
 from pipeline.time import as_utc
 
@@ -326,6 +327,44 @@ def create_clip(payload: ClipRequest, user: CurrentUser, session: SessionDep):
             kind="render",
             settings=spec.model_dump(),
         ),
+    )
+
+
+@router.get("/clips/{clip_edit_id}/subtitles")
+def clip_subtitles(
+    clip_edit_id: uuid.UUID,
+    user: CurrentUser,
+    session: SessionDep,
+    subtitle_format: SubtitleFormat = Query("srt", alias="format"),
+) -> Response:
+    """편집본 자막을 SRT·VTT 파일로 내려줍니다.
+
+    영상에 굽는 자막과 같은 규칙을 거치고 시각은 클립 시작이 0초입니다. 화면
+    제목은 자막이 아니므로 넣지 않습니다. 표시 규칙을 렌더 뒤에 바꿨다면 줄바꿈과
+    분할이 영상과 달라질 수 있습니다.
+    """
+    clip = session.get(ClipEdit, clip_edit_id)
+    if clip is None:
+        raise HTTPException(404, "편집본을 찾을 수 없습니다.")
+    # 편집본의 자막은 렌더 요청의 설정 사본에만 있습니다. 대본은 그 뒤로 바뀔 수
+    # 있으므로 최신 대본이 아니라 이 사본을 씁니다.
+    task = session.scalar(
+        select(MediaTask)
+        .where(MediaTask.clip_edit_id == clip_edit_id, MediaTask.kind == "render")
+        .order_by(MediaTask.created_at.desc())
+        .limit(1)
+    )
+    if task is None:
+        raise HTTPException(409, "편집본의 렌더 요청을 찾을 수 없습니다.")
+    text = subtitle_file(EditSpec.model_validate(task.settings), subtitle_format, subtitle_rules())
+    if not text.strip():
+        raise HTTPException(409, "이 편집본에는 내보낼 자막이 없습니다.")
+    return Response(
+        content=text,
+        media_type=f"{MEDIA_TYPES[subtitle_format]}; charset=utf-8",
+        headers={
+            "Content-Disposition": (f'attachment; filename="clip-{clip_edit_id}.{subtitle_format}"')
+        },
     )
 
 
