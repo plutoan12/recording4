@@ -232,7 +232,7 @@ jobs:
         run: |
           docker run --rm -v /tmp/align-sample:/audio -v "$PWD/scripts:/work:ro" \
             --entrypoint python recording4-worker:ci /work/verify_sync.py \
-            --directory /audio --offset 2.5
+            --directory /audio --offset 2.5 --language ko
 
       # 합성 음성만으로는 사람 목소리 정확도를 말할 수 없습니다. 공개 한국어
       # 낭독 음성을 받아 같은 검사를 한 번 더 돌립니다. 받지 못하면 실패합니다.
@@ -265,14 +265,23 @@ jobs:
       # 공급자라 시크릿이 필요 없습니다. 이게 통과해도 pyannote가 검증된 것은
       # 아닙니다. 둘은 다른 모델입니다. 우리 쪽 묶기·배정 규칙과 "두 목소리가
       # 실제로 갈리는가"를 실제 음성으로 확인하는 것입니다.
-      - name: 화자 분리 검증 (토큰 없는 공급자)
+      - name: 화자 분리 표본 준비
         if: |
+          env.HF_TOKEN != '' ||
           contains(github.event.pull_request.labels.*.name, 'verify-align') ||
           contains(github.event.head_commit.message, '[verify-align]')
         run: |
           sudo apt-get update && sudo apt-get install -y espeak-ng ffmpeg
           python3 scripts/make_two_speaker_sample.py --out /tmp/two-speaker \
             --human /tmp/human-sample
+          test -s /tmp/two-speaker/sample.wav
+          test -s /tmp/two-speaker/expected.json
+
+      - name: 화자 분리 검증 (토큰 없는 공급자)
+        if: |
+          contains(github.event.pull_request.labels.*.name, 'verify-align') ||
+          contains(github.event.head_commit.message, '[verify-align]')
+        run: |
           docker run --rm -v /tmp/two-speaker:/audio -v "$PWD/scripts:/work:ro" \
             --entrypoint python recording4-worker:ci \
             /work/verify_diarize.py --directory /audio --provider embedding --max-speakers 2

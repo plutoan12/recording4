@@ -1,0 +1,216 @@
+{
+  "profile": "long_cues",
+  "limit": 0.5,
+  "results": [
+    {
+      "variant": "short",
+      "cases": {
+        "0.0": {
+          "pass": true,
+          "max_error_seconds": 0.05,
+          "text_preserved": true,
+          "offset_seconds": 0.05,
+          "boundary_support": 0,
+          "recovery_used": false
+        },
+        "2.5": {
+          "pass": true,
+          "max_error_seconds": 0.05,
+          "text_preserved": true,
+          "offset_seconds": -2.45,
+          "boundary_support": 0,
+          "recovery_used": false
+        }
+      }
+    },
+    {
+      "variant": "long_repeated",
+      "cases": {
+        "0.0": {
+          "pass": true,
+          "max_error_seconds": 0.015,
+          "text_preserved": true,
+          "offset_seconds": 0.015,
+          "boundary_support": 9,
+          "recovery_used": false
+        },
+        "2.5": {
+          "pass": true,
+          "max_error_seconds": 0.015,
+          "text_preserved": true,
+          "offset_seconds": -2.485,
+          "boundary_support": 9,
+          "recovery_used": false
+        }
+      }
+    },
+    {
+      "variant": "dense",
+      "cases": {
+        "0.0": {
+          "pass": true,
+          "max_error_seconds": 0.014,
+          "text_preserved": true,
+          "offset_seconds": 0.014,
+          "boundary_support": 3,
+          "recovery_used": false
+        },
+        "2.5": {
+          "pass": true,
+          "max_error_seconds": 0.014,
+          "text_preserved": true,
+          "offset_seconds": -2.486,
+          "boundary_support": 3,
+          "recovery_used": false
+        }
+      }
+    },
+    {
+      "variant": "long_pauses",
+      "cases": {
+        "0.0": {
+          "pass": true,
+          "max_error_seconds": 0.0,
+          "text_preserved": true,
+          "offset_seconds": -0.0,
+          "boundary_support": 3,
+          "recovery_used": false
+        },
+        "2.5": {
+          "pass": true,
+          "max_error_seconds": 0.0,
+          "text_preserved": true,
+          "offset_seconds": -2.5,
+          "boundary_support": 3,
+          "recovery_used": false
+        }
+      }
+    },
+    {
+      "variant": "fast",
+      "cases": {
+        "0.0": {
+          "pass": true,
+          "max_error_seconds": 0.033,
+          "text_preserved": true,
+          "offset_seconds": 0.033,
+          "boundary_support": 3,
+          "recovery_used": false
+        },
+        "2.5": {
+          "pass": true,
+          "max_error_seconds": 0.033,
+          "text_preserved": true,
+          "offset_seconds": -2.467,
+          "boundary_support": 3,
+          "recovery_used": false
+        }
+      }
+    },
+    {
+      "variant": "slow",
+      "cases": {
+        "0.0": {
+          "pass": true,
+          "max_error_seconds": 0.004,
+          "text_preserved": true,
+          "offset_seconds": -0.004,
+          "boundary_support": 3,
+          "recovery_used": false
+        },
+        "2.5": {
+          "pass": true,
+          "max_error_seconds": 0.004,
+          "text_preserved": true,
+          "offset_seconds": -2.504,
+          "boundary_support": 3,
+          "recovery_used": false
+        }
+      }
+    },
+    {
+      "variant": "quiet_voice",
+      "cases": {
+        "0.0": {
+          "pass": true,
+          "max_error_seconds": 0.014,
+          "text_preserved": true,
+          "offset_seconds": 0.014,
+          "boundary_support": 3,
+          "recovery_used": true
+        },
+        "2.5": {
+          "pass": true,
+          "max_error_seconds": 0.014,
+          "text_preserved": true,
+          "offset_seconds": -2.486,
+          "boundary_support": 3,
+          "recovery_used": true
+        }
+      }
+    },
+    {
+      "variant": "noise_15db",
+      "cases": {
+        "0.0": {
+          "pass": true,
+          "max_error_seconds": 0.04,
+          "text_preserved": true,
+          "offset_seconds": 0.039,
+          "boundary_support": 3,
+          "recovery_used": false
+        },
+        "2.5": {
+          "pass": true,
+          "max_error_seconds": 0.04,
+          "text_preserved": true,
+          "offset_seconds": -2.461,
+          "boundary_support": 3,
+          "recovery_used": false
+        }
+      }
+    },
+    {
+      "variant": "noise_5db",
+      "cases": {
+        "0.0": {
+          "pass": true,
+          "max_error_seconds": 0.1,
+          "text_preserved": true,
+          "offset_seconds": 0.1,
+          "boundary_support": 0,
+          "recovery_used": false
+        },
+        "2.5": {
+          "pass": true,
+          "max_error_seconds": 0.1,
+          "text_preserved": true,
+          "offset_seconds": -2.4,
+          "boundary_support": 0,
+          "recovery_used": false
+        }
+      }
+    },
+    {
+      "variant": "music_intro",
+      "cases": {
+        "0.0": {
+          "pass": true,
+          "max_error_seconds": 0.045,
+          "text_preserved": true,
+          "offset_seconds": 0.045,
+          "boundary_support": 3,
+          "recovery_used": false
+        },
+        "2.5": {
+          "pass": true,
+          "max_error_seconds": 0.045,
+          "text_preserved": true,
+          "offset_seconds": -2.455,
+          "boundary_support": 3,
+          "recovery_used": false
+        }
+      }
+    }
+  ]
+}

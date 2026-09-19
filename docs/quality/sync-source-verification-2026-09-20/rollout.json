@@ -1,0 +1,129 @@
+{
+  "cases": [
+    {
+      "sample": "en-holdout-music_intro",
+      "offset": -0.73,
+      "rejected": true,
+      "reason": "원문 대사 정렬의 근거가 부족합니다. 기존 대본을 유지합니다.",
+      "source_unchanged": true
+    },
+    {
+      "sample": "en-holdout-music_intro",
+      "offset": 1.37,
+      "rejected": true,
+      "reason": "원문 대사 정렬의 근거가 부족합니다. 기존 대본을 유지합니다.",
+      "source_unchanged": true
+    },
+    {
+      "sample": "en-holdout-music_intro",
+      "offset": 4.12,
+      "rejected": true,
+      "reason": "원문 대사 정렬의 근거가 부족합니다. 기존 대본을 유지합니다.",
+      "source_unchanged": true
+    },
+    {
+      "sample": "en-holdout-slow",
+      "offset": -0.73,
+      "rejected": false,
+      "max_error": 0.3095,
+      "metadata": {
+        "offset_seconds": 0.421,
+        "framerate_scale": 1.0,
+        "profile": "quiet",
+        "verified_by": "source_text",
+        "source_language": "en",
+        "denoised": true,
+        "text_support": 8,
+        "boundary_support": 4,
+        "recovery_used": true,
+        "audio_normalized": true
+      },
+      "source_unchanged": true
+    },
+    {
+      "sample": "en-holdout-slow",
+      "offset": 1.37,
+      "rejected": false,
+      "max_error": 0.3095,
+      "metadata": {
+        "offset_seconds": -1.679,
+        "framerate_scale": 1.0,
+        "profile": "quiet",
+        "verified_by": "source_text",
+        "source_language": "en",
+        "denoised": true,
+        "text_support": 8,
+        "boundary_support": 4,
+        "recovery_used": true,
+        "audio_normalized": true
+      },
+      "source_unchanged": true
+    },
+    {
+      "sample": "en-holdout-slow",
+      "offset": 4.12,
+      "rejected": false,
+      "max_error": 0.3095,
+      "metadata": {
+        "offset_seconds": -4.429,
+        "framerate_scale": 1.0,
+        "profile": "quiet",
+        "verified_by": "source_text",
+        "source_language": "en",
+        "denoised": true,
+        "text_support": 8,
+        "boundary_support": 4,
+        "recovery_used": true,
+        "audio_normalized": true
+      },
+      "source_unchanged": true
+    },
+    {
+      "sample": "ja-short",
+      "offset": 0.0,
+      "rejected": false,
+      "max_error": 0.05,
+      "metadata": {
+        "offset_seconds": 0.05,
+        "framerate_scale": 1.0,
+        "vad": "",
+        "max_offset_seconds": 10.0,
+        "profile": "long_cues",
+        "audio_normalized": false,
+        "boundary_support": 0,
+        "recovery_used": false,
+        "verified_by": "source_text",
+        "source_language": "ja",
+        "denoised": false,
+        "text_support": 3
+      },
+      "source_unchanged": true
+    },
+    {
+      "sample": "ja-short",
+      "offset": 2.5,
+      "rejected": false,
+      "max_error": 0.05,
+      "metadata": {
+        "offset_seconds": -2.45,
+        "framerate_scale": 1.0,
+        "vad": "",
+        "max_offset_seconds": 10.0,
+        "profile": "long_cues",
+        "audio_normalized": false,
+        "boundary_support": 0,
+        "recovery_used": false,
+        "verified_by": "source_text",
+        "source_language": "ja",
+        "denoised": false,
+        "text_support": 3
+      },
+      "source_unchanged": true
+    }
+  ],
+  "source_hashes": {
+    "analysis.py": "9b7a6c1e448136fe304351dca6e350464fc0f28138e8ae5e8e4e81a272738ea6",
+    "sync_verification.py": "2bdfe66df52d9ade14532e9b86476c0a9ab37c8545013aabf8a7e96a0bfe0ada",
+    "media_tasks.py": "eb20729b18d25e083a865fde9d07f8a52f2ff0a80f0c8d5f34f9bb06cdd9e878"
+  }
+}

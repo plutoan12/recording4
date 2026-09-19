@@ -16,7 +16,8 @@ from pipeline.subtitle_files import dump_subtitles, parse_subtitles
 
 pytest.importorskip("ffsubsync", reason="subtitles extra가 있어야 보정기를 돌립니다.")
 
-from worker.analysis import SyncOptions, sync_subtitles  # noqa: E402
+from worker.analysis import SyncOptions  # noqa: E402
+from worker.analysis import _sync_acoustic as sync_subtitles  # noqa: E402
 
 TRUE_CUES = [
     Cue(start=5, end=7, text="첫 문장입니다"),

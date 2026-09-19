@@ -24,6 +24,7 @@ export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWo
   const [violations, setViolations] = useState<Violation[]>([])
   const [plainScript, setPlainScript] = useState('')
   const [syncProfile, setSyncProfile] = useState('standard')
+  const [syncLanguage, setSyncLanguage] = useState('')
   const [tasks, setTasks] = useState<Task[]>([])
   const [outputUrl, setOutputUrl] = useState('')
   const [previewed, setPreviewed] = useState('')
@@ -55,7 +56,7 @@ export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWo
   }
   async function loadSource(id: string) {
     selection.current = id
-    setAssetId(id); setSourceUrl(''); setSuggestions([]); setCaptions([])
+    setAssetId(id); setSourceUrl(''); setSuggestions([]); setCaptions([]); setSyncLanguage('')
     const asset = assets.find(a => a.id === id)
     setStart(0); setEnd(Math.min(30, Number(asset?.duration_seconds ?? 30)))
     if (!id) return
@@ -151,9 +152,14 @@ export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWo
           <option value="quiet">작은 음량·음량 차이 보정</option>
           <option value="long_cues">긴 문장 자막 보정</option>
         </select></label>
-        <p>작은 음량 보정은 분석용 오디오만 조정합니다. 긴 문장 보정은 자막 전체 길이를 비교합니다. 원음과 글자는 유지하며, 보정 후 앞·중간·끝의 싱크를 확인해 주세요.</p>
+        <label>원문 음성 언어 <select value={syncLanguage} disabled={busy} onChange={e => setSyncLanguage(e.target.value)}>
+          <option value="">원본에 등록한 언어</option>
+          <option value="ko">한국어</option><option value="en">영어</option>
+          <option value="ja">일본어</option><option value="zh">중국어</option>
+        </select></label>
+        <p>원문 대본으로 음성과 시각을 비교합니다. 번역된 자막은 원문 대본으로 넣지 마세요. 필요하면 분석용 사본의 잡음을 줄여 재시도하며, 원음과 글자는 유지합니다. 근거가 부족하거나 결과가 충돌하면 기존 대본을 유지합니다.</p>
         <button disabled={busy || !captions.length} onClick={() => void act(async () => {
-          await request(`/source-assets/${assetId}/transcript/sync?profile=${syncProfile}`, {method:'POST'})
+          await request(`/source-assets/${assetId}/transcript/sync?profile=${syncProfile}${syncLanguage ? `&language=${syncLanguage}` : ''}`, {method:'POST'})
           setMessage('싱크 보정을 요청했습니다. 완료 후 대본 다시 읽기로 새 버전을 확인하세요. 실패하면 기존 대본을 유지합니다.'); await refresh()
         })}>자막 싱크 보정 (원본 음성에 맞추기)</button>
       </details>

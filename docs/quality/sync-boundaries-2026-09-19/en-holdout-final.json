@@ -1,0 +1,265 @@
+{
+  "profile": "quiet",
+  "limit": 0.5,
+  "offsets": [
+    -0.73,
+    1.37,
+    4.12
+  ],
+  "results": [
+    {
+      "variant": "short",
+      "cases": {
+        "-0.73": {
+          "pass": true,
+          "max_error_seconds": 0.17,
+          "text_preserved": true,
+          "offset_seconds": 0.56,
+          "boundary_support": 3,
+          "recovery_used": true
+        },
+        "1.37": {
+          "pass": true,
+          "max_error_seconds": 0.17,
+          "text_preserved": true,
+          "offset_seconds": -1.54,
+          "boundary_support": 3,
+          "recovery_used": true
+        },
+        "4.12": {
+          "pass": true,
+          "max_error_seconds": 0.17,
+          "text_preserved": true,
+          "offset_seconds": -4.29,
+          "boundary_support": 3,
+          "recovery_used": true
+        }
+      }
+    },
+    {
+      "variant": "long_repeated",
+      "cases": {
+        "-0.73": {
+          "pass": true,
+          "max_error_seconds": 0.31,
+          "text_preserved": true,
+          "offset_seconds": 0.42,
+          "boundary_support": 15,
+          "recovery_used": true
+        },
+        "1.37": {
+          "pass": true,
+          "max_error_seconds": 0.31,
+          "text_preserved": true,
+          "offset_seconds": -1.68,
+          "boundary_support": 15,
+          "recovery_used": true
+        },
+        "4.12": {
+          "pass": true,
+          "max_error_seconds": 0.31,
+          "text_preserved": true,
+          "offset_seconds": -4.43,
+          "boundary_support": 15,
+          "recovery_used": true
+        }
+      }
+    },
+    {
+      "variant": "dense",
+      "cases": {
+        "-0.73": {
+          "pass": true,
+          "max_error_seconds": 0.24,
+          "text_preserved": true,
+          "offset_seconds": 0.49,
+          "boundary_support": 6,
+          "recovery_used": true
+        },
+        "1.37": {
+          "pass": true,
+          "max_error_seconds": 0.24,
+          "text_preserved": true,
+          "offset_seconds": -1.61,
+          "boundary_support": 6,
+          "recovery_used": true
+        },
+        "4.12": {
+          "pass": true,
+          "max_error_seconds": 0.24,
+          "text_preserved": true,
+          "offset_seconds": -4.36,
+          "boundary_support": 6,
+          "recovery_used": true
+        }
+      }
+    },
+    {
+      "variant": "long_pauses",
+      "cases": {
+        "-0.73": {
+          "pass": true,
+          "max_error_seconds": 0.185,
+          "text_preserved": true,
+          "offset_seconds": 0.545,
+          "boundary_support": 9,
+          "recovery_used": false
+        },
+        "1.37": {
+          "pass": true,
+          "max_error_seconds": 0.185,
+          "text_preserved": true,
+          "offset_seconds": -1.555,
+          "boundary_support": 9,
+          "recovery_used": false
+        },
+        "4.12": {
+          "pass": true,
+          "max_error_seconds": 0.185,
+          "text_preserved": true,
+          "offset_seconds": -4.305,
+          "boundary_support": 9,
+          "recovery_used": false
+        }
+      }
+    },
+    {
+      "variant": "fast",
+      "cases": {
+        "-0.73": {
+          "pass": true,
+          "max_error_seconds": 0.176,
+          "text_preserved": true,
+          "offset_seconds": 0.554,
+          "boundary_support": 6,
+          "recovery_used": true
+        },
+        "1.37": {
+          "pass": true,
+          "max_error_seconds": 0.176,
+          "text_preserved": true,
+          "offset_seconds": -1.546,
+          "boundary_support": 6,
+          "recovery_used": true
+        },
+        "4.12": {
+          "pass": true,
+          "max_error_seconds": 0.176,
+          "text_preserved": true,
+          "offset_seconds": -4.296,
+          "boundary_support": 6,
+          "recovery_used": true
+        }
+      }
+    },
+    {
+      "variant": "slow",
+      "cases": {
+        "-0.73": {
+          "pass": false,
+          "rejected": "\uc800\uc74c\ub7c9 \uc7ac\uc2dc\ub3c4\uc758 \ubcf4\uc815 \uadfc\uac70\uac00 \ubd80\uc871\ud569\ub2c8\ub2e4. \uae30\uc874 \ub300\ubcf8\uc744 \uc720\uc9c0\ud569\ub2c8\ub2e4."
+        },
+        "1.37": {
+          "pass": false,
+          "rejected": "\uc800\uc74c\ub7c9 \uc7ac\uc2dc\ub3c4\uc758 \ubcf4\uc815 \uadfc\uac70\uac00 \ubd80\uc871\ud569\ub2c8\ub2e4. \uae30\uc874 \ub300\ubcf8\uc744 \uc720\uc9c0\ud569\ub2c8\ub2e4."
+        },
+        "4.12": {
+          "pass": false,
+          "rejected": "\uc800\uc74c\ub7c9 \uc7ac\uc2dc\ub3c4\uc758 \ubcf4\uc815 \uadfc\uac70\uac00 \ubd80\uc871\ud569\ub2c8\ub2e4. \uae30\uc874 \ub300\ubcf8\uc744 \uc720\uc9c0\ud569\ub2c8\ub2e4."
+        }
+      }
+    },
+    {
+      "variant": "quiet_voice",
+      "cases": {
+        "-0.73": {
+          "pass": true,
+          "max_error_seconds": 0.24,
+          "text_preserved": true,
+          "offset_seconds": 0.49,
+          "boundary_support": 6,
+          "recovery_used": true
+        },
+        "1.37": {
+          "pass": true,
+          "max_error_seconds": 0.24,
+          "text_preserved": true,
+          "offset_seconds": -1.61,
+          "boundary_support": 6,
+          "recovery_used": true
+        },
+        "4.12": {
+          "pass": true,
+          "max_error_seconds": 0.24,
+          "text_preserved": true,
+          "offset_seconds": -4.36,
+          "boundary_support": 6,
+          "recovery_used": true
+        }
+      }
+    },
+    {
+      "variant": "noise_15db",
+      "cases": {
+        "-0.73": {
+          "pass": false,
+          "rejected": "\uc800\uc74c\ub7c9 \uc7ac\uc2dc\ub3c4\uc758 \ubcf4\uc815 \uadfc\uac70\uac00 \ubd80\uc871\ud569\ub2c8\ub2e4. \uae30\uc874 \ub300\ubcf8\uc744 \uc720\uc9c0\ud569\ub2c8\ub2e4."
+        },
+        "1.37": {
+          "pass": false,
+          "rejected": "\uc800\uc74c\ub7c9 \uc7ac\uc2dc\ub3c4\uc758 \ubcf4\uc815 \uadfc\uac70\uac00 \ubd80\uc871\ud569\ub2c8\ub2e4. \uae30\uc874 \ub300\ubcf8\uc744 \uc720\uc9c0\ud569\ub2c8\ub2e4."
+        },
+        "4.12": {
+          "pass": false,
+          "rejected": "\uc800\uc74c\ub7c9 \uc7ac\uc2dc\ub3c4\uc758 \ubcf4\uc815 \uadfc\uac70\uac00 \ubd80\uc871\ud569\ub2c8\ub2e4. \uae30\uc874 \ub300\ubcf8\uc744 \uc720\uc9c0\ud569\ub2c8\ub2e4."
+        }
+      }
+    },
+    {
+      "variant": "noise_5db",
+      "cases": {
+        "-0.73": {
+          "pass": false,
+          "rejected": "\uc800\uc74c\ub7c9 \uc7ac\uc2dc\ub3c4\uc758 \ubcf4\uc815 \uadfc\uac70\uac00 \ubd80\uc871\ud569\ub2c8\ub2e4. \uae30\uc874 \ub300\ubcf8\uc744 \uc720\uc9c0\ud569\ub2c8\ub2e4."
+        },
+        "1.37": {
+          "pass": false,
+          "rejected": "\uc800\uc74c\ub7c9 \uc7ac\uc2dc\ub3c4\uc758 \ubcf4\uc815 \uadfc\uac70\uac00 \ubd80\uc871\ud569\ub2c8\ub2e4. \uae30\uc874 \ub300\ubcf8\uc744 \uc720\uc9c0\ud569\ub2c8\ub2e4."
+        },
+        "4.12": {
+          "pass": false,
+          "rejected": "\uc800\uc74c\ub7c9 \uc7ac\uc2dc\ub3c4\uc758 \ubcf4\uc815 \uadfc\uac70\uac00 \ubd80\uc871\ud569\ub2c8\ub2e4. \uae30\uc874 \ub300\ubcf8\uc744 \uc720\uc9c0\ud569\ub2c8\ub2e4."
+        }
+      }
+    },
+    {
+      "variant": "music_intro",
+      "cases": {
+        "-0.73": {
+          "pass": false,
+          "max_error_seconds": 3.94,
+          "text_preserved": true,
+          "offset_seconds": -3.21,
+          "boundary_support": 0,
+          "recovery_used": false
+        },
+        "1.37": {
+          "pass": false,
+          "max_error_seconds": 3.94,
+          "text_preserved": true,
+          "offset_seconds": -5.31,
+          "boundary_support": 0,
+          "recovery_used": false
+        },
+        "4.12": {
+          "pass": false,
+          "max_error_seconds": 3.94,
+          "text_preserved": true,
+          "offset_seconds": -8.06,
+          "boundary_support": 0,
+          "recovery_used": false
+        }
+      }
+    }
+  ]
+}

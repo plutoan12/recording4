@@ -11,6 +11,7 @@ import argparse
 import contextlib
 import json
 import logging
+import math
 import subprocess
 import wave
 from pathlib import Path
@@ -145,6 +146,10 @@ def evaluate(
             "max_error_seconds": round(max(errors), 3),
             "text_preserved": same,
             "offset_seconds": meta["offset_seconds"],
+            "boundary_support": meta.get("boundary_support", 0),
+            "recovery_used": meta.get("recovery_used", False),
+            "verified_by": meta.get("verified_by"),
+            "denoised": meta.get("denoised", False),
         }
     except (ValueError, RuntimeError) as exc:
         return {"pass": False, "rejected": str(exc)}
@@ -156,7 +161,11 @@ def main() -> int:
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--limit", type=float, default=0.5)
     parser.add_argument("--profile", choices=["standard", "quiet", "long_cues"], default="standard")
+    parser.add_argument("--offsets", type=float, nargs="+", default=[0.0, 2.5])
+    parser.add_argument("--language", choices=["en", "ja", "ko", "zh"])
     args = parser.parse_args()
+    if any(not math.isfinite(value) for value in args.offsets):
+        parser.error("offsets는 유한한 초 단위 값이어야 합니다.")
     args.out.mkdir(parents=True, exist_ok=True)
     results = []
     for spec in VARIANTS:
@@ -167,7 +176,9 @@ def main() -> int:
             "cue_count": len(truth),
             "cases": {},
         }
-        for offset in (0.0, 2.5):
+        for offset in args.offsets:
+            if min(c.start for c in truth) + offset < 0:
+                parser.error("offsets가 기준 자막을 영상 시작 앞으로 옮깁니다.")
             with (
                 (args.out / spec[0] / f"{offset}.log").open("w") as log,
                 contextlib.redirect_stdout(log),
@@ -175,13 +186,22 @@ def main() -> int:
             ):
                 logging.disable(logging.CRITICAL)
                 entry["cases"][str(offset)] = evaluate(
-                    source, truth, offset, args.limit, SyncOptions(profile=args.profile)
+                    source,
+                    truth,
+                    offset,
+                    args.limit,
+                    SyncOptions(profile=args.profile, source_language=args.language),
                 )
                 logging.disable(logging.NOTSET)
         results.append(entry)
         (args.out / "results.json").write_text(
             json.dumps(
-                {"limit": args.limit, "profile": args.profile, "results": results},
+                {
+                    "limit": args.limit,
+                    "profile": args.profile,
+                    "offsets": args.offsets,
+                    "results": results,
+                },
                 ensure_ascii=False,
                 indent=2,
             )
