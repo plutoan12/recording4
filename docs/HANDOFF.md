@@ -1,5 +1,7 @@
 ## 2026-09-19: 원문 말투 유지·조건별 싱크 검증 (Codex)
 
+- [PR #27](https://github.com/plutoan12/recording4/pull/27)에 저장하고 운영 반영 완료. API·워커·관리화면 재빌드/재시작, 전체 서비스 healthy. 기존 18작업 조회에서 3작업에 문체 힌트를 표시했고 데이터 불변 확인. 운영 워커의 새 9문장 WAV 표본 재검증은 원본/2.5초 이동 모두 최대 0.01초, 길이 보존 통과.
+
 - 사용자 선택: 문체를 자동으로 바꾸지 않고 혼용 가능성만 검수 표시.
 - 브랜치 `codex/subtitle-style-sync-matrix`, PR #26 위 후속. 담당: pipeline/style_review, API/workflow, WorkflowPanel, worker/analysis, fetch_korean_speech, verify_sync_matrix, 관련 테스트·문서.
 - 작업 상세에 문체 종류/자막 번호 안내. 조회는 기존 자막·승인을 변경하지 않음. 인용문 제외 및 제한된 언어별 단서 검사.
