@@ -111,7 +111,7 @@
 - `/clips`: 구간·화면·자막·제목을 검증하고 불변 편집본 및 렌더 요청 생성.
 - `media.run` → Celery 워커: S3 다운로드 → 로컬 처리 → 결과 업로드 → DB 결과물 등록.
 - `/source-assets/{id}/analyze`: 로컬 STT 또는 장면 감지. 분석 의존성 설치가 필요하며 STT 첫 실행은 모델을 다운로드할 수 있습니다.
-- `/source-assets/{id}/transcript/import`: 밖에서 만든 SRT·WebVTT·ASS 파일을 대본 새 버전으로 들입니다. 형식은 pysubs2가 글자를 보고 판별하고, 꾸밈 표기는 벗깁니다. 시각은 파일에 적힌 그대로 씁니다.
+- `/source-assets/{id}/transcript/import`: 밖에서 만든 SRT·WebVTT·ASS 파일을 대본 새 버전으로 들입니다. 형식은 pysubs2가 글자를 보고 판별하고, 꾸밈 표기는 벗깁니다. 시각은 파일에 적힌 그대로 씁니다. 인코딩은 UTF-8·BOM까지만 스스로 판단하고, 그 밖에는 후보별 미리보기를 주어 사람이 고릅니다.
 - YouTube 자막 트랙: 게시할 때 같은 자막을 `captions.insert`로 올립니다(`R4_YOUTUBE_CAPTIONS_ENABLED`, 기본 꺼짐). 같은 언어 트랙이 이미 있으면 올리지 않고, 실패해도 게시를 막지 않습니다.
 - `/clips/{id}/subtitles?format=srt|vtt`, `/jobs/{id}/subtitles?format=srt|vtt`: 숏폼 편집본과 번역·더빙 작업의 자막을 SRT·WebVTT 파일로 내려받습니다. 생성은 `pipeline/subtitle_files.py:subtitle_file()`이며 pysubs2가 형식을 씁니다. 저장하지 않고 요청할 때 만듭니다.
 

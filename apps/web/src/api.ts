@@ -104,6 +104,40 @@ export async function downloadFile(path: string, filename: string): Promise<void
   URL.revokeObjectURL(url)
 }
 
+export type EncodingChoice = { encoding: string; preview: string }
+export type ImportResult =
+  | { ok: true; version: number; count: number; skipped: string[]; violations: {index:number;kind:string;detail:string}[] }
+  | { ok: false; message: string; choices: EncodingChoice[] }
+
+export async function importSubtitles(
+  assetId: string,
+  file: File,
+  encoding?: string,
+): Promise<ImportResult> {
+  // 파일은 바이트 그대로 보냅니다. 브라우저가 글자로 먼저 바꾸면 UTF-8이 아닌
+  // 파일(한국어 자막에 흔한 CP949)이 그 자리에서 깨집니다.
+  const bytes = new Uint8Array(await file.arrayBuffer())
+  let binary = ''
+  for (const byte of bytes) binary += String.fromCharCode(byte)
+  const token = getToken()
+  const response = await fetch(`${BASE}/source-assets/${assetId}/transcript/import`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify({ content_base64: btoa(binary), ...(encoding ? { encoding } : {}) }),
+  })
+  const body = await response.json().catch(() => undefined)
+  if (response.ok) return { ok: true, ...body }
+  const detail = body?.detail
+  // 인코딩을 고르라는 응답은 실패가 아니라 다음 단계입니다.
+  if (detail && typeof detail === 'object' && Array.isArray(detail.choices)) {
+    return { ok: false, message: detail.message, choices: detail.choices }
+  }
+  throw new ApiError(response.status, typeof detail === 'string' ? detail : `자막을 들이지 못했습니다 (${response.status})`)
+}
+
 export async function login(email: string, password: string): Promise<void> {
   const body = await request<{ access_token: string }>('/auth/login', {
     method: 'POST',

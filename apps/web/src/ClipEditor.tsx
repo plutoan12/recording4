@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { downloadFile, request, type SourceAsset } from './api'
+import { downloadFile, importSubtitles, request, type EncodingChoice, type ImportResult, type SourceAsset } from './api'
 import { PublicationForm } from './PublicationForm'
 import type { WorkflowDraft } from './WorkflowPanel'
 
@@ -27,6 +27,7 @@ export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWo
   const [previewId, setPreviewId] = useState('')
   const [approvedId,setApprovedId] = useState('')
   const [message, setMessage] = useState('')
+  const [pending, setPending] = useState<{file: File; choices: EncodingChoice[]} | null>(null)
   const [busy, setBusy] = useState(false)
   const video = useRef<HTMLVideoElement>(null)
   const selection = useRef('')
@@ -60,6 +61,21 @@ export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWo
       ])
       if (selection.current !== id) return
       setSourceUrl(preview.url); setCaptions(cues)
+    })
+  }
+  async function bring(file: File, encoding?: string) {
+    await act(async () => {
+      const imported: ImportResult = await importSubtitles(assetId, file, encoding)
+      if (!imported.ok) {
+        setPending({file, choices: imported.choices})
+        setMessage(imported.message)
+        return
+      }
+      setPending(null)
+      setCaptions(await request<Cue[]>(`/source-assets/${assetId}/transcript`))
+      setViolations(imported.violations)
+      setMessage(`자막 ${imported.count}개를 대본 ${imported.version}번으로 들였습니다.`
+        + (imported.skipped.length ? ` 뺀 자막 ${imported.skipped.length}개: ${imported.skipped.join(' ')}` : ''))
     })
   }
   function updateCue(index: number, patch: Partial<Cue>) {
@@ -104,16 +120,16 @@ export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWo
         <input type="file" accept=".srt,.vtt,.ass,.ssa,text/plain" disabled={busy} onChange={e => {
           const file = e.target.files?.[0]
           e.target.value = ''
-          if (!file) return
-          void act(async () => {
-            const imported = await request<{version:number;count:number;skipped:string[];violations:Violation[]}>(
-              `/source-assets/${assetId}/transcript/import`, {method:'POST', body: JSON.stringify({text: await file.text()})})
-            setCaptions(await request<Cue[]>(`/source-assets/${assetId}/transcript`))
-            setViolations(imported.violations)
-            setMessage(`자막 ${imported.count}개를 대본 ${imported.version}번으로 들였습니다.`
-              + (imported.skipped.length ? ` 뺀 자막 ${imported.skipped.length}개: ${imported.skipped.join(' ')}` : ''))
-          })
+          if (file) void bring(file)
         }} />
+        {pending && <div className="error">
+          <p>이 파일의 인코딩을 알 수 없습니다. <b>글자가 제대로 보이는 것</b>을 고르세요. 잘못 고르면 깨진 채로 저장됩니다.</p>
+          {pending.choices.map(choice => <button key={choice.encoding} disabled={busy}
+            onClick={() => void bring(pending.file, choice.encoding)}>
+            {choice.encoding}: {choice.preview}
+          </button>)}
+          <button disabled={busy} onClick={() => setPending(null)}>취소</button>
+        </div>}
       </details>
       <details>
         <summary>시간 없는 대본 붙여넣기</summary>

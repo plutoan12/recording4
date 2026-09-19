@@ -1,3 +1,4 @@
+import base64
 import uuid
 from decimal import Decimal
 
@@ -240,6 +241,11 @@ def test_broken_rules_record_falls_back_instead_of_failing() -> None:
     assert source == "rendered" and rules.max_chars_per_line == 9
 
 
+def upload(text: str, encoding: str = "utf-8") -> dict:
+    """브라우저가 보내는 모양대로 파일 바이트를 base64로 싣습니다."""
+    return {"content_base64": base64.b64encode(text.encode(encoding)).decode()}
+
+
 def test_imported_subtitles_become_a_new_transcript_version(client, auth_headers, asset):
     """밖에서 만든 자막 파일을 대본으로 들입니다. 기존 버전은 남습니다."""
     path = f"/source-assets/{asset.id}/transcript"
@@ -248,7 +254,7 @@ def test_imported_subtitles_become_a_new_transcript_version(client, auth_headers
     )
     srt = "1\n00:00:03,000 --> 00:00:05,000\n들여온 자막\n둘째 줄\n"
 
-    response = client.post(f"{path}/import", headers=auth_headers, json={"text": srt})
+    response = client.post(f"{path}/import", headers=auth_headers, json=upload(srt))
     assert response.status_code == 200, response.text
     body = response.json()
     assert body["version"] == 2 and body["count"] == 1 and body["skipped"] == []
@@ -259,16 +265,58 @@ def test_imported_subtitles_become_a_new_transcript_version(client, auth_headers
 
 def test_import_reports_what_it_skipped_and_refuses_what_it_cannot_use(client, auth_headers, asset):
     path = f"/source-assets/{asset.id}/transcript/import"
-    assert client.post(path, json={"text": "x"}).status_code == 401
-    assert client.post(path, headers=auth_headers, json={"text": "자막 아님"}).status_code == 422
+    assert client.post(path, json=upload("x")).status_code == 401
+    assert client.post(path, headers=auth_headers, json=upload("자막 아님")).status_code == 422
+    assert (
+        client.post(path, headers=auth_headers, json={"content_base64": "***"}).status_code == 422
+    )
 
     # 원본 길이(120초)를 넘는 자막은 저장하지 않습니다.
     too_long = "1\n00:02:30,000 --> 00:02:35,000\n원본보다 뒤\n"
-    assert client.post(path, headers=auth_headers, json={"text": too_long}).status_code == 422
+    assert client.post(path, headers=auth_headers, json=upload(too_long)).status_code == 422
 
     mixed = (
         "1\n00:00:01,000 --> 00:00:02,000\n쓸 자막\n\n2\n00:00:03,000 --> 00:00:03,000\n길이 0\n"
     )
-    body = client.post(path, headers=auth_headers, json={"text": mixed}).json()
+    body = client.post(path, headers=auth_headers, json=upload(mixed)).json()
     assert body["count"] == 1
     assert len(body["skipped"]) == 1 and "2번" in body["skipped"][0]
+
+
+def test_a_cp949_file_asks_which_encoding_instead_of_saving_broken_text(
+    client, auth_headers, asset
+):
+    """UTF-8이 아닌 파일은 추측해서 저장하지 않습니다. 후보를 미리보기와 함께 돌려줍니다.
+
+    잘못 고르면 글자가 조용히 깨진 채로 저장되고 나중에 영상에 그대로 구워집니다.
+    이름만 보고는 못 골라도 자기 자막 글자는 알아봅니다.
+    """
+    path = f"/source-assets/{asset.id}/transcript/import"
+    srt = "1\n00:00:01,000 --> 00:00:02,000\n안녕하세요 자막입니다\n"
+
+    asked = client.post(path, headers=auth_headers, json=upload(srt, "cp949"))
+    assert asked.status_code == 422
+    detail = asked.json()["detail"]
+    assert "인코딩" in detail["message"]
+    correct = [c for c in detail["choices"] if c["preview"] == "안녕하세요 자막입니다"]
+    assert correct and correct[0]["encoding"] == "cp949"
+    # 글자가 깨져 보이는 후보도 함께 보여 주어 사람이 고를 수 있게 합니다.
+    assert len(detail["choices"]) > 1
+    assert client.get(f"/source-assets/{asset.id}/transcript", headers=auth_headers).json() == []
+
+    saved = client.post(
+        path, headers=auth_headers, json={**upload(srt, "cp949"), "encoding": "cp949"}
+    )
+    assert saved.status_code == 200 and saved.json()["count"] == 1
+    assert client.get(f"/source-assets/{asset.id}/transcript", headers=auth_headers).json() == [
+        {"start": 1.0, "end": 2.0, "text": "안녕하세요 자막입니다"}
+    ]
+
+
+def test_a_wrong_encoding_choice_is_reported_not_saved(client, auth_headers, asset):
+    path = f"/source-assets/{asset.id}/transcript/import"
+    srt = "1\n00:00:01,000 --> 00:00:02,000\n안녕하세요\n"
+    response = client.post(
+        path, headers=auth_headers, json={**upload(srt, "cp949"), "encoding": "utf-8"}
+    )
+    assert response.status_code == 422 and "utf-8" in response.json()["detail"]

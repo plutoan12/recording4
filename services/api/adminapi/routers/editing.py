@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
 import uuid
 from datetime import UTC, datetime
 from typing import Literal
@@ -28,7 +30,13 @@ from adminapi.storage import ObjectStorage, get_storage
 from adminapi.subtitle_rules import subtitle_rules
 from pipeline.editing import Cue, EditSpec, suggest_clips
 from pipeline.states import JobState
-from pipeline.subtitle_files import MEDIA_TYPES, SubtitleFormat, parse_subtitles
+from pipeline.subtitle_files import (
+    MEDIA_TYPES,
+    SubtitleFormat,
+    UnknownEncoding,
+    decode_subtitles,
+    parse_subtitles,
+)
 from pipeline.subtitles import check
 from pipeline.time import as_utc
 
@@ -137,9 +145,14 @@ def put_transcript(
 
 
 class SubtitleImportRequest(BaseModel):
-    """밖에서 만든 자막 파일. 형식은 글자를 보고 판별합니다."""
+    """밖에서 만든 자막 파일. 형식은 글자를 보고 판별합니다.
 
-    text: str = Field(min_length=1, max_length=2_000_000)
+    파일은 바이트 그대로(base64) 받습니다. 브라우저가 글자로 먼저 바꾸면 UTF-8이
+    아닌 파일(한국어 자막에 흔한 CP949)이 그 자리에서 깨집니다.
+    """
+
+    content_base64: str = Field(min_length=1, max_length=2_000_000)
+    encoding: str | None = Field(default=None, max_length=32, pattern=r"^[A-Za-z0-9_.:-]+$")
 
 
 @router.post("/source-assets/{asset_id}/transcript/import")
@@ -147,6 +160,10 @@ def import_subtitles(
     asset_id: uuid.UUID, payload: SubtitleImportRequest, user: CurrentUser, session: SessionDep
 ):
     """SRT·WebVTT·ASS 파일을 읽어 대본 새 버전으로 저장합니다.
+
+    인코딩은 파일이 밝힌 표시(BOM)와 UTF-8까지만 스스로 판단합니다. 거기서
+    실패하면 **추측하지 않고** 후보마다 첫 자막이 어떻게 보이는지 붙여 422로
+    돌려줍니다. 글자가 제대로 보이는 것을 골라 `encoding`에 넣어 다시 부르세요.
 
     시각은 **파일에 적힌 그대로** 씁니다. 원본 음성과 맞는지는 확인하지 않습니다.
     다른 판본에서 만든 자막이면 통째로 어긋날 수 있으니 편집기에서 확인하세요.
@@ -156,7 +173,23 @@ def import_subtitles(
     """
     asset = asset_for_edit(session, asset_id)
     try:
-        cues, notes = parse_subtitles(payload.text)
+        data = base64.b64decode(payload.content_base64, validate=True)
+    except (ValueError, binascii.Error):
+        raise HTTPException(422, "자막 파일을 읽지 못했습니다. 다시 올려 주세요.") from None
+    try:
+        text = decode_subtitles(data, payload.encoding)
+        cues, notes = parse_subtitles(text)
+    except UnknownEncoding as exc:
+        raise HTTPException(
+            422,
+            {
+                "message": str(exc),
+                "choices": [
+                    {"encoding": choice.encoding, "preview": choice.preview}
+                    for choice in exc.choices
+                ],
+            },
+        ) from None
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from None
     return {**save_transcript(session, asset, cues), "skipped": notes}

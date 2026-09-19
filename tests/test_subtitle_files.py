@@ -7,7 +7,9 @@ from pipeline.editing import Cue, EditSpec
 from pipeline.subtitle_files import (
     FORMATS,
     MEDIA_TYPES,
+    UnknownEncoding,
     clip_subtitle_file,
+    decode_subtitles,
     parse_subtitles,
     subtitle_file,
 )
@@ -167,3 +169,39 @@ def test_import_round_trips_what_we_export():
     again, notes = parse_subtitles(exported)
     assert [c.model_dump() for c in again] == [c.model_dump() for c in cues]
     assert notes == []
+
+
+def test_decode_reads_utf8_and_files_that_declare_themselves():
+    """BOM이 있으면 파일이 스스로 밝힌 것이라 추측할 필요가 없습니다."""
+    text = "1\n00:00:01,000 --> 00:00:02,000\n안녕하세요\n"
+    assert decode_subtitles(text.encode("utf-8")) == text
+    assert decode_subtitles(text.encode("utf-8-sig")) == text
+    assert decode_subtitles(text.encode("utf-16")) == text
+
+
+def test_decode_asks_instead_of_guessing_a_legacy_encoding():
+    """CP949를 UTF-8로 읽으면 실패합니다. 여기서 추측하면 글자가 조용히 깨집니다."""
+    text = "1\n00:00:01,000 --> 00:00:02,000\n안녕하세요 자막입니다\n"
+    with pytest.raises(UnknownEncoding) as caught:
+        decode_subtitles(text.encode("cp949"))
+    choices = {choice.encoding: choice.preview for choice in caught.value.choices}
+    assert choices["cp949"] == "안녕하세요 자막입니다"
+    # 글자가 깨져 보이는 후보도 함께 내놓아 사람이 보고 고를 수 있게 합니다.
+    assert len(choices) > 1
+    assert all(choice.preview for choice in caught.value.choices)
+
+
+def test_decode_uses_the_encoding_it_is_given():
+    text = "1\n00:00:01,000 --> 00:00:02,000\n안녕하세요\n"
+    assert decode_subtitles(text.encode("cp949"), "cp949") == text
+    with pytest.raises(ValueError):
+        decode_subtitles(text.encode("cp949"), "utf-8")
+    with pytest.raises(ValueError):
+        decode_subtitles(text.encode("utf-8"), "그런 인코딩 없음")
+
+
+def test_decode_offers_only_candidates_that_parse_as_subtitles():
+    """자막으로 읽히지 않는 후보는 내놓지 않습니다. 고를 수 없는 선택지입니다."""
+    with pytest.raises(UnknownEncoding) as caught:
+        decode_subtitles("자막이 아닌 한국어 글".encode("cp949"))
+    assert caught.value.choices == []

@@ -3,7 +3,8 @@
 순수 계산만 둡니다. 파일을 읽거나 쓰지 않고 문자열만 돌려줍니다. 파일 형식
 변환은 이미 쓰고 있는 pysubs2가 맡습니다(근거는 docs/TECH_DECISIONS.md).
 
-밖에서 만든 자막 파일을 읽어 대본으로 들이는 일도 여기서 합니다(`parse_subtitles`).
+밖에서 만든 자막 파일을 읽어 대본으로 들이는 일도 여기서 합니다(`decode_subtitles`로
+글자를 찾고 `parse_subtitles`로 자막을 읽습니다).
 
 내보내는 자막은 영상에 굽는 자막과 같습니다. 구간 밖 자막을 빼고, 시각을 출력
 시작 기준으로 옮기고(`clip_cues`), 같은 표시 규칙으로 줄바꿈·분할합니다
@@ -16,6 +17,8 @@
 
 from __future__ import annotations
 
+import codecs
+from dataclasses import dataclass
 from typing import Literal, get_args
 
 import pysubs2
@@ -123,3 +126,88 @@ def parse_subtitles(text: str) -> tuple[list[Cue], list[str]]:
     if not cues:
         raise ValueError("읽을 수 있는 자막이 없습니다. 파일을 확인하세요.")
     return sorted(cues, key=lambda c: c.start), notes
+
+
+# 들일 때 시험해 보는 인코딩. 한국어 자막에 흔한 CP949를 UTF-8 다음에 둡니다.
+# CP949는 EUC-KR을 포함하므로 EUC-KR은 따로 두지 않습니다(결과가 같습니다).
+IMPORT_ENCODINGS = ("utf-8", "cp949", "shift_jis", "gb18030", "cp1252")
+
+PREVIEW_CHARS = 40
+
+
+@dataclass(frozen=True, slots=True)
+class EncodingChoice:
+    """후보 인코딩과, 그것으로 읽었을 때 첫 자막이 어떻게 보이는지."""
+
+    encoding: str
+    preview: str
+
+
+class UnknownEncoding(ValueError):
+    """인코딩을 알 수 없습니다. 추측하지 않고 후보를 들어 사람에게 넘깁니다."""
+
+    def __init__(self, choices: list[EncodingChoice]) -> None:
+        super().__init__("자막 파일의 인코딩을 알 수 없습니다. 글자가 제대로 보이는 것을 고르세요.")
+        self.choices = choices
+
+
+def _bom_encoding(data: bytes) -> str | None:
+    """파일이 스스로 밝힌 인코딩. 표시가 있으면 추측할 필요가 없습니다."""
+    for bom, name in (
+        (codecs.BOM_UTF8, "utf-8-sig"),
+        (codecs.BOM_UTF32_LE, "utf-32"),
+        (codecs.BOM_UTF32_BE, "utf-32"),
+        (codecs.BOM_UTF16_LE, "utf-16"),
+        (codecs.BOM_UTF16_BE, "utf-16"),
+    ):
+        if data.startswith(bom):
+            return name
+    return None
+
+
+def _preview(text: str) -> str | None:
+    """그 인코딩으로 읽은 첫 자막. 자막으로 읽히지 않으면 후보로 내놓지 않습니다."""
+    try:
+        cues, _ = parse_subtitles(text)
+    except ValueError:
+        return None
+    return cues[0].text[:PREVIEW_CHARS]
+
+
+def decode_subtitles(data: bytes, encoding: str | None = None) -> str:
+    """자막 파일 바이트를 글자로 바꿉니다.
+
+    인코딩을 정해 주면 그것으로만 읽습니다. 안 주면 파일이 밝힌 표시(BOM)와
+    UTF-8까지만 스스로 판단합니다.
+
+    **거기서 실패하면 추측하지 않습니다.** 인코딩을 잘못 고르면 글자가 조용히
+    깨진 채로 저장되고, 나중에 영상에 그대로 구워집니다. 대신 후보마다 첫 자막이
+    어떻게 보이는지 붙여 `UnknownEncoding`으로 올립니다. 이름(CP949·EUC-KR)만
+    보고는 고를 수 없어도 자기 자막 글자는 알아봅니다.
+    """
+    if encoding:
+        try:
+            return data.decode(encoding)
+        except (UnicodeDecodeError, LookupError) as exc:
+            raise ValueError(f"{encoding}으로 읽지 못했습니다: {type(exc).__name__}") from None
+    marked = _bom_encoding(data)
+    if marked:
+        return data.decode(marked)
+    try:
+        return data.decode("utf-8")
+    except UnicodeDecodeError:
+        pass
+    choices: list[EncodingChoice] = []
+    seen: set[str] = set()
+    for candidate in IMPORT_ENCODINGS:
+        try:
+            text = data.decode(candidate)
+        except (UnicodeDecodeError, LookupError):
+            continue
+        preview = _preview(text)
+        # 같은 글자가 나오는 후보는 한 번만 보여 줍니다(CP949와 EUC-KR 등).
+        if preview is None or preview in seen:
+            continue
+        seen.add(preview)
+        choices.append(EncodingChoice(candidate, preview))
+    raise UnknownEncoding(choices)
