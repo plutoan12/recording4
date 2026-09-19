@@ -135,6 +135,19 @@ def test_the_limits_come_from_a_real_measurement() -> None:
         assert limit_for(row.name) == pytest.approx(MEASURED_CER[row.name] + HEADROOM)
 
 
+def test_repeated_measurements_report_the_worst_value_and_the_spread() -> None:
+    """한 번 잰 값으로 상한을 적으면 다음 실행이 우연히 넘습니다. 가장 나쁜 값과
+    폭을 남겨야 그 값이 얼마나 믿을 만한지 보입니다."""
+    import sys
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+    from verify_robust import spread, worst
+
+    assert worst([0.104, 0.134, 0.112]) == pytest.approx(0.134)
+    assert spread([0.104, 0.134, 0.112]) == pytest.approx(0.030)
+    assert spread([0.2]) == 0.0
+
+
 def test_the_partial_window_sits_in_the_middle_and_leaves_both_sides() -> None:
     """앞뒤가 남아야 화자별 전사가 무엇을 살리는지 보입니다."""
     begin, end = partial_window(30.0)
@@ -149,9 +162,16 @@ def test_an_unmeasured_condition_gets_no_invented_limit() -> None:
 
 
 def test_the_limits_get_harder_as_the_condition_gets_harder() -> None:
-    """쉬운 조건의 상한이 어려운 조건보다 높으면 순서가 뒤집힌 것입니다."""
+    """원음 ≤ 소음 ≤ 겹말이어야 합니다. 뒤집혔으면 잰 것이 잘못됐습니다.
+
+    소음 조건끼리는 순서를 묻지 않습니다. 전사기가 같은 소리에도 ±3%p쯤
+    다르게 답해서(실측: 20dB 13.4%, 10dB 10.4%, 5dB 13.4%) 가까운 조건은
+    자리가 바뀝니다. 겹말은 조건 사이 차이가 커서 순서를 묻습니다.
+    """
     from pipeline.noise import MEASURED_CER
 
-    order = ["clean", "noise20", "noise10", "noise5", "noise0", "speech10", "speech5", "speech0"]
-    values = [MEASURED_CER[name] for name in order]
-    assert values == sorted(values)
+    noise = [MEASURED_CER[f"noise{snr:g}"] for snr in NOISE_SNRS]
+    speech = [MEASURED_CER[f"speech{snr:g}"] for snr in SPEECH_SNRS]
+    assert MEASURED_CER["clean"] <= min(noise)
+    assert max(noise) <= min(speech)
+    assert speech == sorted(speech)

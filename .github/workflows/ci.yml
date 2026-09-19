@@ -366,10 +366,15 @@ jobs:
       # 뒤에서부터 읽는 도구에 안 잡힙니다. 마지막 단계가 다시 모아 찍습니다.
       # 전사 품질은 깨끗한 낭독 음성으로만 쟀습니다. 실제 영상에는 소음이 깔리고
       # 사람들이 말을 겹쳐 합니다. 거기서 몇 점인지 모르면 "정확도를 올렸다"고
-      # 말할 수 없습니다. --compare는 후보 손잡이로 한 번 더 재서 견줍니다.
-      # 한계는 2026-09-19 실측 + 10%p입니다(pipeline.noise.MEASURED_CER).
-      # --denoise(분리 후 전사)는 재 보고 **뺐습니다.** 소음에서 오히려
-      # 나빠졌고(0dB에서 +20.1%p) 오래 걸립니다. 손으로 다시 재려면 붙이세요.
+      # 말할 수 없습니다. 한계는 2026-09-19 실측 + 10%p입니다
+      # (pipeline.noise.MEASURED_CER).
+      # 재 보고 **뺀 후보**: --compare(condition_on_previous_text=False, 여섯
+      # 조건 모두 차이 0), --denoise(분리 후 전사, 소음 0dB에서 +20.1%p, 느림).
+      # 손으로 다시 재려면 붙이세요.
+      # 전사기는 같은 소리에도 매번 다르게 답합니다(씨앗 고정 뒤에도 소음 5dB
+      # 17.2% → 13.4%, 고정 파일인 겹말 0dB 116.4% → 98.5%). --repeat 3은 조건마다
+      # 세 번 받아써 가장 나쁜 값과 폭을 남기고, --seed-decoder는 디코더 난수를
+      # 고정한 설정을 나란히 재서 그 폭이 난수에서 오는지 봅니다.
       - name: 소음·겹말 전사 검증
         if: |
           !cancelled() && (
@@ -384,7 +389,7 @@ jobs:
           # 표시를 잽니다. 토큰이 있으면 pyannote, 없으면 embedding으로 나눕니다.
           docker run --rm -v /tmp/human-sample:/audio -v "$PWD/scripts:/work:ro" \
             -e R4_HF_TOKEN --entrypoint python recording4-worker:ci /work/verify_robust.py \
-            --directory /audio --model small --compare --by-speaker \
+            --directory /audio --model small --repeat 3 --seed-decoder --by-speaker \
             2>&1 | tee -a "$RUNNER_TEMP/verify/robust.log"
 
       - name: 배경음 분리 검증

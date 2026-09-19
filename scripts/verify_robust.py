@@ -19,6 +19,13 @@
 겹말에 쓸 목소리는 `interference.wav`입니다. 같은 말뭉치의 **다른 문장**이라
 대상의 원문에 없는 말입니다. 그래서 끼어든 말을 받아쓰면 CER이 올라갑니다.
 파일이 없으면 겹말은 **재지 않습니다.** 조용히 건너뛰고 통과시키지 않습니다.
+
+**같은 소리를 여러 번 받아씁니다.** 전사기는 같은 소리에도 매번 조금 다르게
+답합니다(실측: 씨앗을 고정한 잡음에서도 소음 5dB가 17.2% → 13.4%, 고정 파일인
+겹말 0dB가 116.4% → 98.5%). 한 번 잰 값으로 상한을 적으면 다음 실행이 우연히
+넘습니다. `--repeat N`은 조건마다 N번 받아써서 **가장 나쁜 값과 폭**을 남기고,
+`--seed-decoder`는 디코더 난수를 고정한 설정을 나란히 재서 그 폭이 정말
+난수에서 오는지 봅니다.
 """
 
 from __future__ import annotations
@@ -66,10 +73,33 @@ def loudness(path: Path) -> float:
 # 17.2% → 14.2%). 그러면 회귀인지 잡음이 달라진 것인지 구분할 수 없습니다.
 NOISE_SEED = 20260919
 
+# 디코더 난수 씨앗. faster-whisper는 첫 시도가 미덥지 않으면 온도를 올려 다시
+# 뽑는데(temperature fallback), 그때 표본을 **무작위로** 뽑습니다. 같은 소리에
+# 답이 달라지는 원인으로 의심되는 곳입니다. 정말 그런지는 이 검사가 답합니다.
+DECODER_SEED = 20260919
+
+
+def seed_decoder(seed: int = DECODER_SEED) -> None:
+    """디코더(ctranslate2)의 난수를 고정합니다. 받아쓰기 직전마다 부릅니다."""
+    import ctranslate2
+
+    ctranslate2.set_random_seed(seed)
+
+
+def worst(values: list[float]) -> float:
+    """여러 번 잰 것 중 가장 나쁜 값. 상한은 다음 실행이 우연히 넘지 않을 값이어야
+    하므로 평균이 아니라 최댓값을 봅니다."""
+    return max(values)
+
+
+def spread(values: list[float]) -> float:
+    """여러 번 잰 값의 폭(최대-최소). 이보다 작은 차이는 개선도 회귀도 아닙니다."""
+    return max(values) - min(values)
+
 
 def noise_file(path: Path, seconds: float) -> Path:
     """분홍 잡음. 흰 잡음보다 실제 방·거리 소리에 가깝습니다."""
-    source = f"anoisesrc=color=pink:seed={NOISE_SEED}" f":duration={seconds:.2f}:sample_rate=16000"
+    source = f"anoisesrc=color=pink:seed={NOISE_SEED}:duration={seconds:.2f}:sample_rate=16000"
     run(
         [
             "ffmpeg", "-nostdin", "-y", "-v", "error",
@@ -161,6 +191,7 @@ def speaker_report(
     token: str | None,
     model: str,
     language: str,
+    seed: int | None = None,
 ) -> dict:
     """화자를 나눠 화자별로 받아쓰고, 우리가 아는 목소리의 자막만 채점합니다.
 
@@ -180,6 +211,8 @@ def speaker_report(
     if len(found) < 2 or who is None:
         return {"speakers": len(found), "error": "화자를 둘로 가르지 못했습니다."}
 
+    if seed is not None:
+        seed_decoder(seed)
     spoken = transcribe_by_speaker(audio, turns, model=model, language=language, device="cpu")
     mine = [item for item in spoken if item.speaker == who]
     heard_all = " ".join(item.cue.text for item in mine)
@@ -219,6 +252,17 @@ def main() -> int:
         action="store_true",
         help="겹말 조건에서 화자를 나눠 화자별로 받아쓰고 겹침 표시를 잽니다.",
     )
+    parser.add_argument(
+        "--repeat",
+        type=int,
+        default=1,
+        help="조건마다 이만큼 받아써서 가장 나쁜 값과 폭(최대-최소)을 남깁니다.",
+    )
+    parser.add_argument(
+        "--seed-decoder",
+        action="store_true",
+        help="디코더 난수를 고정한 설정을 나란히 재서 폭이 난수 탓인지 봅니다.",
+    )
     # 조건마다 상한이 다릅니다(pipeline.noise.MEASURED_CER, 실측 + 10%p).
     # 이 값을 주면 모든 조건에 같은 상한을 씁니다.
     parser.add_argument("--max-cer", type=float, default=None, help="모든 조건에 쓸 CER 상한")
@@ -238,21 +282,29 @@ def main() -> int:
     else:
         print("**겹말은 재지 않습니다.** interference.wav가 없습니다.")
 
-    # (이름, 손잡이, 분리할지)
-    settings: list[tuple[str, dict | None, bool]] = [("지금 설정", None, False)]
+    if args.repeat < 1:
+        parser.error("--repeat는 1 이상이어야 합니다.")
+    # (이름, 손잡이, 분리할지, 디코더 씨앗)
+    settings: list[tuple[str, dict | None, bool, int | None]] = [("지금 설정", None, False, None)]
     if args.compare:
-        settings.append(("손잡이", CANDIDATE, False))
+        settings.append(("손잡이", CANDIDATE, False, None))
         print(f"후보 손잡이: {CANDIDATE}")
     if args.denoise:
-        settings.append(("분리 후", None, True))
+        settings.append(("분리 후", None, True, None))
         print("후보: 목소리만 분리한 뒤 전사 (겹말은 갈라지지 않습니다)")
+    if args.seed_decoder:
+        settings.append(("씨앗 고정", None, False, DECODER_SEED))
+        print(f"후보: 디코더 난수 고정 (seed={DECODER_SEED})")
+    if args.repeat > 1:
+        print(f"조건마다 {args.repeat}번 받아씁니다. 표의 값은 가장 나쁜 것, 폭은 최대-최소입니다.")
 
     target_spans = [(float(item["start"]), float(item["end"])) for item in expected["sentences"]]
     token = os.environ.get("R4_HF_TOKEN")
     if args.by_speaker:
         print(f"화자 분리: {'pyannote' if token else 'embedding (토큰 없음)'}")
 
-    rows: list[tuple[Condition, dict[str, float]]] = []
+    # 조건마다 설정별 CER 값들. 한 번만 재면 길이 1입니다.
+    rows: list[tuple[Condition, dict[str, list[float]]]] = []
     by_speaker: list[tuple[Condition, dict]] = []
     problems: list[str] = []
     with tempfile.TemporaryDirectory(prefix="robust-") as temp:
@@ -273,62 +325,78 @@ def main() -> int:
                             token=token,
                             model=args.model,
                             language=args.language,
+                            seed=DECODER_SEED if args.seed_decoder else None,
                         ),
                     )
                 )
-            scores: dict[str, float] = {}
-            for label, tuning, denoise in settings:
+            scores: dict[str, list[float]] = {}
+            for label, tuning, denoise, seed in settings:
                 heard_from = audio
                 if denoise:
                     from worker.separation import separate_voice
 
                     heard_from = separate_voice(audio, work / f"{condition.name}-voice.wav")
                     heard_from = heard_from.background  # 고른 갈래가 담긴 파일입니다.
-                cues = transcribe(
-                    heard_from,
-                    model=args.model,
-                    language=args.language,
-                    device="cpu",
-                    tuning=tuning,
-                )
-                heard = " ".join(cue.text for cue in cues)
-                scores[label] = cer(reference, heard)
-                # 무엇을 들었는지 함께 남깁니다. 숫자만으로는 되풀이인지
-                # 못 알아들은 것인지 구분할 수 없습니다.
-                where = f"{condition.label} / {label}"
-                print(f"\n[{where}] 자막 {len(cues)}개, CER {scores[label]:.1%}")
-                print(f"  {heard[:300] or '(없음)'}")
+                scores[label] = []
+                for attempt in range(args.repeat):
+                    if seed is not None:
+                        seed_decoder(seed)
+                    cues = transcribe(
+                        heard_from,
+                        model=args.model,
+                        language=args.language,
+                        device="cpu",
+                        tuning=tuning,
+                    )
+                    heard = " ".join(cue.text for cue in cues)
+                    scores[label].append(cer(reference, heard))
+                    # 무엇을 들었는지 함께 남깁니다. 숫자만으로는 되풀이인지
+                    # 못 알아들은 것인지 구분할 수 없습니다.
+                    where = f"{condition.label} / {label}"
+                    if args.repeat > 1:
+                        where += f" / {attempt + 1}회"
+                    print(f"\n[{where}] 자막 {len(cues)}개, CER {scores[label][-1]:.1%}")
+                    print(f"  {heard[:300] or '(없음)'}")
             rows.append((condition, scores))
 
+    first = settings[0][0]
     baseline = rows[0][1]
-    print("\n조건별 글자 오류율")
-    header = "  {:<16}".format("조건") + "".join(f"{label:>12}" for label, _, _ in settings)
+    print("\n조건별 글자 오류율" + (" (가장 나쁜 값 / 폭)" if args.repeat > 1 else ""))
+    header = "  {:<16}".format("조건")
+    for label, *_ in settings:
+        header += f"{label:>12}" + (f"{'폭':>7}" if args.repeat > 1 else "")
     print(header + f"{'원음 대비':>12}")
     for condition, scores in rows:
         line = f"  {condition.label:<16}"
-        line += "".join(f"{scores[label]:>11.1%}" for label, _, _ in settings)
-        first = settings[0][0]
-        line += f"{worse(baseline[first], scores[first]):>+11.1%}"
+        for label, *_ in settings:
+            line += f"{worst(scores[label]):>11.1%}"
+            if args.repeat > 1:
+                line += f"{spread(scores[label]):>6.1%}"
+        line += f"{worse(worst(baseline[first]), worst(scores[first])):>+11.1%}"
         print(line)
         limit = args.max_cer if args.max_cer is not None else limit_for(condition.name)
-        if limit is not None and scores[first] > limit:
+        if limit is not None and worst(scores[first]) > limit:
             problems.append(
-                f"{condition.label}에서 CER {scores[first]:.1%}가 " f"한계 {limit:.1%}를 넘습니다."
+                f"{condition.label}에서 CER {worst(scores[first]):.1%}가 "
+                f"한계 {limit:.1%}를 넘습니다."
             )
 
-    for label, _, _ in settings[1:]:
-        print(f"\n'{label}'가 조건마다 몇 점 바꿨는가 (음수가 좋아진 것)")
+    for label, *_ in settings[1:]:
+        print(f"\n'{label}'가 조건마다 몇 점 바꿨는가 (가장 나쁜 값끼리, 음수가 좋아진 것)")
         for condition, scores in rows:
-            print(f"  {condition.label:<16}{scores[label] - scores['지금 설정']:>+11.1%}")
+            print(f"  {condition.label:<16}{worst(scores[label]) - worst(scores[first]):>+11.1%}")
     if len(settings) > 1:
         print("\n**전체가 고르게 좋아질 때만 기본값을 바꿉니다.** 한 조건만 좋아진 것은")
         print("표본 하나에서 나온 우연일 수 있습니다.")
+    if args.repeat > 1:
+        widest = max(spread(scores[first]) for _, scores in rows)
+        print(f"\n'{first}'의 가장 큰 폭: {widest:.1%}p. 이보다 작은 차이는 개선이 아닙니다.")
 
     if by_speaker:
         print("\n화자별 전사 (겹말 조건만). 우리가 아는 목소리의 자막만 채점합니다.")
         print("  '겹침 뺀 것'은 겹침 표시가 붙은 자막을 버리고 잰 값입니다.")
         for condition, report in by_speaker:
-            plain = next(scores for row, scores in rows if row is condition)["지금 설정"]
+            plain = worst(next(scores for row, scores in rows if row is condition)[first])
             if "error" in report:
                 count = report.get("speakers", "?")
                 print(f"  {condition.label:<16} 화자 {count}명 — {report['error']}")
