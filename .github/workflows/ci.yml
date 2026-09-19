@@ -324,17 +324,24 @@ jobs:
       # 폰트 메트릭 계산이 아니라 libass 렌더 결과를 FFmpeg cropdetect로 측정합니다.
       # 분리는 모델을 내려받고 CPU에서 느립니다. 정렬 검증과 같은 라벨에서만
       # 돌립니다. 아는 두 소리(합성 음성 + 순음)를 섞어 무엇이 남는지 잽니다.
+      # 측정 출력은 파일에도 남깁니다. 빌드 로그가 길어 중간 출력은 로그를
+      # 뒤에서부터 읽는 도구에 안 잡힙니다. 마지막 단계가 다시 모아 찍습니다.
       - name: 배경음 분리 검증
         if: |
+          !cancelled() && (
           contains(github.event.pull_request.labels.*.name, 'verify-align') ||
-          contains(github.event.head_commit.message, '[verify-align]')
+          contains(github.event.head_commit.message, '[verify-align]'))
         run: |
+          set -eo pipefail
+          mkdir -p "$RUNNER_TEMP/verify"
           sudo apt-get update && sudo apt-get install -y espeak-ng ffmpeg
           # 합성 음성은 워커 이미지에 없습니다. 표본은 러너에서 만들고 넘깁니다.
-          python3 scripts/verify_separation.py --make --out /tmp/separation
+          python3 scripts/verify_separation.py --make --out /tmp/separation \
+            2>&1 | tee -a "$RUNNER_TEMP/verify/separation.log"
           docker run --rm -v /tmp/separation:/audio -v "$PWD/scripts:/work:ro" \
             --entrypoint python recording4-worker:ci \
-            /work/verify_separation.py --directory /audio
+            /work/verify_separation.py --directory /audio \
+            2>&1 | tee -a "$RUNNER_TEMP/verify/separation.log"
 
       - name: 자막 화면 측정
         if: ${{ !cancelled() }}
@@ -342,13 +349,26 @@ jobs:
           docker run --rm -v "$PWD/scripts:/work:ro" --entrypoint python \
             recording4-worker:ci /work/measure_subtitles.py
 
-      # 빌드 로그가 길어서 중간 출력은 찾기 어렵습니다. 잡 끝에서 한 번 더 모읍니다.
       # 얼굴 검출은 세로 자르기 제안에만 씁니다. 여기서 재는 것은 오검출뿐입니다.
       # 진짜 얼굴을 얼마나 잘 찾는지는 얼굴이 든 표본이 없어 재지 않습니다.
       - name: 얼굴 검출 오검출 점검
+        if: ${{ !cancelled() }}
         run: |
+          set -eo pipefail
+          mkdir -p "$RUNNER_TEMP/verify"
           docker run --rm -v "$PWD/scripts:/work:ro" --entrypoint python \
-            recording4-worker:ci /work/verify_faces.py --out /tmp/faces
+            recording4-worker:ci /work/verify_faces.py --out /tmp/faces \
+            2>&1 | tee -a "$RUNNER_TEMP/verify/faces.log"
+
+      # 앞 단계가 실패했더라도 무엇이라고 찍혔는지는 봐야 고칠 수 있습니다.
+      - name: 측정 출력 다시 보기
+        if: ${{ !cancelled() }}
+        run: |
+          for log in "$RUNNER_TEMP"/verify/*.log; do
+            [ -e "$log" ] || continue
+            echo "===== $(basename "$log") ====="
+            cat "$log"
+          done
 
       - name: 이미지 요약
         if: ${{ !cancelled() }}
