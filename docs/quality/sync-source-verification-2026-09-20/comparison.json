@@ -1,0 +1,133 @@
+{
+  "previous_pass_now_rejected": [
+    {
+      "sample": "en",
+      "variant": "short",
+      "input_offset": 0.0
+    },
+    {
+      "sample": "en",
+      "variant": "short",
+      "input_offset": 2.5
+    },
+    {
+      "sample": "ko",
+      "variant": "short",
+      "input_offset": 0.0
+    },
+    {
+      "sample": "ko",
+      "variant": "short",
+      "input_offset": 2.5
+    },
+    {
+      "sample": "ko",
+      "variant": "slow",
+      "input_offset": 0.0
+    },
+    {
+      "sample": "ko",
+      "variant": "slow",
+      "input_offset": 2.5
+    },
+    {
+      "sample": "ko",
+      "variant": "noise_15db",
+      "input_offset": 0.0
+    },
+    {
+      "sample": "ko",
+      "variant": "noise_15db",
+      "input_offset": 2.5
+    },
+    {
+      "sample": "ko",
+      "variant": "noise_5db",
+      "input_offset": 0.0
+    },
+    {
+      "sample": "ko",
+      "variant": "noise_5db",
+      "input_offset": 2.5
+    },
+    {
+      "sample": "ko",
+      "variant": "music_intro",
+      "input_offset": 0.0
+    },
+    {
+      "sample": "ko",
+      "variant": "music_intro",
+      "input_offset": 2.5
+    },
+    {
+      "sample": "zh",
+      "variant": "short",
+      "input_offset": 0.0
+    },
+    {
+      "sample": "zh",
+      "variant": "short",
+      "input_offset": 2.5
+    },
+    {
+      "sample": "zh",
+      "variant": "noise_5db",
+      "input_offset": 0.0
+    },
+    {
+      "sample": "zh",
+      "variant": "noise_5db",
+      "input_offset": 2.5
+    },
+    {
+      "sample": "ja-holdout",
+      "variant": "short",
+      "input_offset": -0.73
+    },
+    {
+      "sample": "ja-holdout",
+      "variant": "short",
+      "input_offset": 1.37
+    },
+    {
+      "sample": "ja-holdout",
+      "variant": "short",
+      "input_offset": 4.12
+    }
+  ],
+  "previous_rejected_now_pass": [
+    {
+      "sample": "en-holdout",
+      "variant": "slow",
+      "input_offset": -0.73
+    },
+    {
+      "sample": "en-holdout",
+      "variant": "slow",
+      "input_offset": 1.37
+    },
+    {
+      "sample": "en-holdout",
+      "variant": "slow",
+      "input_offset": 4.12
+    }
+  ],
+  "previous_wrong_accept_now_rejected": [
+    {
+      "sample": "en-holdout",
+      "variant": "music_intro",
+      "input_offset": -0.73
+    },
+    {
+      "sample": "en-holdout",
+      "variant": "music_intro",
+      "input_offset": 1.37
+    },
+    {
+      "sample": "en-holdout",
+      "variant": "music_intro",
+      "input_offset": 4.12
+    }
+  ]
+}

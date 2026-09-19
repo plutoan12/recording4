@@ -1,0 +1,308 @@
+{
+  "profile": "quiet",
+  "language": "en",
+  "limit": 0.5,
+  "offsets": [
+    -0.73,
+    1.37,
+    4.12
+  ],
+  "results": [
+    {
+      "variant": "short",
+      "cases": {
+        "-0.73": {
+          "pass": true,
+          "max_error_seconds": 0.17,
+          "text_preserved": true,
+          "offset_seconds": 0.56,
+          "boundary_support": 3,
+          "recovery_used": true,
+          "verified_by": "source_boundaries",
+          "denoised": false
+        },
+        "1.37": {
+          "pass": true,
+          "max_error_seconds": 0.17,
+          "text_preserved": true,
+          "offset_seconds": -1.54,
+          "boundary_support": 3,
+          "recovery_used": true,
+          "verified_by": "source_boundaries",
+          "denoised": false
+        },
+        "4.12": {
+          "pass": true,
+          "max_error_seconds": 0.17,
+          "text_preserved": true,
+          "offset_seconds": -4.29,
+          "boundary_support": 3,
+          "recovery_used": true,
+          "verified_by": "source_boundaries",
+          "denoised": false
+        }
+      }
+    },
+    {
+      "variant": "long_repeated",
+      "cases": {
+        "-0.73": {
+          "pass": true,
+          "max_error_seconds": 0.31,
+          "text_preserved": true,
+          "offset_seconds": 0.42,
+          "boundary_support": 15,
+          "recovery_used": true,
+          "verified_by": "source_boundaries",
+          "denoised": false
+        },
+        "1.37": {
+          "pass": true,
+          "max_error_seconds": 0.31,
+          "text_preserved": true,
+          "offset_seconds": -1.68,
+          "boundary_support": 15,
+          "recovery_used": true,
+          "verified_by": "source_boundaries",
+          "denoised": false
+        },
+        "4.12": {
+          "pass": true,
+          "max_error_seconds": 0.31,
+          "text_preserved": true,
+          "offset_seconds": -4.43,
+          "boundary_support": 15,
+          "recovery_used": true,
+          "verified_by": "source_boundaries",
+          "denoised": false
+        }
+      }
+    },
+    {
+      "variant": "dense",
+      "cases": {
+        "-0.73": {
+          "pass": true,
+          "max_error_seconds": 0.24,
+          "text_preserved": true,
+          "offset_seconds": 0.49,
+          "boundary_support": 6,
+          "recovery_used": true,
+          "verified_by": "source_boundaries",
+          "denoised": false
+        },
+        "1.37": {
+          "pass": true,
+          "max_error_seconds": 0.24,
+          "text_preserved": true,
+          "offset_seconds": -1.61,
+          "boundary_support": 6,
+          "recovery_used": true,
+          "verified_by": "source_boundaries",
+          "denoised": false
+        },
+        "4.12": {
+          "pass": true,
+          "max_error_seconds": 0.24,
+          "text_preserved": true,
+          "offset_seconds": -4.36,
+          "boundary_support": 6,
+          "recovery_used": true,
+          "verified_by": "source_boundaries",
+          "denoised": false
+        }
+      }
+    },
+    {
+      "variant": "long_pauses",
+      "cases": {
+        "-0.73": {
+          "pass": true,
+          "max_error_seconds": 0.185,
+          "text_preserved": true,
+          "offset_seconds": 0.545,
+          "boundary_support": 9,
+          "recovery_used": false,
+          "verified_by": "source_boundaries",
+          "denoised": false
+        },
+        "1.37": {
+          "pass": true,
+          "max_error_seconds": 0.185,
+          "text_preserved": true,
+          "offset_seconds": -1.555,
+          "boundary_support": 9,
+          "recovery_used": false,
+          "verified_by": "source_boundaries",
+          "denoised": false
+        },
+        "4.12": {
+          "pass": true,
+          "max_error_seconds": 0.185,
+          "text_preserved": true,
+          "offset_seconds": -4.305,
+          "boundary_support": 9,
+          "recovery_used": false,
+          "verified_by": "source_boundaries",
+          "denoised": false
+        }
+      }
+    },
+    {
+      "variant": "fast",
+      "cases": {
+        "-0.73": {
+          "pass": true,
+          "max_error_seconds": 0.176,
+          "text_preserved": true,
+          "offset_seconds": 0.554,
+          "boundary_support": 6,
+          "recovery_used": true,
+          "verified_by": "source_boundaries",
+          "denoised": false
+        },
+        "1.37": {
+          "pass": true,
+          "max_error_seconds": 0.176,
+          "text_preserved": true,
+          "offset_seconds": -1.546,
+          "boundary_support": 6,
+          "recovery_used": true,
+          "verified_by": "source_boundaries",
+          "denoised": false
+        },
+        "4.12": {
+          "pass": true,
+          "max_error_seconds": 0.176,
+          "text_preserved": true,
+          "offset_seconds": -4.296,
+          "boundary_support": 6,
+          "recovery_used": true,
+          "verified_by": "source_boundaries",
+          "denoised": false
+        }
+      }
+    },
+    {
+      "variant": "slow",
+      "cases": {
+        "-0.73": {
+          "pass": true,
+          "max_error_seconds": 0.309,
+          "text_preserved": true,
+          "offset_seconds": 0.421,
+          "boundary_support": 4,
+          "recovery_used": true,
+          "verified_by": "source_text",
+          "denoised": true
+        },
+        "1.37": {
+          "pass": true,
+          "max_error_seconds": 0.309,
+          "text_preserved": true,
+          "offset_seconds": -1.679,
+          "boundary_support": 4,
+          "recovery_used": true,
+          "verified_by": "source_text",
+          "denoised": true
+        },
+        "4.12": {
+          "pass": true,
+          "max_error_seconds": 0.309,
+          "text_preserved": true,
+          "offset_seconds": -4.429,
+          "boundary_support": 4,
+          "recovery_used": true,
+          "verified_by": "source_text",
+          "denoised": true
+        }
+      }
+    },
+    {
+      "variant": "quiet_voice",
+      "cases": {
+        "-0.73": {
+          "pass": true,
+          "max_error_seconds": 0.24,
+          "text_preserved": true,
+          "offset_seconds": 0.49,
+          "boundary_support": 6,
+          "recovery_used": true,
+          "verified_by": "source_boundaries",
+          "denoised": false
+        },
+        "1.37": {
+          "pass": true,
+          "max_error_seconds": 0.24,
+          "text_preserved": true,
+          "offset_seconds": -1.61,
+          "boundary_support": 6,
+          "recovery_used": true,
+          "verified_by": "source_boundaries",
+          "denoised": false
+        },
+        "4.12": {
+          "pass": true,
+          "max_error_seconds": 0.24,
+          "text_preserved": true,
+          "offset_seconds": -4.36,
+          "boundary_support": 6,
+          "recovery_used": true,
+          "verified_by": "source_boundaries",
+          "denoised": false
+        }
+      }
+    },
+    {
+      "variant": "noise_15db",
+      "cases": {
+        "-0.73": {
+          "pass": false,
+          "rejected": "원문 대사 정렬의 근거가 부족합니다. 기존 대본을 유지합니다."
+        },
+        "1.37": {
+          "pass": false,
+          "rejected": "원문 대사 정렬의 근거가 부족합니다. 기존 대본을 유지합니다."
+        },
+        "4.12": {
+          "pass": false,
+          "rejected": "원문 대사 정렬의 근거가 부족합니다. 기존 대본을 유지합니다."
+        }
+      }
+    },
+    {
+      "variant": "noise_5db",
+      "cases": {
+        "-0.73": {
+          "pass": false,
+          "rejected": "원문 대사 정렬의 근거가 부족합니다. 기존 대본을 유지합니다."
+        },
+        "1.37": {
+          "pass": false,
+          "rejected": "원문 대사 정렬의 근거가 부족합니다. 기존 대본을 유지합니다."
+        },
+        "4.12": {
+          "pass": false,
+          "rejected": "원문 대사 정렬의 근거가 부족합니다. 기존 대본을 유지합니다."
+        }
+      }
+    },
+    {
+      "variant": "music_intro",
+      "cases": {
+        "-0.73": {
+          "pass": false,
+          "rejected": "원문 대사 정렬의 근거가 부족합니다. 기존 대본을 유지합니다."
+        },
+        "1.37": {
+          "pass": false,
+          "rejected": "원문 대사 정렬의 근거가 부족합니다. 기존 대본을 유지합니다."
+        },
+        "4.12": {
+          "pass": false,
+          "rejected": "원문 대사 정렬의 근거가 부족합니다. 기존 대본을 유지합니다."
+        }
+      }
+    }
+  ]
+}

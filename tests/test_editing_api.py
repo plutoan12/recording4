@@ -462,3 +462,46 @@ def test_rejected_sync_keeps_saved_transcript(client, auth_headers, asset, monke
     result = module.run_media.run(created["id"])
     assert result["status"] == "failed"
     assert client.get(path, headers=auth_headers).json() == original
+
+
+def test_sync_pins_source_language_and_rejects_stale_completion(
+    client, auth_headers, asset, monkeypatch, session
+):
+    import uuid
+    from types import SimpleNamespace
+
+    import worker.media_tasks as module
+    from adminapi.models import MediaTask
+    from pipeline.editing import Cue
+
+    path = f"/source-assets/{asset.id}/transcript"
+    client.put(
+        path,
+        headers=auth_headers,
+        json={"cues": [{"start": 3, "end": 6, "text": "original English"}]},
+    )
+    job = client.post(path + "/sync?language=en", headers=auth_headers).json()
+    assert client.post(path + "/sync?language=ja", headers=auth_headers).status_code == 409
+    assert client.post(path + "/sync?language=xx", headers=auth_headers).status_code == 422
+    client.put(
+        path,
+        headers=auth_headers,
+        json={"cues": [{"start": 4, "end": 7, "text": "newer source edit"}]},
+    )
+    monkeypatch.setattr(
+        module,
+        "get_storage",
+        lambda: SimpleNamespace(download_file=lambda key, path: path.write_bytes(b"source")),
+    )
+
+    def correct(source, cues, options):
+        assert options.source_language == "en"
+        assert [c.text for c in cues] == ["original English"]
+        return [Cue(start=5, end=8, text=cues[0].text)], {"offset_seconds": 2}
+
+    monkeypatch.setattr(module, "sync_subtitles", correct)
+    assert module.run_media.run(job["id"])["status"] == "failed"
+    assert client.get(path, headers=auth_headers).json()[0]["text"] == "newer source edit"
+    session.expire_all()
+    task = session.get(MediaTask, uuid.UUID(job["id"]))
+    assert "대본이 바뀌었습니다" in task.error

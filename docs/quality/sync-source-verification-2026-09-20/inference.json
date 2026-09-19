@@ -1,0 +1,1 @@
+{"model_calls": 32, "cache_keys": 32, "cache_policy": "same source audio hash, source text, model/language/device/strict; timestamps excluded"}
