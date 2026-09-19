@@ -162,7 +162,7 @@ def turns_from_labels(
 MULTIPLE_SPEAKERS = "복수 화자"
 
 
-def review_speakers(cues, turns, words_by_cue):
+def review_speakers(cues, turns, words_by_cue, *, stage=2):
     """단어마다 근거가 있는 단일 화자만 배정합니다. 불확실하면 검수합니다."""
     from pipeline.alignment import squeeze
 
@@ -181,26 +181,98 @@ def review_speakers(cues, turns, words_by_cue):
                 )
                 if left.speaker != right.speaker and finish > begin:
                     overlaps.append({"start": begin, "end": finish})
-        valid = bool(words) and squeeze("".join(w.text for w in words)) == squeeze(cue.text)
-        valid = valid and all(cue.start <= w.start < w.end <= cue.end for w in words)
-        valid = valid and all(
-            a.end <= b.start + 0.001 for a, b in zip(words, words[1:], strict=False)
-        )
+        # Map only unambiguous exact text spans. Missing/invalid words stay in the
+        # output so callers cannot accidentally count a smaller denominator.
+        text = squeeze(cue.text)
+        cursor = 0
+        # In whitespace-delimited text do not match "one" inside "someone".
+        boundaries = {0}
+        edge = 0
+        for token_text in cue.text.split():
+            edge += len(squeeze(token_text))
+            boundaries.add(edge)
         assignments = []
-        if valid:
-            for word in words:
-                labels = sorted({t.speaker for t in turns if _overlap(word.start, word.end, t) > 0})
-                label = labels[0] if len(labels) == 1 else MULTIPLE_SPEAKERS if labels else None
+        previous_end = cue.start
+        for word in words:
+            token = squeeze(word.text)
+            if not token:
+                continue
+            begin = text.find(token, cursor)
+            if begin < 0 or (begin != cursor and text.find(token, begin + 1) >= 0):
+                continue
+            if len(cue.text.split()) > 1 and (
+                begin not in boundaries or begin + len(token) not in boundaries
+            ):
+                continue
+            if begin > cursor:
                 assignments.append(
-                    {
-                        "start": word.start,
-                        "end": word.end,
-                        "text": word.text,
-                        "speaker": label,
-                        "candidates": labels,
-                        "needs_review": len(labels) != 1,
-                    }
+                    dict(
+                        start=cue.start,
+                        end=cue.end,
+                        text=text[cursor:begin],
+                        speaker=None,
+                        candidates=[],
+                        needs_review=True,
+                        timing_valid=False,
+                    )
                 )
+            valid_word = (
+                cue.start <= word.start < word.end <= cue.end and word.start >= previous_end - 0.001
+            )
+            if valid_word:
+                previous_end = word.end
+            labels = sorted(
+                {t.speaker for t in turns if valid_word and _overlap(word.start, word.end, t) > 0}
+            )
+            label = labels[0] if len(labels) == 1 else MULTIPLE_SPEAKERS if labels else None
+            if stage >= 2 and len(labels) > 1:
+                simultaneous = any(
+                    min(word.end, o["end"]) > max(word.start, o["start"]) for o in overlaps
+                )
+                # A sequential boundary is not simultaneous speech. Require a
+                # strong duration majority; ties and true overlaps remain unresolved.
+                if not simultaneous:
+                    spans = {lab: [] for lab in labels}
+                    for turn in relevant:
+                        if turn.speaker in spans and _overlap(word.start, word.end, turn) > 0:
+                            spans[turn.speaker].append(
+                                (max(word.start, turn.start), min(word.end, turn.end))
+                            )
+                    durations = {}
+                    for lab, intervals in spans.items():
+                        edge, duration = word.start, 0.0
+                        for left, right in sorted(intervals):
+                            duration += max(0.0, right - max(edge, left))
+                            edge = max(edge, right)
+                        durations[lab] = duration
+                    best = max(durations, key=durations.get)
+                    if durations[best] / (word.end - word.start) >= 0.8:
+                        label = best
+            assignments.append(
+                dict(
+                    start=word.start if valid_word else cue.start,
+                    end=word.end if valid_word else cue.end,
+                    text=word.text,
+                    speaker=label,
+                    candidates=labels,
+                    needs_review=label in (None, MULTIPLE_SPEAKERS),
+                    timing_valid=valid_word,
+                )
+            )
+            cursor = begin + len(token)
+        if cursor < len(text):
+            assignments.append(
+                dict(
+                    start=cue.start,
+                    end=cue.end,
+                    text=text[cursor:],
+                    speaker=None,
+                    candidates=[],
+                    needs_review=True,
+                    timing_valid=False,
+                )
+            )
+        valid = any(w["timing_valid"] for w in assignments)
         resolved = {
             w["speaker"] for w in assignments if w["speaker"] not in (None, MULTIPLE_SPEAKERS)
         }
@@ -221,7 +293,7 @@ def review_speakers(cues, turns, words_by_cue):
                 "needs_review": needs_review or label == MULTIPLE_SPEAKERS,
                 "alignment_available": bool(valid),
                 "overlaps": overlaps,
-                "words": assignments,
+                "words": assignments if valid else [],
             }
         )
     return reviewed

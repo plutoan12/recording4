@@ -4,7 +4,7 @@ import { PublicationForm } from './PublicationForm'
 import type { WorkflowDraft } from './WorkflowPanel'
 
 type Cue = { start: number; end: number; text: string }
-type SpeakerReview = { version: number | null; needs_review: boolean; review: {start:number;end:number;text:string;speaker:string|null;needs_review:boolean;alignment_available:boolean;words:{start:number;end:number;text:string;speaker:string|null;needs_review:boolean}[]}[] }
+type SpeakerReview = { version: number | null; needs_review: boolean; review: {start:number;end:number;text:string;speaker:string|null;needs_review:boolean;alignment_available:boolean;words:{start:number;end:number;timing_valid?:boolean;text:string;speaker:string|null;needs_review:boolean}[]}[] }
 type Suggestion = { start: number; end: number; title: string; reason: string }
 type Violation = { index: number; kind: string; detail: string }
 type Task = { id: string; source_asset_id: string; clip_edit_id: string | null; kind: string; state: string; error: string | null;
@@ -203,7 +203,7 @@ export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWo
           <summary>{segment.start.toFixed(2)}–{segment.end.toFixed(2)}초 · {segment.speaker ?? '미확인'}{segment.needs_review ? ' · 검수 필요' : ''}</summary>
           <p>{segment.text}</p>
           {!segment.alignment_available && <p>단어 시각을 확인하지 못했습니다. 화자를 추측하지 않았습니다.</p>}
-          <ul>{segment.words.map((word,j) => <li key={j}>{word.start.toFixed(2)}–{word.end.toFixed(2)}초 · {word.text} · {word.speaker ?? '미확인'}{word.needs_review ? ' · 검수 필요' : ''}</li>)}</ul>
+          <ul>{segment.words.map((word,j) => <li key={j}>{word.timing_valid === false ? '시각 미확인' : `${word.start.toFixed(2)}–${word.end.toFixed(2)}초`} · {word.text} · {word.speaker ?? '미확인'}{word.needs_review ? ' · 검수 필요' : ''}</li>)}</ul>
         </details>)}
       </aside>}
       <h3>자막 편집</h3>

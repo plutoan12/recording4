@@ -11,14 +11,15 @@ import hashlib
 import itertools
 import json
 import os
+from dataclasses import asdict
 from pathlib import Path
 
 import numpy as np
 from measure_diarization_stress import sample, score
 
-from pipeline.alignment import squeeze
+from pipeline.alignment import WordTiming, squeeze
 from pipeline.editing import Cue
-from pipeline.speakers import MULTIPLE_SPEAKERS, assign_speakers, review_speakers
+from pipeline.speakers import MULTIPLE_SPEAKERS, SpeakerTurn, assign_speakers, review_speakers
 from worker.analysis import align_speaker_words, diarize
 
 
@@ -29,6 +30,8 @@ def main():
     parser.add_argument("--directory", type=Path, required=True)
     parser.add_argument("--fixtures", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--stage", type=int, choices=[1, 2, 3, 4], default=1)
+    parser.add_argument("--cache", type=Path)
     args = parser.parse_args()
     pieces = []
     for name in ["mono-a0.wav", "mono-b0.wav", "mono-a1.wav", "mono-b1.wav"]:
@@ -49,10 +52,34 @@ def main():
             Cue(start=t["start"], end=t["end"], text=text)
             for t, text in zip(truth, texts, strict=True)
         ]
-        turns = diarize(path, token=os.environ["R4_HF_TOKEN"], device="cpu")
+        cache = args.cache / (case["case"] + "-raw.json") if args.cache else None
+        if cache and cache.exists():
+            raw = json.loads(cache.read_text())
+            assert raw["sha256"] == before
+            turns = [SpeakerTurn(**t) for t in raw["turns"]]
+            words = [[WordTiming(**w) for w in ws] for ws in raw["words"]]
+        else:
+            turns = diarize(path, token=os.environ["R4_HF_TOKEN"], device="cpu")
+            words = align_speaker_words(path, cues, language="en", device="cpu")
+            if cache:
+                cache.parent.mkdir(parents=True, exist_ok=True)
+                cache.write_text(
+                    json.dumps(
+                        dict(
+                            sha256=before,
+                            turns=[asdict(t) for t in turns],
+                            words=[[asdict(w) for w in ws] for ws in words],
+                        )
+                    )
+                )
         old = assign_speakers(cues, turns)
-        words = align_speaker_words(path, cues, language="en", device="cpu")
-        reviews = review_speakers(cues, turns, words)
+        reviews = review_speakers(cues, turns, words, stage=min(args.stage, 2))
+        if args.stage >= 3:
+            from worker.speaker_recovery import recover_speaker_reviews
+
+            reviews = recover_speaker_reviews(
+                path, cues, turns, words, language="en", stage=args.stage
+            )
         labs = sorted({t.speaker for t in turns})
         n = active.shape[1]
         centers = (np.arange(n) + 0.5) * 0.02

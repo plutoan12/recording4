@@ -230,3 +230,66 @@ def test_duplicate_turns_are_not_treated_as_multiple_speakers():
     result = review_speakers([cue], [SpeakerTurn(0, 1, "A")] * 2, [[WordTiming(0, 1, "same")]])[0]
     assert result["speaker"] == "A"
     assert not result["needs_review"]
+
+
+def test_partial_alignment_preserves_valid_words_and_missing_text():
+    from pipeline.alignment import WordTiming, squeeze
+    from pipeline.speakers import review_speakers
+
+    cue = Cue(start=0, end=4, text="first missing last")
+    result = review_speakers(
+        [cue], [SpeakerTurn(0, 4, "A")], [[WordTiming(0, 1, "first"), WordTiming(3, 4, "last")]]
+    )[0]
+    assert [w["speaker"] for w in result["words"]] == ["A", None, "A"]
+    assert squeeze("".join(w["text"] for w in result["words"])) == squeeze(cue.text)
+    assert result["alignment_available"] and result["needs_review"]
+
+
+def test_invalid_word_does_not_discard_other_valid_words():
+    from pipeline.alignment import WordTiming
+    from pipeline.speakers import review_speakers
+
+    cue = Cue(start=0, end=3, text="one two three")
+    result = review_speakers(
+        [cue],
+        [SpeakerTurn(0, 3, "A")],
+        [[WordTiming(0, 1, "one"), WordTiming(1, 1, "two"), WordTiming(2, 3, "three")]],
+    )[0]
+    assert [w["speaker"] for w in result["words"]] == ["A", None, "A"]
+
+
+def test_sequential_boundary_is_not_simultaneous_speech():
+    from pipeline.alignment import WordTiming
+    from pipeline.speakers import review_speakers
+
+    cue = Cue(start=0, end=1, text="word")
+    turns = [SpeakerTurn(0, 0.9, "A"), SpeakerTurn(0.9, 1, "B")]
+    result = review_speakers([cue], turns, [[WordTiming(0, 1, "word")]], stage=2)[0]
+    assert result["words"][0]["speaker"] == "A"
+    assert result["overlaps"] == []
+    # The same duration ratio cannot override genuine simultaneous speech.
+    turns = [SpeakerTurn(0, 1, "A"), SpeakerTurn(0.9, 1, "B")]
+    result = review_speakers([cue], turns, [[WordTiming(0, 1, "word")]], stage=2)[0]
+    assert result["words"][0]["speaker"] == "복수 화자"
+    assert result["needs_review"]
+
+
+def test_duplicate_turns_cannot_inflate_boundary_majority():
+    from pipeline.alignment import WordTiming
+    from pipeline.speakers import review_speakers
+
+    cue = Cue(start=0, end=1, text="word")
+    turns = [SpeakerTurn(0, 0.5, "A")] * 3 + [SpeakerTurn(0.5, 1, "B")]
+    result = review_speakers([cue], turns, [[WordTiming(0, 1, "word")]], stage=2)[0]
+    assert result["words"][0]["speaker"] == "복수 화자"
+
+
+def test_partial_alignment_cannot_match_inside_another_word():
+    from pipeline.alignment import WordTiming
+    from pipeline.speakers import review_speakers
+
+    cue = Cue(start=0, end=2, text="someone speaks")
+    result = review_speakers(
+        [cue], [SpeakerTurn(0, 2, "A")], [[WordTiming(0, 1, "one"), WordTiming(1, 2, "speaks")]]
+    )[0]
+    assert [w["speaker"] for w in result["words"]] == [None, "A"]
