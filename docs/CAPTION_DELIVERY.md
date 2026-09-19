@@ -14,6 +14,10 @@
 ## 2026-09-19 실제 검증
 
 - API·워커·디스패처·모니터·웹 Docker 이미지 재빌드 성공. 배포 전 운영 DB·영상 백업 완료.
+- PR #22를 main에 병합(`83d94b1`)한 뒤 재빌드·재기동 완료. 운영 PostgreSQL에서 `0006_sync (head)`, API charset-normalizer 3.5.1, 워커 ffsubsync 0.4.27과 `captions_enabled=True` 확인.
+- 로컬 pytest 350 passed / 5 skipped, Ruff check·전체 format check·TypeScript/Vite build 통과. 실제 숏폼·전체 영상 각각에서 굽기/트랙 전용 프레임 차이와 MP4 전체 디코드 성공 확인.
+- 운영 API·S3·큐·워커에 사람 목소리 MP4를 넣어 싱크 작업을 실행했습니다. 작업은 failed로 끝났고 실행 전후 대본이 완전히 동일해 잘못된 결과가 저장되지 않았습니다. 기록은 `.runtime/human-sync-runtime-check.json`에 있습니다.
+- 배포 체크아웃은 `/Users/an-youwon/Projects/recording4-caption-delivery`이며 기존 런타임 비밀·볼륨을 공유합니다. 로그인 자동 시작도 이 경로로 갱신했고 이전 plist는 비공개 런타임 폴더에 백업했습니다. Claude 공유 체크아웃의 작업 파일은 수정하지 않았습니다.
 - Chrome 파일 선택창에서 디스크의 CP949·Shift_JIS SRT를 실제 업로드했습니다. 격리된 SQLite API와 테스트 계정을 사용했으며 multipart 업로드·판별·저장·대본 표시는 실제 코드입니다. 직접 작성한 통제 표본이며 모든 외부 편집기 출력 형식을 보장하는 검사는 아닙니다.
 - CP949: `cp949` 자동 판별, `안녕하세요. 한국어 자막 파일입니다.` 정상 표시.
 - Shift_JIS: `cp932` 자동 판별, `こんにちは。日本語の字幕ファイルです。` 정상 표시. 이 표본은 두 인코딩이 같은 글자로 읽힙니다.
