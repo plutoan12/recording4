@@ -10,7 +10,6 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 
-from adminapi.config import get_settings
 from adminapi.deps import CurrentUser, SessionDep
 from adminapi.models import (
     Approval,
@@ -24,10 +23,11 @@ from adminapi.models import (
 )
 from adminapi.outbox import enqueue
 from adminapi.storage import ObjectStorage, get_storage
+from adminapi.subtitle_rules import subtitle_rules
 from pipeline.editing import Cue, EditSpec, suggest_clips
 from pipeline.states import JobState
-from pipeline.subtitle_files import MEDIA_TYPES, SubtitleFormat, subtitle_file
-from pipeline.subtitles import SubtitleRules, check
+from pipeline.subtitle_files import MEDIA_TYPES, SubtitleFormat, clip_subtitle_file
+from pipeline.subtitles import check
 from pipeline.time import as_utc
 
 router = APIRouter(tags=["editing"])
@@ -83,17 +83,6 @@ def schedule(session, task):
         dedupe_key=f"media.run:{task.id}:{task.attempt}",
     )
     return task_response(task)
-
-
-def subtitle_rules() -> SubtitleRules:
-    s = get_settings()
-    return SubtitleRules(
-        max_chars_per_line=s.subtitle_max_chars_per_line,
-        max_lines=s.subtitle_max_lines,
-        max_cps=s.subtitle_max_cps,
-        min_duration=s.subtitle_min_duration,
-        max_duration=s.subtitle_max_duration,
-    )
 
 
 def violations(cues: list[Cue]) -> list[dict]:
@@ -356,7 +345,9 @@ def clip_subtitles(
     )
     if task is None:
         raise HTTPException(409, "편집본의 렌더 요청을 찾을 수 없습니다.")
-    text = subtitle_file(EditSpec.model_validate(task.settings), subtitle_format, subtitle_rules())
+    text = clip_subtitle_file(
+        EditSpec.model_validate(task.settings), subtitle_format, subtitle_rules()
+    )
     if not text.strip():
         raise HTTPException(409, "이 편집본에는 내보낼 자막이 없습니다.")
     return Response(

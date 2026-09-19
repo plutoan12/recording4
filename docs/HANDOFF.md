@@ -724,3 +724,37 @@ CI가 토큰 없이도 이 경로를 점검합니다(`화자 분리 토큰 오�
 - 표시 규칙(`R4_SUBTITLE_*`)을 렌더 뒤에 바꾸면 파일 자막이 그 편집본의 화면 자막과 달라집니다. 규칙을 바꾼 편집본은 다시 렌더해야 합니다. 렌더 시점 규칙을 함께 저장하면 없앨 수 있는 차이입니다.
 - 외부 SRT를 **가져오는** 경로는 없습니다. 생기면 ffsubsync 도입 시점입니다(`docs/OPEN_SOURCE_INTEGRATIONS.md`).
 - 단어별 강조(ASS 전용)와 게시 시 YouTube 자막 트랙 업로드는 이번 범위가 아닙니다.
+
+
+## 번역·더빙 작업 자막 파일 내보내기 (2026-09-19)
+
+- 사용자 요청: 자막 파일 생성 관련 코드가 더 없는지 확인하고, 남은 곳 중 1번(작업 경로)부터 구현. 브랜치 `claude/subtitle-file-generation-38xjz4`(PR #11 병합 후 최신 main에서 재시작).
+- 담당 파일: `packages/pipeline/pipeline/{subtitle_files,workflow}.py`, `services/api/adminapi/subtitle_rules.py`(신규), `services/api/adminapi/routers/{workflow,editing}.py`, `services/worker/worker/workflow_tasks.py`, `apps/web/src/{api.ts,WorkflowPanel.tsx}`, `tests/{test_subtitle_files,test_connected_workflow}.py`, `README.md`, `docs/{CONNECTED_WORKFLOW,OPEN_SOURCE_INTEGRATIONS,TECH_DECISIONS,HANDOFF}.md`.
+- 의존 작업: PR #11(클립 편집본 내보내기)의 `subtitle_files.py`를 확장했습니다. 새 의존성은 없습니다.
+- **Codex 작업과 겹칠 수 있는 파일**: `routers/workflow.py`, `workflow_tasks.py`, `WorkflowPanel.tsx`.
+
+### 조사 결과: 자막을 만드는 곳이 하나 더 있었습니다
+
+`composition.py:render_final()`이 번역·더빙 작업의 자막을 같은 `write_subtitles()`로 만들어 굽고 지웁니다. 클립 경로와 같은 상황이었고, PR #11은 `ClipEdit`만 다뤘습니다. 자막 데이터는 `Job.workflow_data`에 남아 있어 내보내기가 가능했습니다.
+
+### 구현한 것
+
+- `GET /jobs/{id}/subtitles?format=srt|vtt`: 작업 자막을 파일로 내려줍니다. 렌더를 기다리지 않고 대본 단계 뒤부터 받을 수 있습니다.
+- `pipeline/workflow.py:rendered_cues()`·`rendered_language()`: 구운 자막을 고르는 순서(`aligned` → `translated` → `cues`)와 그 언어. `workflow_tasks.py`의 렌더 단계가 인라인으로 갖고 있던 식을 이 함수로 바꿨습니다. 두 곳이 어긋날 수 없습니다.
+- `subtitle_files.py` 재구성: 핵심은 `subtitle_file(cues, start, end, format, rules)`이고 편집본용은 `clip_subtitle_file(spec, ...)` 래퍼입니다. 작업은 출력 구간이 `0~duration`이라 `EditSpec`(9:16·180초 제한)에 담을 수 없습니다.
+- `adminapi/subtitle_rules.py`(신규): 설정 → 표시 규칙. `routers/editing.py`에 있던 함수를 옮겨 두 라우터가 함께 씁니다.
+- 관리화면 작업 화면에 **자막 SRT·VTT 내려받기** 버튼. `api.ts:downloadFile()`이 서버가 정한 파일 이름(`job-{id}.{언어}.srt`)을 쓰도록 `Content-Disposition`을 읽습니다.
+
+### 검증 결과
+
+- `pytest -q`: **291 통과 / 6 skip**(SQLite). 새 테스트 4개.
+- 원어 작업: 대본 단계 직후 `job-{id}.ko.srt`가 나오고 시각이 원본 대본과 같음을 확인했습니다. 대본 단계 전에는 409입니다.
+- 더빙 작업: `aligned`·`translated`·`cues`가 모두 있을 때 **`aligned`만** 나오는 것을 확인했습니다. 렌더가 쓰는 자막과 같습니다.
+- `ruff check`·`ruff format --check` 통과. `npm run typecheck`·`npm run build` 통과.
+- **미검증**: PostgreSQL에서의 실행(CI 대상), 실제 재생기에서의 표시, 브라우저에서의 실제 내려받기, 실제 더빙 음성으로 만든 `aligned` 자막의 품질(유료 공급자 필요).
+
+### 남은 작업 (조사에서 확인한 나머지)
+
+- **YouTube 자막 트랙 업로드 없음.** `worker/youtube.py`는 `videos().insert()`만 씁니다. `captions().insert()`가 없어 구운 자막만 나갑니다. 의존성(`google-api-python-client`)과 OAuth 스코프(`youtube.force-ssl`, `connect_youtube.py`)는 이미 있으므로 코드만 추가하면 됩니다. 실제 게시 흐름을 건드리므로 유료·계정 설정 상태를 먼저 확인해야 합니다.
+- **외부 SRT 가져오기 없음.** 생기면 ffsubsync 도입 시점입니다.
+- 표시 규칙을 렌더 뒤에 바꾸면 파일 자막이 그 결과물의 화면 자막과 달라지는 문제는 두 경로 모두 그대로입니다(PR #11 기록 참조).

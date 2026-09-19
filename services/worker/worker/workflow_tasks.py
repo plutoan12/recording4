@@ -33,7 +33,7 @@ from pipeline.budget import BudgetShortfall
 from pipeline.editing import Cue, clip_cues
 from pipeline.hashing import StageInputs
 from pipeline.states import JobState, StageRunState
-from pipeline.workflow import WorkflowOptions
+from pipeline.workflow import WorkflowOptions, rendered_cues
 from worker.analysis import transcribe
 from worker.celery_app import celery_app
 from worker.composition import TimingError, compose_dub, mix_speech, render_final
@@ -342,10 +342,7 @@ def execute_step(name, options, data, asset, directory, stage_id, remote_id, sav
         render_final(
             source,
             output,
-            cues=[
-                Cue.model_validate(c)
-                for c in data.get("aligned", data.get("translated", data["cues"]))
-            ],
+            cues=[Cue.model_validate(c) for c in rendered_cues(data)],
             duration=data["duration"],
             start=0 if dubbed else data["start"],
             clip=options.clip,

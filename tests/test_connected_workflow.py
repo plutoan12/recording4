@@ -492,3 +492,48 @@ def test_tts_hash_changes_for_voice_and_model_revision():
             settings.model_copy(update={"tts_model_version": "new-revision"}),
         ).digest()
     )
+
+
+def test_original_job_exports_source_language_subtitles(setup_flow, client, auth_headers):
+    """원어 작업은 번역 단계가 없어 원본 대본을 원본 언어로 내보냅니다."""
+    create, _ = setup_flow
+    jid = create(source_language="ko")
+    empty = client.get(f"/jobs/{jid}/subtitles", headers=auth_headers)
+    assert empty.status_code == 409 and "대본 단계" in empty.json()["detail"]
+    assert wf.run_job(jid)["stage"] == "transcribe"
+
+    srt = client.get(f"/jobs/{jid}/subtitles", headers=auth_headers)
+    assert srt.status_code == 200
+    assert srt.headers["content-type"] == "application/x-subrip; charset=utf-8"
+    assert srt.headers["content-disposition"] == f'attachment; filename="job-{jid}.ko.srt"'
+    assert srt.text.startswith("1\n00:00:01,000 --> 00:00:02,000\nhello")
+
+    vtt = client.get(f"/jobs/{jid}/subtitles?format=vtt", headers=auth_headers)
+    assert vtt.text.startswith("WEBVTT\n\n1\n00:00:01.000 --> 00:00:02.000\n")
+    assert client.get(f"/jobs/{jid}/subtitles?format=ass", headers=auth_headers).status_code == 422
+    assert client.get(f"/jobs/{uuid.uuid4()}/subtitles", headers=auth_headers).status_code == 404
+    assert client.get(f"/jobs/{jid}/subtitles").status_code == 401
+
+
+def test_dubbed_job_exports_the_speech_aligned_translation(
+    setup_flow, client, auth_headers, session
+):
+    """더빙 작업은 합성 음성에 맞춰 재정렬한 번역 자막을 목표 언어로 내보냅니다."""
+    create, _ = setup_flow
+    jid = create()
+    wf.run_job(jid)
+    job = session.get(Job, uuid.UUID(jid))
+    # 렌더가 쓰는 우선순위(aligned → translated → cues)를 그대로 확인합니다.
+    job.workflow_data = {
+        **job.workflow_data,
+        "translated": [{"start": 1, "end": 2, "text": "번역 자막"}],
+        "aligned": [{"start": 3, "end": 5, "text": "음성에 맞춘 자막"}],
+    }
+    session.commit()
+
+    response = client.get(f"/jobs/{jid}/subtitles", headers=auth_headers)
+    assert response.status_code == 200
+    assert response.headers["content-disposition"] == f'attachment; filename="job-{jid}.en.srt"'
+    assert "음성에 맞춘 자막" in response.text
+    assert "번역 자막" not in response.text
+    assert "hello" not in response.text

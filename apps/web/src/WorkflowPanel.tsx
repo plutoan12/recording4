@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { request, type Job, type SourceAsset } from './api'
+import { downloadFile, request, type Job, type SourceAsset } from './api'
 import { PublicationForm } from './PublicationForm'
 
 export type WorkflowDraft = {source_asset_id:string; start:number; end:number; mode:string; focus_x:number;
@@ -42,6 +42,12 @@ export function WorkflowPanel({assets,jobs,draft,onCreated}:{assets:SourceAsset[
   },[selected])
   useEffect(()=>{void refresh();const timer=setInterval(()=>void refresh(),5000);return()=>clearInterval(timer)},[refresh])
   async function act(action:()=>Promise<void>){setBusy(true);setMessage('');try{await action();await refresh();await onCreated()}catch(e){setMessage(e instanceof Error?e.message:'요청 실패')}finally{setBusy(false)}}
+  async function grab(path:string,name:string,done:string){
+    setBusy(true);setMessage('')
+    try{await downloadFile(path,name);setMessage(done)}
+    catch(e){setMessage(e instanceof Error?e.message:'내려받기 실패')}
+    finally{setBusy(false)}
+  }
   async function create(event:React.FormEvent){event.preventDefault();await act(async()=>{
     const job = await request<Job>('/jobs',{method:'POST',body:JSON.stringify({source_asset_id:asset,target_language:target,
       workflow:{audio_mode:audio,voice_id:voice||null,lipsync:audio==='dub'&&lip,budget_usd:budget,
@@ -84,6 +90,10 @@ export function WorkflowPanel({assets,jobs,draft,onCreated}:{assets:SourceAsset[
         <button disabled={busy} onClick={()=>void act(async()=>{await request(`/jobs/${detail.id}/resume`,{method:'POST'})})}>설정 확인 후 작업 재개</button>
         <button disabled={busy} onClick={()=>{const amount=window.prompt('새 작업 예산 상한 (USD)');if(amount)void act(async()=>{await request(`/jobs/${detail.id}/budget`,{method:'PUT',body:JSON.stringify({limit_usd:amount})})})}}>작업 예산 수정</button>
       </>}
+      {detail.cues.length>0 && (['srt','vtt'] as const).map(fmt=><button key={fmt} disabled={busy} onClick={()=>void grab(
+        `/jobs/${detail.id}/subtitles?format=${fmt}`, `job-${detail.id}.${fmt}`,
+        `자막 ${fmt.toUpperCase()} 파일을 내려받았습니다. 시각은 출력 영상 시작이 0초입니다.`,
+      )}>자막 {fmt.toUpperCase()} 내려받기</button>)}
       {detail.translated.length>0 && <details><summary>번역 검수·새 버전 만들기</summary>
         <button onClick={()=>setTranslated(detail.translated)}>번역 불러오기</button>
         {translated.map((c,i)=><label key={i}>{c.start.toFixed(1)}~{c.end.toFixed(1)}초<textarea value={c.text} onChange={e=>setTranslated(rows=>rows.map((r,j)=>j===i?{...r,text:e.target.value}:r))} /></label>)}
