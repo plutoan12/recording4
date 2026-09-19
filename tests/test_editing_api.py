@@ -505,3 +505,24 @@ def test_sync_pins_source_language_and_rejects_stale_completion(
     session.expire_all()
     task = session.get(MediaTask, uuid.UUID(job["id"]))
     assert "대본이 바뀌었습니다" in task.error
+
+
+@pytest.mark.parametrize("state", ["pending", "running"])
+def test_sync_dedup_rejects_new_transcript_version(client, auth_headers, asset, session, state):
+    from adminapi.models import MediaTask
+
+    path = f"/source-assets/{asset.id}/transcript"
+    data = {"cues": [{"start": 3, "end": 20, "text": "original"}]}
+    client.put(path, headers=auth_headers, json=data)
+    first = client.post(path + "/sync", headers=auth_headers)
+    assert first.status_code == 202
+    task = session.get(MediaTask, uuid.UUID(first.json()["id"]))
+    task.state = state
+    session.commit()
+    assert client.post(path + "/sync", headers=auth_headers).json()["id"] == first.json()["id"]
+    # Even identical words in a new version must not reuse a job pinned to version 1.
+    assert client.put(path, headers=auth_headers, json=data).json()["version"] == 2
+    assert client.post(path + "/sync", headers=auth_headers).status_code == 409
+    session.refresh(task)
+    assert task.settings["transcript_version"] == 1
+    assert len(session.scalars(select(MediaTask).where(MediaTask.kind == "sync")).all()) == 1

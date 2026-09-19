@@ -341,8 +341,10 @@ def sync_transcript(
     쓰면 됩니다. 유료 호출이 아니며 `[subtitles]` 설치가 필요합니다.
     """
     asset = asset_for_edit(session, asset_id)
-    if not transcript(session, asset_id):
+    rows = transcript(session, asset_id)
+    if not rows:
         raise HTTPException(409, "보정할 대본이 없습니다. 먼저 대본을 만들거나 들이세요.")
+    version = rows[0].transcript_version
     existing = session.scalar(
         select(MediaTask).where(
             MediaTask.source_asset_id == asset_id,
@@ -351,11 +353,14 @@ def sync_transcript(
         )
     )
     if existing:
-        if existing.settings.get("sync_profile", "standard") != profile or existing.settings.get(
-            "source_language"
-        ) != (language or asset.source_language):
+        if (
+            existing.settings.get("sync_profile", "standard") != profile
+            or existing.settings.get("source_language") != (language or asset.source_language)
+            or existing.settings.get("transcript_version") != version
+        ):
             raise HTTPException(
-                409, "다른 방식의 싱크 보정이 진행 중입니다. 완료 후 다시 요청하세요."
+                409,
+                "다른 방식 또는 대본 버전의 싱크 보정이 진행 중입니다. 완료 후 다시 요청하세요.",
             )
         return task_response(existing)
     return schedule(
@@ -366,11 +371,7 @@ def sync_transcript(
             settings={
                 "sync_profile": profile,
                 "source_language": language or asset.source_language,
-                "transcript_version": session.scalar(
-                    select(func.max(TranscriptSegment.transcript_version)).where(
-                        TranscriptSegment.source_asset_id == asset_id
-                    )
-                ),
+                "transcript_version": version,
             },
         ),
     )

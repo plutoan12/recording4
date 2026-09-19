@@ -722,6 +722,7 @@ def align_speaker_words(source, cues, *, model="small", language=None, device="c
                     "-v",
                     "error",
                     "-y",
+                    "-nostdin",
                     "-ss",
                     str(cue.start),
                     "-i",
@@ -737,6 +738,7 @@ def align_speaker_words(source, cues, *, model="small", language=None, device="c
                 ],
                 check=True,
                 capture_output=True,
+                timeout=600,
             )
             try:
                 result = engine.align(

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import uuid
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
@@ -387,3 +388,38 @@ def test_word_alignment_missing_prerequisites_fail_instead_of_empty_success(tmp_
     monkeypatch.setitem(sys.modules, "stable_whisper", None)
     with pytest.raises(MissingDependency, match="의존성"):
         align_speaker_words(tmp_path / "sample.wav", [], language="ko")
+
+
+@pytest.mark.parametrize("failure", ["timeout", "decode", "missing"])
+def test_speaker_word_crop_failure_is_bounded_and_not_empty_success(monkeypatch, tmp_path, failure):
+    import subprocess
+    import sys
+    from types import SimpleNamespace
+
+    import worker.analysis as analysis
+    from pipeline.editing import Cue
+
+    engine = SimpleNamespace(align=lambda *a, **kw: pytest.fail("failed crop must not align"))
+    monkeypatch.setitem(
+        sys.modules,
+        "stable_whisper",
+        SimpleNamespace(load_faster_whisper=lambda *a, **kw: engine),
+    )
+    monkeypatch.setattr(analysis, "ffmpeg_binary", lambda: "ffmpeg")
+    error = {
+        "timeout": subprocess.TimeoutExpired("ffmpeg", 600),
+        "decode": subprocess.CalledProcessError(1, "ffmpeg"),
+        "missing": FileNotFoundError("ffmpeg"),
+    }[failure]
+
+    def run(command, **kwargs):
+        assert "-nostdin" in command
+        assert kwargs["timeout"] == 600
+        assert kwargs["check"] and kwargs["capture_output"]
+        raise error
+
+    monkeypatch.setattr(analysis.subprocess, "run", run)
+    with pytest.raises(type(error)):
+        analysis.align_speaker_words(
+            tmp_path / "source.wav", [Cue(start=0, end=3, text="hello")], language="en"
+        )

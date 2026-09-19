@@ -166,9 +166,13 @@ def verify_sync(source, cues, options, acoustic, align):  # noqa: ANN001
         raise UnverifiedSync("발화 보정과 원문 대사 정렬이 충돌합니다. 보정을 적용하지 않습니다.")
     if coarse is not None:
         return finish(coarse, min(result[1] for result in candidates), True)
-    evidence = refine_offset(source, cues, shift)
-    if len(candidates) < 2 and (not evidence or abs(evidence[0] - shift) > 0.5):
+    try:
+        evidence = refine_offset(source, cues, shift)
+    except ValueError as exc:
+        raise UnverifiedSync("원음에 싱크를 검증할 시간 근거가 부족합니다.") from exc
+    boundary_agrees = evidence is not None and abs(evidence[0] - shift) <= 0.5
+    if len(candidates) < 2 and not boundary_agrees:
         raise UnverifiedSync("원문 대사 정렬을 교차 검증하지 못했습니다. 기존 대본을 유지합니다.")
     return finish(
-        shift, min(result[1] for result in candidates), True, evidence[1] if evidence else 0
+        shift, min(result[1] for result in candidates), True, evidence[1] if boundary_agrees else 0
     )

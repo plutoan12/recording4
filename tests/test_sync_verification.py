@@ -192,3 +192,36 @@ def test_translation_uses_corrected_source_times_not_stale_translation(tmp_path,
     assert [(c["start"], c["end"]) for c in result["translated"]] == [
         (c.start, c.end) for c in originals
     ]
+
+
+@pytest.mark.parametrize("offset, support", [(0.1, 5), (2.0, 0)])
+def test_text_recovery_reports_only_agreeing_boundary_support(setup, monkeypatch, offset, support):
+    module, source = setup
+    monkeypatch.setattr(module, "refine_offset", lambda *args: (offset, 5))
+    _, report = verify_sync(
+        source,
+        cues(),
+        SyncOptions(source_language="en"),
+        failed_acoustic,
+        lambda *args, **kwargs: cues(),
+    )
+    assert report["boundary_support"] == support
+    assert report["text_support"] == 5
+
+
+def test_recovery_boundary_error_has_safe_explanation(setup, monkeypatch):
+    module, source = setup
+
+    def invalid_audio(*args):
+        raise ValueError("private decoder diagnostic")
+
+    monkeypatch.setattr(module, "refine_offset", invalid_audio)
+    with pytest.raises(UnverifiedSync, match="시간 근거") as error:
+        verify_sync(
+            source,
+            cues(),
+            SyncOptions(source_language="en"),
+            failed_acoustic,
+            lambda *args, **kwargs: cues(),
+        )
+    assert "private" not in str(error.value)
