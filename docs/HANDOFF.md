@@ -1,5 +1,7 @@
 ## 2026-09-19: 다국어 자막 전용 번역 (Codex)
 
+- PR: https://github.com/plutoan12/recording4/pull/24 . 로컬 운영 서버에 반영 완료(같은 영구 체크아웃). API·worker·dispatcher·monitor·web 재빌드/재시작, 모든 서비스 healthy. 네 언어 실제 FFmpeg 자막 렌더 및 오디오/비디오 디코딩 통과. GitHub Python/Web 검사 통과, 이미지/스택 CI는 기록 시점 진행 중으로 PR은 아직 미병합.
+
 - 브랜치 `codex/multilingual-subtitles`. 담당: WorkflowOptions, workflow_tasks, WorkflowPanel, test_connected_workflow, 관련 문서.
 - 자막만 번역 모드와 ko/en/ja/zh 선택을 연결. 원음·원문 시각 유지, 더빙·립싱크 제외, 기존 검수·수정·SRT/VTT·YouTube 트랙 경로 재사용.
 - 365개 테스트 통과, 5개 조건부 skip. 네 언어 간 12방향을 공급자 대역으로 검증. TypeScript·Vite build·Ruff 통과. 실제 유료 번역 호출은 하지 않았으며 번역 품질 검증은 남아 있습니다.
