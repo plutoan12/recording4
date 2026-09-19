@@ -1,3 +1,11 @@
+## 2026-09-20: 실제 유료 호출·화자/STT 실측·비공개 게시 (Codex)
+
+- Google 번역 2회·ElevenLabs 더빙 1회 실제 성공. 샘플 더빙과 사용자 영상의 한국어 자막 작업은 분리. 사용자 영상은 원음 유지·더빙 없음으로 비공개 업로드 1회, 최종 private/succeeded 및 예약 없음 확인.
+- 이번 내부 정산 0.0357 USD, 월 누적 0.0796/3.40 USD. 공급자 최종 청구액과 구분. 비공개 영상 링크·승인·재개 체크포인트는 `.runtime/requested-y4-private-upload-report.json` 및 객체 저장소 `ops/requested-y4-private-review/`에 있음. 재업로드 금지, 기존 ID/세션 재사용.
+- STT CER ko 8.1%, en 1.4%, ja 9.0%, zh 34.3%(기준 20% 실패). 실제 두 화자 4문장 embedding 라벨 4/4, 화자 수 2를 미리 줬으므로 자동 검출/pyannote 검증 아님.
+- 음량·역전사·전체 디코딩·자막 프레임 검사 완료. 실제 청취는 사용자 응답 대기. HF_TOKEN 없음, Hugging Face 로그인 요청 상태. 모델 접근 동의·토큰 발급·pyannote 추론 미완료. 사용자 영상의 인명/중계 대사 언어 검수 필요.
+- PR #30 CI의 NumPy 개발 의존성 누락을 수정, 관련 4테스트·Ruff·포맷 통과. [실측 보고서](quality/live-services-2026-09-20/REPORT.md).
+
 ## 2026-09-20: 원문 정렬 검증·분석 사본 재시도 (Codex)
 
 - 브랜치 `codex/sync-text-verification`, PR #29 위 후속. 잘못된 싱크 성공 차단 → 원문 대사 정렬 → 분석 사본 잡음 제거 → 동일 140조건 재검사를 구현했습니다.
