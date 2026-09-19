@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import sys
 import urllib.error
@@ -67,6 +68,44 @@ def rows(dataset: str, config: str, split: str, count: int, offset: int = 0) -> 
         return []
 
 
+def sample_id(texts: list[str]) -> str:
+    """이 표본이 무엇인지 한 줄로 가리키는 값. 문장 목록에서만 만듭니다.
+
+    행 번호(--offset)는 표본을 고정하지 못합니다. 같은 --offset 30으로 30분
+    간격을 두고 받았더니 **문장 아홉 개가 전부 다르게** 왔습니다(측정:
+    2026-09-19 CI run #306 대 #328). 그래서 잰 값에는 행 번호가 아니라 이
+    값을 함께 남깁니다. 그러지 않으면 서로 다른 음성에서 나온 숫자를 같은
+    표에 놓고 견주게 됩니다.
+    """
+    return hashlib.sha256("\n".join(texts).encode("utf-8")).hexdigest()[:12]
+
+
+def find_window(
+    dataset: str, config: str, split: str, count: int, expect: str, limit: int, block: int = 100
+) -> list[tuple[str, str]] | None:
+    """기록해 둔 표본을 행 순서가 바뀌어도 찾아냅니다.
+
+    앞에서부터 훑으며 연속한 count개의 문장 묶음이 expect와 같은지 봅니다.
+    찾지 못하면 None입니다. 조용히 다른 표본으로 넘어가지 않습니다.
+    """
+    collected: list[tuple[str, str]] = []
+    offset = 0
+    while offset < limit:
+        got = rows(dataset, config, split, block, offset)
+        if not got:
+            break
+        for row in got:
+            if pair := audio_and_text(row):
+                collected.append(pair)
+        for start in range(max(0, len(collected) - count + 1)):
+            window = collected[start : start + count]
+            if len(window) == count and sample_id([text for _, text in window]) == expect:
+                print(f"  기록해 둔 표본을 {start}번째 쓸 수 있는 행에서 찾았습니다.")
+                return window
+        offset += block
+    return None
+
+
 def audio_and_text(row: dict) -> tuple[str, str] | None:
     """행에서 오디오 주소와 원문을 꺼냅니다. 형식이 다르면 None입니다."""
     values = row.get("row", {})
@@ -98,6 +137,13 @@ def main() -> int:
     parser.add_argument("--count", type=int, default=3)
     parser.add_argument("--offset", type=int, default=0, help="서로 다른 표본을 가져올 시작 행")
     parser.add_argument("--dataset", default=None, help="지정하면 이 데이터셋만 씁니다.")
+    # 행 번호는 표본을 고정하지 못합니다(sample_id 설명 참고). 기록해 둔 표본을
+    # 다시 쓰려면 그 표본 id를 줍니다. 찾지 못하면 실패합니다. 다른 표본으로
+    # 조용히 갈아타면 같은 이름의 조건에서 다른 숫자가 나옵니다.
+    parser.add_argument(
+        "--expect", default=None, help="기록해 둔 표본 id. 행 순서가 바뀌어도 찾습니다"
+    )
+    parser.add_argument("--search", type=int, default=500, help="--expect를 찾을 때 훑을 행 수")
     args = parser.parse_args()
     args.out.mkdir(parents=True, exist_ok=True)
 
@@ -108,16 +154,25 @@ def main() -> int:
             continue
         config, split = chosen
         print(f"  config={config} split={split}")
-        found = rows(dataset, config, split, args.count * 2, args.offset)
-        pieces: list[tuple[Path, str]] = []
-        for index, row in enumerate(found):
-            pair = audio_and_text(row)
-            if not pair:
+        if args.expect:
+            chosen = find_window(dataset, config, split, args.count, args.expect, args.search)
+            if chosen is None:
+                print(f"  표본 {args.expect}를 앞 {args.search}행에서 찾지 못했습니다.")
                 continue
-            source, text = pair
+        else:
+            found = rows(dataset, config, split, args.count * 2, args.offset)
+            chosen = [pair for row in found if (pair := audio_and_text(row))]
+        pieces: list[tuple[Path, str]] = []
+        for index, (source, text) in enumerate(chosen):
             suffix = Path(urllib.parse.urlparse(source).path).suffix or ".wav"
             raw = args.out / f"raw{index}{suffix}"
             if not download(source, raw):
+                # 기록해 둔 표본을 고른 뒤라면 한 조각만 빠져도 다른 표본이
+                # 됩니다. 건너뛰고 채우면 id가 거짓말을 합니다.
+                if args.expect:
+                    print("  기록해 둔 표본의 조각을 받지 못했습니다.")
+                    pieces = []
+                    break
                 continue
             piece = to_mono16k(raw, args.out / f"human{len(pieces)}.wav")
             pieces.append((piece, text))
@@ -126,6 +181,14 @@ def main() -> int:
                 break
         if len(pieces) >= 2:
             build_sample(pieces, args.out)
+            # 표본 id는 실제로 쓴 문장에서 만듭니다. 고르려던 것이 아니라
+            # 쓴 것을 가리켜야 합니다.
+            identifier = sample_id([text for _, text in pieces])
+            path = args.out / "expected.json"
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            payload["sample_id"] = identifier
+            path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+            print(f"표본 id {identifier} (문장 {len(pieces)}개)")
             return 0
         print("  쓸 만한 조각을 충분히 받지 못했습니다.")
 

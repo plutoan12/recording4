@@ -217,3 +217,21 @@ def test_matrix_table_keeps_each_drift_on_its_own_row(matrix, capsys):
     # 어긋남이 없으면 shift가 낫고, 크면 뒤집힙니다. 그게 줄마다 보여야 합니다.
     assert "0.040" in rows[0] and "1.000" in rows[0]
     assert "2.400" in rows[1] and "1.000" in rows[1]
+
+
+def test_matrix_reports_which_sample_it_measured(matrix, tmp_path):
+    """표에는 표본 id가 붙어야 합니다. 없으면 다른 음성의 숫자와 섞입니다."""
+    import json
+
+    (tmp_path / "expected.json").write_text(
+        json.dumps({"gap": 1.0, "sentences": [], "sample_id": "abc123def456"})
+    )
+    assert matrix.sample_name(tmp_path) == "abc123def456"
+
+
+def test_matrix_says_so_when_the_sample_id_is_missing(matrix, tmp_path):
+    import json
+
+    (tmp_path / "expected.json").write_text(json.dumps({"gap": 1.0, "sentences": []}))
+    # 없는 것을 있는 척하면 안 됩니다. 옛 폴더에는 id가 없습니다.
+    assert matrix.sample_name(tmp_path) == "알 수 없음"

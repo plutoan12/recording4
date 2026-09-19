@@ -54,6 +54,17 @@ def run(args: list[str]) -> None:
     subprocess.run(args, check=True, capture_output=True, timeout=600)
 
 
+def sample_name(directory: Path) -> str:
+    """이 음성이 어느 표본에서 나왔는지. 잰 값에는 반드시 이것이 붙어야 합니다.
+
+    행 번호는 표본을 고정하지 못합니다. 같은 `--offset 30`으로 받은 문장이
+    30분 만에 전부 바뀐 일이 있습니다. 표본 id 없이 남긴 표는 서로 다른
+    음성의 숫자를 나란히 놓게 됩니다.
+    """
+    payload = json.loads((directory / "expected.json").read_text())
+    return payload.get("sample_id", "알 수 없음")
+
+
 def make_variant(directory: Path, out: Path, spec: tuple) -> tuple[Path, list[Cue], float]:
     name, count, gap, speed, snr, music, intro = spec
     expected = json.loads((directory / "expected.json").read_text())["sentences"]
@@ -297,6 +308,8 @@ def main() -> int:
         )
     variants = [spec for spec in VARIANTS if not wanted or spec[0] in wanted]
     args.out.mkdir(parents=True, exist_ok=True)
+    sample = sample_name(args.directory)
+    print(f"표본 id {sample}")
     results = []
     for spec in variants:
         source, truth, duration = make_variant(args.directory, args.out, spec)
@@ -325,6 +338,7 @@ def main() -> int:
         (args.out / "results.json").write_text(
             json.dumps(
                 {
+                    "sample_id": sample,
                     "limit": args.limit,
                     "methods": list(methods),
                     "gated": list(gated),
@@ -337,6 +351,7 @@ def main() -> int:
         )
         print(json.dumps(entry, ensure_ascii=False), flush=True)
     summarize(results, methods, drift_values)
+    print(f"\n위 표는 표본 {sample}에서 잰 값입니다. 다른 표본의 표와 섞지 마세요.")
     failed = [
         key
         for entry in results
