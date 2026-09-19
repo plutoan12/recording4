@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import tempfile
 import uuid
 from dataclasses import asdict
@@ -39,11 +40,29 @@ from worker.analysis import transcribe
 from worker.celery_app import celery_app
 from worker.composition import TimingError, compose_dub, mix_speech, render_final
 from worker.providers import ElevenLabsSpeech, GoogleTranslator, SyncLipsync
+from worker.separation import MissingDependency as SeparationMissing
+from worker.separation import separate_background
 from worker.subtitle_rules import rules_from_settings
 
 
 class Blocked(RuntimeError):
     pass
+
+
+def separated_background(source: Path, directory: Path, settings) -> Path | None:  # noqa: ANN001
+    """원본에서 목소리를 뺀 소리. 분리를 못 하면 None이고, 더빙은 그대로 갑니다.
+
+    분리가 안 된다고 더빙 전체를 멈추지 않습니다. 배경음이 없는 결과가 나올
+    뿐이고, 그건 이 설정을 켜기 전과 같습니다. 대신 **왜 없는지 기록에
+    남깁니다.** 조용히 넘어가면 설정을 켜 놓고도 배경음이 없는 이유를 알 수
+    없습니다.
+    """
+    output = directory / "background.wav"
+    try:
+        return separate_background(source, output, device=settings.whisper_device).background
+    except SeparationMissing as exc:
+        logging.getLogger(__name__).warning("배경음 분리를 건너뜁니다: %s", exc)
+        return None
 
 
 class RemoteTerminalFailure(Blocked):
@@ -303,8 +322,26 @@ def execute_step(name, options, data, asset, directory, stage_id, remote_id, sav
         audio = directory / "speech.wav"
         storage.download_file(data["audio_key"], audio)
         output = directory / "dubbed.mp4"
-        compose_dub(source, audio, output, data["start"], data["duration"])
-        return {"base_key": upload(storage, f"{prefix}/dubbed.mp4", output, "video/mp4")}
+        # 배경음을 켜지 않으면 원본 오디오가 통째로 사라집니다. 음악 위에서
+        # 말하는 영상이면 더빙본은 말만 남습니다.
+        background = (
+            separated_background(source, directory, settings)
+            if settings.background_audio_enabled
+            else None
+        )
+        compose_dub(
+            source,
+            audio,
+            output,
+            data["start"],
+            data["duration"],
+            background=background,
+            background_gain_db=settings.background_gain_db,
+        )
+        return {
+            "base_key": upload(storage, f"{prefix}/dubbed.mp4", output, "video/mp4"),
+            "background": bool(background),
+        }
     if name == "lipsync":
         with httpx.Client(follow_redirects=False) as client:
             adapter = SyncLipsync(settings.sync_api_key, client=client, allow_paid=True)

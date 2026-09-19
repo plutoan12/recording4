@@ -201,6 +201,16 @@ jobs:
           print('화자 분리 진입점', DiarizationPipeline.__module__)
           from speechbrain.inference.speaker import EncoderClassifier
           print('목소리 특징 진입점', EncoderClassifier.__module__)
+          # 배경음 분리는 torchaudio가 싣고 있는 모델을 씁니다. 별도 패키지를
+          # 넣지 않으려고 고른 것이라, 이 번들이 없으면 방법부터 다시 정해야
+          # 합니다. 모델을 내려받지는 않습니다.
+          import torchaudio
+          bundle = getattr(torchaudio.pipelines, 'HDEMUCS_HIGH_MUSDB_PLUS', None)
+          print('torchaudio', torchaudio.__version__, '/ 배경음 분리 번들', bundle is not None)
+          assert bundle is not None, (
+              'torchaudio에 HDEMUCS_HIGH_MUSDB_PLUS가 없습니다. worker/separation.py를 고쳐야 합니다.'
+          )
+          print('분리 갈래', bundle.sources if hasattr(bundle, 'sources') else '(모델을 받아야 알 수 있음)')
           "
 
       - name: API 이미지 빌드
@@ -312,6 +322,20 @@ jobs:
 
       # 자막 기본값이 실제 세로 화면에서 여백 안에 한 줄로 들어가는지 렌더해서 잽니다.
       # 폰트 메트릭 계산이 아니라 libass 렌더 결과를 FFmpeg cropdetect로 측정합니다.
+      # 분리는 모델을 내려받고 CPU에서 느립니다. 정렬 검증과 같은 라벨에서만
+      # 돌립니다. 아는 두 소리(합성 음성 + 순음)를 섞어 무엇이 남는지 잽니다.
+      - name: 배경음 분리 검증
+        if: |
+          contains(github.event.pull_request.labels.*.name, 'verify-align') ||
+          contains(github.event.head_commit.message, '[verify-align]')
+        run: |
+          sudo apt-get update && sudo apt-get install -y espeak-ng ffmpeg
+          # 합성 음성은 워커 이미지에 없습니다. 표본은 러너에서 만들고 넘깁니다.
+          python3 scripts/verify_separation.py --make --out /tmp/separation
+          docker run --rm -v /tmp/separation:/audio -v "$PWD/scripts:/work:ro" \
+            --entrypoint python recording4-worker:ci \
+            /work/verify_separation.py --directory /audio
+
       - name: 자막 화면 측정
         if: ${{ !cancelled() }}
         run: |

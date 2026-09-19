@@ -43,6 +43,13 @@ class Settings(BaseSettings):
     subtitle_min_duration: float = 1.0
     subtitle_max_duration: float = 7.0
 
+    # 더빙은 원본 오디오를 통째로 바꿉니다. 음악과 효과음도 같이 사라집니다.
+    # 켜면 원본에서 목소리만 빼고 남은 소리를 대사 아래에 깝니다. 느려서
+    # (CPU에서 1분 소리에 수십 초) 기본은 꺼 둡니다. 남는 목소리 흔적은
+    # scripts/verify_separation.py가 잽니다.
+    background_audio_enabled: bool = False
+    background_gain_db: float = Field(default=-9.0, le=0)
+
     # Explicit deployment switches: tests and default installs never call paid APIs.
     paid_processing_enabled: bool = False
     max_job_budget_usd: Decimal | None = Field(default=None, ge=0)
