@@ -142,26 +142,35 @@ def main() -> int:
     print(f"기본 한도({DEFAULT_RULES.max_chars_per_line}자) 한 줄: {filled[0]}x{filled[1]}px")
     print(f"예문 '{SAMPLE}' (폭 {text_width(SAMPLE):.1f}자): {sample_box[0]}px")
 
-    # 영어 자막은 지침이 달라 줄이 더 깁니다(42자). 폭으로는 21이라 한글
-    # 16자보다 큽니다. 같은 화면에 들어가는지 직접 재야 합니다.
+    # 영어는 지침 줄 길이가 더 깁니다(42자). 라틴 글자는 폭이 제각각이라
+    # 가장 넓은 M으로 잽니다. 실제 문장은 이보다 좁지만, 넘치면 libass가
+    # 제멋대로 다시 줄바꿈하므로 최악을 기준으로 둡니다.
+    print(f"\n{'영어 글자 수(M)':>14} {'렌더 폭(px)':>12} {'화면 대비':>10} {'여백 안':>8}")
+    english_fits = 0
+    for count in (30, 34, 36, 38, 40, 42):
+        text = "M" * count
+        box = measure(text, spec_for(text, args.font_size, args.width, args.height), single_line)
+        if box is None:
+            print(f"{count:>14} {'측정 실패':>12}")
+            continue
+        inside = box[0] <= usable
+        english_fits = max(english_fits, count) if inside else english_fits
+        print(
+            f"{count:>14} {box[0]:>12} {box[0] / args.width:>9.0%} "
+            f"{'예' if inside else '아니오':>8}"
+        )
     english_rules = rules_for("en")
-    english = "M" * int(english_rules.max_chars_per_line * 2)
-    english_box = measure(
-        english, spec_for(english, args.font_size, args.width, args.height), single_line
-    )
-    if english_box is None:
-        print("영어 자막이 그려지지 않았습니다.")
-        return 1
+    limit = int(english_rules.max_chars_per_line * 2)
     print(
-        f"영어 한도({len(english)}자, 폭 {text_width(english):.1f}) 한 줄: "
-        f"{english_box[0]}x{english_box[1]}px ({english_box[0] / args.width:.0%})"
+        f"글자 크기 {args.font_size}에서 여백 안에 들어가는 영어 글자 수: {english_fits}자까지 "
+        f"(기본 한도 {limit}자)"
     )
 
     problems = []
-    if english_box[0] > usable:
+    if limit > english_fits:
         problems.append(
-            f"영어 줄 길이 {len(english)}자가 {english_box[0]}px로 여백 안({usable}px)을 "
-            "넘습니다. 영어 기본값을 줄이거나 글자 크기를 낮춰야 합니다."
+            f"영어 기본 한도 {limit}자가 여백 안({usable}px)에 안 들어갑니다. "
+            f"실측으로 {english_fits}자까지입니다. 기본값을 줄이거나 글자 크기를 낮추세요."
         )
     if filled[0] > usable:
         problems.append(

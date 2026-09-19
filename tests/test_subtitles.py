@@ -180,13 +180,16 @@ def test_write_subtitles_applies_rules_to_the_ass_file(tmp_path) -> None:  # noq
     assert "가나다 라마바 사아자 차카타 파하가 나다라 마바사 아자차" not in body
 
 
-def test_english_rules_follow_the_english_guideline() -> None:
-    """지침 숫자는 언어마다 다릅니다. 한국어 숫자를 영어에 그대로 쓰면
-    줄이 32자에서 잘리고(지침 42자) 읽기 속도는 24자/초까지 봐줍니다(지침 20자/초)."""
+def test_english_rules_use_the_measured_line_length() -> None:
+    """지침은 줄당 42자지만 이 세로 화면에서는 안 들어갑니다(측정: M 42자가
+    1068px, 여백 980px). 실측으로 들어가는 38자를 씁니다. 읽기 속도는 지침대로입니다.
+
+    한국어 숫자를 그대로 쓰면 영어 줄이 32자에서 잘리고 읽기 속도는 24자/초까지
+    봐줍니다. 그래서 언어별 값이 필요합니다."""
     from pipeline.subtitles import rules_for, text_width
 
     rules = rules_for("en")
-    assert text_width("a" * 42) == rules.max_chars_per_line
+    assert text_width("M" * 38) == rules.max_chars_per_line
     assert text_width("a" * 20) == rules.max_cps
 
 

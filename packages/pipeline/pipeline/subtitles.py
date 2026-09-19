@@ -66,8 +66,11 @@ DEFAULT_RULES = SubtitleRules()
 LANGUAGE_RULES: dict[str, SubtitleRules] = {
     # Netflix 한국어 지침 I.2/I.15: 줄당 16자, 초당 12자.
     "ko": DEFAULT_RULES,
-    # Netflix 영어 지침: 줄당 42자, 초당 20자. 폭으로는 21과 10.0입니다.
-    "en": SubtitleRules(max_chars_per_line=21, max_cps=10.0),
+    # Netflix 영어 지침은 줄당 42자지만 이 화면에서는 안 들어갑니다(측정: 가장
+    # 넓은 글자 M으로 42자가 1068px, 쓸 수 있는 폭은 980px). 지침은 가로 화면
+    # 기준이고 우리는 세로 숏폼에 큰 글자를 씁니다. 실측으로 들어가는 38자
+    # (폭 19)로 둡니다. 읽기 속도는 지침대로 초당 20자(폭 10.0)입니다.
+    "en": SubtitleRules(max_chars_per_line=19, max_cps=10.0),
 }
 
 
