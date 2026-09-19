@@ -29,6 +29,9 @@ def main() -> int:
 
     human = sorted((args.human or Path("/nonexistent")).glob("human*.wav"))
     if len(human) >= 2:
+        # 사람 목소리 조각에는 LINES_A의 글을 붙입니다. 실제로 하는 말과
+        # 다릅니다. 화자 분리는 누가 언제 말했는지만 보므로 상관없지만, 이
+        # 음성을 전사 검증에 쓰면 안 됩니다.
         first = [(path, text) for path, text in zip(human[:2], LINES_A, strict=False)]
         print(f"화자 A: 사람 목소리 {len(first)}조각")
     else:

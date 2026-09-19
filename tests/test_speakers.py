@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from pipeline.editing import Cue
@@ -66,3 +68,63 @@ def test_totals_sum_per_speaker_in_descending_order() -> None:
     ]
     assert speaker_totals(turns) == {"B": 3.0, "A": 2.0}
     assert list(speaker_totals(turns)) == ["B", "A"]
+
+
+def test_windows_cut_a_long_span_into_overlapping_pieces() -> None:
+    """한 구간 안에서 화자가 바뀔 수 있습니다. 통째로 보면 경계를 못 찾습니다."""
+    from pipeline.speakers import windows
+
+    cut = windows([(0.0, 3.0)], length=1.5, hop=0.75)
+    assert cut[0] == (0.0, 1.5)
+    assert cut[1][0] == 0.75  # 겹칩니다
+    assert cut[-1][1] == 3.0  # 끝을 버리지 않습니다
+
+
+def test_a_span_shorter_than_the_window_is_kept_whole() -> None:
+    from pipeline.speakers import windows
+
+    assert windows([(1.0, 1.9)], length=1.5, hop=0.75) == [(1.0, 1.9)]
+
+
+def test_cluster_splits_two_directions_of_vectors() -> None:
+    """같은 방향끼리 묶입니다. 크기가 달라도 방향이 같으면 같은 묶음입니다."""
+    from pipeline.speakers import cluster
+
+    labels = cluster([[1.0, 0.0], [0.9, 0.1], [0.0, 1.0], [0.1, 2.0]], 2)
+    assert labels[0] == labels[1]
+    assert labels[2] == labels[3]
+    assert labels[0] != labels[2]
+
+
+def test_cluster_is_the_same_on_a_second_run() -> None:
+    """무작위 시작점을 쓰면 같은 음성을 두 번 재도 답이 달라집니다."""
+    from pipeline.speakers import cluster
+
+    vectors = [[1.0, 0.0], [0.8, 0.2], [0.0, 1.0], [0.2, 0.9], [0.9, 0.1]]
+    assert cluster(vectors, 2) == cluster(vectors, 2)
+
+
+def test_turns_join_neighbouring_windows_of_the_same_voice() -> None:
+    from pipeline.speakers import turns_from_labels
+
+    turns = turns_from_labels([(0.0, 1.5), (0.75, 2.25), (3.0, 4.5)], [0, 0, 1])
+    assert [(t.start, t.end, t.speaker) for t in turns] == [
+        (0.0, 2.25, "SPEAKER_00"),
+        (3.0, 4.5, "SPEAKER_01"),
+    ]
+
+
+def test_a_voice_change_inside_a_span_becomes_two_turns() -> None:
+    from pipeline.speakers import turns_from_labels
+
+    turns = turns_from_labels([(0.0, 1.5), (1.5, 3.0)], [0, 1])
+    assert [t.speaker for t in turns] == ["SPEAKER_00", "SPEAKER_01"]
+    assert turns[1].start == 1.5
+
+
+def test_embedding_diarizer_refuses_a_speaker_count_below_one() -> None:
+    """모델을 내려받기 전에 막습니다. 잘못된 값으로 큰 모델을 부르지 않습니다."""
+    from worker.analysis import diarize_by_embedding
+
+    with pytest.raises(ValueError):
+        diarize_by_embedding(Path("/nonexistent.wav"), speakers=0)

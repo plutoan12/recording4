@@ -9,12 +9,13 @@ from pathlib import Path
 from pipeline.alignment import (
     WordTiming,
     cues_for_lines,
+    merge_spans,
     snap_starts,
     spans_from_timestamps,
     supported_options,
 )
 from pipeline.editing import Cue
-from pipeline.speakers import SpeakerTurn
+from pipeline.speakers import SpeakerTurn, cluster, turns_from_labels, windows
 from worker.rendering import ffmpeg_binary
 
 
@@ -173,6 +174,66 @@ def speech_spans(source: Path) -> list[tuple[float, float]]:
     return found if found else silence_spans(source)
 
 
+# 목소리 특징을 뽑는 공개 모델. 약관 동의도 토큰도 필요 없습니다.
+_EMBEDDING_MODEL = "speechbrain/spkrec-ecapa-voxceleb"
+
+
+def diarize_by_embedding(
+    source: Path,
+    *,
+    device: str = "cpu",
+    speakers: int = 2,
+    model: str = _EMBEDDING_MODEL,
+) -> list[SpeakerTurn]:
+    """토큰 없이 도는 화자 분리. 발화 구간을 잘라 목소리끼리 묶습니다.
+
+    pyannote는 게이트 모델이라 토큰이 있어야 합니다. 토큰이 없는 환경에서도
+    화자를 나눌 수 있게, 공개 목소리 특징 모델과 우리 묶기 규칙으로 같은 일을
+    합니다. 발화 구간은 이미 쓰고 있는 VAD가 찾고, 그 구간을 겹치는 창으로
+    잘라 창마다 특징을 뽑은 뒤 코사인 거리로 묶습니다.
+
+    **품질은 pyannote와 다릅니다.** 겹쳐 말하는 구간을 다루지 못하고, 화자
+    수를 스스로 세지 않아 `speakers`로 알려 줘야 합니다. 목소리가 비슷하면
+    갈리지 않습니다. 그래서 기본 공급자가 아니라 선택지입니다.
+    """
+    if speakers < 1:
+        raise ValueError("화자 수는 1 이상이어야 합니다.")
+    try:
+        import torch
+        from faster_whisper.audio import decode_audio
+        from speechbrain.inference.speaker import EncoderClassifier
+    except ImportError as exc:
+        raise MissingDependency(
+            "목소리 특징 모델 의존성이 없습니다. pip install '.[subtitles]'를 실행하세요."
+        ) from exc
+
+    audio = decode_audio(str(source), sampling_rate=16000)
+    spans = merge_spans(speech_spans(source))
+    cut = windows(spans)
+    if not cut:
+        raise RuntimeError("발화 구간을 찾지 못했습니다. 음성이 있는 원본인지 확인하세요.")
+
+    encoder = EncoderClassifier.from_hparams(source=model, run_opts={"device": device})
+    vectors: list[list[float]] = []
+    kept: list[tuple[float, float]] = []
+    for begin, finish in cut:
+        piece = audio[int(begin * 16000) : int(finish * 16000)]
+        # 너무 짧은 조각은 특징이 불안정합니다. 묶기를 흔들기보다 버립니다.
+        if len(piece) < 16000 // 2:
+            continue
+        with torch.no_grad():
+            found = encoder.encode_batch(torch.tensor(piece).unsqueeze(0))
+        vectors.append(found.squeeze().tolist())
+        kept.append((begin, finish))
+    if not vectors:
+        raise RuntimeError("특징을 뽑을 만큼 긴 발화가 없습니다.")
+
+    turns = turns_from_labels(kept, cluster(vectors, min(speakers, len(vectors))))
+    if not turns:
+        raise RuntimeError("화자를 찾지 못했습니다. 음성이 있는 원본인지 확인하세요.")
+    return turns
+
+
 def diarize(
     source: Path,
     *,
@@ -185,6 +246,7 @@ def diarize(
 
     pyannote 모델이 Hugging Face 게이트 모델이라 토큰과 약관 동의가 필요합니다.
     토큰이 없으면 호출 전에 막습니다. 모델은 첫 실행 때 내려받습니다.
+    토큰 없이 쓰려면 `diarize_by_embedding()`이 있습니다. 품질이 다릅니다.
     """
     if not token:
         raise MissingDependency(

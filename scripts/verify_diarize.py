@@ -1,11 +1,17 @@
 #!/usr/bin/env python3
-"""pyannote 화자 분리를 실제로 돌려 보고 화자가 갈리는지 확인합니다.
+"""화자 분리를 실제로 돌려 보고 화자가 갈리는지 확인합니다.
 
-지금까지 화자 분리는 대역으로만 검증했습니다. 실제 모델은 게이트 모델이라
-Hugging Face 토큰과 약관 동의가 필요해서 CI에서 돌릴 수 없었습니다. 토큰이
-있으면 이 스크립트가 끝까지 확인합니다.
+공급자가 둘입니다.
+
+- `pyannote`: 운영 기본값. 게이트 모델이라 `R4_HF_TOKEN`이 있어야 돕니다.
+- `embedding`: 공개 목소리 특징 모델. 토큰이 필요 없어 어디서나 돕니다.
+
+기본값 `auto`는 토큰이 있으면 pyannote, 없으면 embedding으로 갑니다.
+**embedding이 통과했다고 pyannote가 검증된 것은 아닙니다.** 둘은 다른
+모델이고 품질도 다릅니다. 어느 쪽으로 쟀는지 항상 출력합니다.
 
     R4_HF_TOKEN=... python scripts/verify_diarize.py --directory /audio
+    python scripts/verify_diarize.py --directory /audio --provider embedding
 
 make_two_speaker_sample.py가 만든 음성은 조각마다 화자가 정해져 있습니다.
 그 정답과 분리 결과를 맞춰 봅니다.
@@ -28,7 +34,7 @@ from pathlib import Path
 
 from pipeline.editing import Cue
 from pipeline.speakers import assign_speakers, speaker_totals
-from worker.analysis import diarize
+from worker.analysis import diarize, diarize_by_embedding
 
 
 def main() -> int:
@@ -36,10 +42,14 @@ def main() -> int:
     parser.add_argument("--directory", type=Path, required=True)
     parser.add_argument("--min-speakers", type=int, default=None)
     parser.add_argument("--max-speakers", type=int, default=None)
+    parser.add_argument("--provider", choices=["auto", "pyannote", "embedding"], default="auto")
     args = parser.parse_args()
 
     token = os.environ.get("R4_HF_TOKEN")
-    if not token:
+    provider = args.provider
+    if provider == "auto":
+        provider = "pyannote" if token else "embedding"
+    if provider == "pyannote" and not token:
         print("R4_HF_TOKEN이 없습니다. pyannote 약관에 동의한 계정의 토큰이 필요합니다.")
         return 2
 
@@ -50,14 +60,19 @@ def main() -> int:
         return 2
     audio = args.directory / "sample.wav"
 
-    print(f"음성 {audio}, 문장 {len(sentences)}개")
-    turns = diarize(
-        audio,
-        token=token,
-        device="cpu",
-        min_speakers=args.min_speakers,
-        max_speakers=args.max_speakers,
-    )
+    print(f"공급자 {provider}, 음성 {audio}, 문장 {len(sentences)}개")
+    if provider == "embedding":
+        # 이 공급자는 화자 수를 스스로 세지 않습니다. 정답에 있는 화자 수를 줍니다.
+        speakers = args.max_speakers or len({item["speaker"] for item in sentences})
+        turns = diarize_by_embedding(audio, device="cpu", speakers=speakers)
+    else:
+        turns = diarize(
+            audio,
+            token=token,
+            device="cpu",
+            min_speakers=args.min_speakers,
+            max_speakers=args.max_speakers,
+        )
     print(f"화자 구간 {len(turns)}개")
     for turn in turns:
         print(f"  {turn.start:>6.2f} ~ {turn.end:>6.2f}  {turn.speaker}")
@@ -95,7 +110,9 @@ def main() -> int:
         for problem in problems:
             print(f"- {problem}")
         return 1
-    print(f"\n화자 분리가 두 목소리를 갈랐습니다: {chosen}")
+    print(f"\n{provider} 화자 분리가 두 목소리를 갈랐습니다: {chosen}")
+    if provider == "embedding":
+        print("이 결과는 pyannote를 검증하지 않습니다. 둘은 다른 모델입니다.")
     return 0
 
 
