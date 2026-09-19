@@ -3,6 +3,8 @@
 순수 계산만 둡니다. 파일을 읽거나 쓰지 않고 문자열만 돌려줍니다. 파일 형식
 변환은 이미 쓰고 있는 pysubs2가 맡습니다(근거는 docs/TECH_DECISIONS.md).
 
+밖에서 만든 자막 파일을 읽어 대본으로 들이는 일도 여기서 합니다(`parse_subtitles`).
+
 내보내는 자막은 영상에 굽는 자막과 같습니다. 구간 밖 자막을 빼고, 시각을 출력
 시작 기준으로 옮기고(`clip_cues`), 같은 표시 규칙으로 줄바꿈·분할합니다
 (`apply_rules`). 출력 구간은 경로마다 다릅니다. 숏폼 편집본은 편집본의
@@ -19,7 +21,7 @@ from typing import Literal, get_args
 import pysubs2
 
 from pipeline.editing import Cue, EditSpec, clip_cues
-from pipeline.subtitles import DEFAULT_RULES, SubtitleRules, apply_rules
+from pipeline.subtitles import DEFAULT_RULES, SubtitleRules, apply_rules, normalize
 
 SubtitleFormat = Literal["srt", "vtt"]
 
@@ -79,3 +81,45 @@ def clip_subtitle_file(
 ) -> str:
     """숏폼 편집본 자막. 출력 구간은 편집본의 시작·끝입니다."""
     return subtitle_file(spec.cues, spec.start, spec.end, subtitle_format, rules)
+
+
+MAX_IMPORT_CHARS = 2000
+"""자막 하나의 글자 수 상한. `pipeline.editing.Cue`가 받는 값과 같습니다."""
+
+
+def parse_subtitles(text: str) -> tuple[list[Cue], list[str]]:
+    """자막 파일 글자를 대본 자막으로 읽습니다. (자막, 뺀 것에 대한 설명)을 돌려줍니다.
+
+    SRT·WebVTT·ASS를 형식 표시 없이 읽습니다(pysubs2 자동 판별). 꾸밈 표기는
+    벗기고 글자만 남깁니다. 재생기가 넣은 기울임·색·위치 지정은 대본이 아니며,
+    우리 표시 규칙이 화면 모양을 따로 정합니다.
+
+    줄바꿈은 공백으로 합칩니다. 파일의 줄바꿈은 그 도구가 그 화면에 맞춰 끊은
+    결과라 우리 화면에는 맞지 않습니다. 렌더가 우리 규칙으로 다시 끊습니다.
+
+    **뺀 자막은 조용히 버리지 않고 무엇을 왜 뺐는지 함께 돌려줍니다.** 부르는
+    쪽이 사람에게 보여 줍니다.
+    """
+    try:
+        parsed = pysubs2.SSAFile.from_string(text)
+    except Exception as exc:  # noqa: BLE001 - pysubs2의 여러 실패를 한 말로 바꿉니다.
+        raise ValueError(f"자막 파일을 읽지 못했습니다: {type(exc).__name__}") from None
+
+    cues: list[Cue] = []
+    notes: list[str] = []
+    for index, event in enumerate(parsed, start=1):
+        if event.is_comment or event.is_drawing:
+            continue
+        body = normalize(event.plaintext)
+        start, end = event.start / 1000, event.end / 1000
+        if not body:
+            notes.append(f"{index}번: 글자가 없어 뺐습니다.")
+        elif end <= start or start < 0:
+            notes.append(f"{index}번: 시간이 올바르지 않아 뺐습니다({start:.3f}~{end:.3f}초).")
+        elif len(body) > MAX_IMPORT_CHARS:
+            notes.append(f"{index}번: {len(body)}자로 한도({MAX_IMPORT_CHARS}자)를 넘어 뺐습니다.")
+        else:
+            cues.append(Cue(start=start, end=end, text=body))
+    if not cues:
+        raise ValueError("읽을 수 있는 자막이 없습니다. 파일을 확인하세요.")
+    return sorted(cues, key=lambda c: c.start), notes

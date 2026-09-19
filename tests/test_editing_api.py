@@ -238,3 +238,37 @@ def test_broken_rules_record_falls_back_instead_of_failing() -> None:
 
     rules, source = rules_from_record({"max_chars_per_line": 9})
     assert source == "rendered" and rules.max_chars_per_line == 9
+
+
+def test_imported_subtitles_become_a_new_transcript_version(client, auth_headers, asset):
+    """밖에서 만든 자막 파일을 대본으로 들입니다. 기존 버전은 남습니다."""
+    path = f"/source-assets/{asset.id}/transcript"
+    client.put(
+        path, headers=auth_headers, json={"cues": [{"start": 1, "end": 2, "text": "옛 대본"}]}
+    )
+    srt = "1\n00:00:03,000 --> 00:00:05,000\n들여온 자막\n둘째 줄\n"
+
+    response = client.post(f"{path}/import", headers=auth_headers, json={"text": srt})
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["version"] == 2 and body["count"] == 1 and body["skipped"] == []
+    assert client.get(path, headers=auth_headers).json() == [
+        {"start": 3.0, "end": 5.0, "text": "들여온 자막 둘째 줄"}
+    ]
+
+
+def test_import_reports_what_it_skipped_and_refuses_what_it_cannot_use(client, auth_headers, asset):
+    path = f"/source-assets/{asset.id}/transcript/import"
+    assert client.post(path, json={"text": "x"}).status_code == 401
+    assert client.post(path, headers=auth_headers, json={"text": "자막 아님"}).status_code == 422
+
+    # 원본 길이(120초)를 넘는 자막은 저장하지 않습니다.
+    too_long = "1\n00:02:30,000 --> 00:02:35,000\n원본보다 뒤\n"
+    assert client.post(path, headers=auth_headers, json={"text": too_long}).status_code == 422
+
+    mixed = (
+        "1\n00:00:01,000 --> 00:00:02,000\n쓸 자막\n\n2\n00:00:03,000 --> 00:00:03,000\n길이 0\n"
+    )
+    body = client.post(path, headers=auth_headers, json={"text": mixed}).json()
+    assert body["count"] == 1
+    assert len(body["skipped"]) == 1 and "2번" in body["skipped"][0]

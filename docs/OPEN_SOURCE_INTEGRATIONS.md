@@ -98,7 +98,7 @@
 
 ### 검토했으나 추가하지 않은 자막 도구
 
-- [ffsubsync](https://github.com/smacke/ffsubsync) (MIT): 이미 있는 자막 파일의 싱크를 오디오로 보정합니다. 지금은 자막을 우리가 만들어 쓸 자리가 없습니다. 외부 SRT 반입 경로가 생기면 그때가 적기입니다.
+- [ffsubsync](https://github.com/smacke/ffsubsync) (MIT): 이미 있는 자막 파일의 싱크를 오디오로 보정합니다. **반입 경로는 이제 있습니다**(`POST /source-assets/{id}/transcript/import`). 다만 들인 자막이 실제로 얼마나 어긋나는지 재 본 적이 없어 아직 넣지 않았습니다. 어긋남을 측정한 뒤 넣는 것이 순서입니다. 새 의존성이며 보정은 원본 음성 분석이 필요합니다.
 - silero-vad (MIT): 별도로 설치하지 않았습니다. faster-whisper가 Silero VAD를 내장하고 있고 `analysis.py:transcribe()`가 `vad_filter=True`로 이미 사용합니다.
 - [subaligner](https://github.com/baxtree/subaligner), NeMo Forced Aligner: 정렬 품질은 좋으나 TensorFlow/NeMo를 통째로 끌어옵니다. 이미 CPU 전용 휠로 설치량을 줄인 결정과 어긋납니다.
 - `srt`, `webvtt-py`: pysubs2가 SRT·WebVTT·ASS를 모두 처리하므로 중복입니다. 내보내기도 pysubs2로 구현했습니다(`pipeline/subtitle_files.py`).
@@ -111,6 +111,7 @@
 - `/clips`: 구간·화면·자막·제목을 검증하고 불변 편집본 및 렌더 요청 생성.
 - `media.run` → Celery 워커: S3 다운로드 → 로컬 처리 → 결과 업로드 → DB 결과물 등록.
 - `/source-assets/{id}/analyze`: 로컬 STT 또는 장면 감지. 분석 의존성 설치가 필요하며 STT 첫 실행은 모델을 다운로드할 수 있습니다.
+- `/source-assets/{id}/transcript/import`: 밖에서 만든 SRT·WebVTT·ASS 파일을 대본 새 버전으로 들입니다. 형식은 pysubs2가 글자를 보고 판별하고, 꾸밈 표기는 벗깁니다. 시각은 파일에 적힌 그대로 씁니다.
 - YouTube 자막 트랙: 게시할 때 같은 자막을 `captions.insert`로 올립니다(`R4_YOUTUBE_CAPTIONS_ENABLED`, 기본 꺼짐). 같은 언어 트랙이 이미 있으면 올리지 않고, 실패해도 게시를 막지 않습니다.
 - `/clips/{id}/subtitles?format=srt|vtt`, `/jobs/{id}/subtitles?format=srt|vtt`: 숏폼 편집본과 번역·더빙 작업의 자막을 SRT·WebVTT 파일로 내려받습니다. 생성은 `pipeline/subtitle_files.py:subtitle_file()`이며 pysubs2가 형식을 씁니다. 저장하지 않고 요청할 때 만듭니다.
 
