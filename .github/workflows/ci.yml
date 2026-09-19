@@ -244,10 +244,9 @@ jobs:
       # (짧은 발화 간격 0.03초)를 골랐습니다. 조건 10가지를 둘 다 돌리면 이 잡의
       # 시간 예산을 넘습니다.
       #
-      # 조건을 바꿔 가며 잽니다. short,fast,dense에서는 통째로 옮기기가
-      # 0.030~0.500초, 강제 정렬이 0.746~0.809초였습니다(run #288/#296).
-      # 이제 통째로 옮기기가 더 약해질 만한 조건을 봅니다. 긴 무음·느린
-      # 말·잡음입니다. 여기서도 이기면 조건에 따라 갈릴 여지가 없습니다.
+      # 조건을 바꿔 가며 잽니다. 여섯 조건에서 통째로 옮기기가 0.030~0.500초,
+      # 강제 정렬이 0.746~2.628초였습니다(run #288/#296/#302). 남은 네 조건으로
+      # 열 가지를 채웁니다. 긴 영상·작은 음량·약한 잡음·음악 도입입니다.
       #
       # align_nosnap은 뺐습니다. 스냅 가설이 기각됐습니다(-0.076~+0.022초).
       #
@@ -265,7 +264,8 @@ jobs:
           docker run --rm -v /tmp/matrix-audio:/audio -v /tmp/matrix-out:/out \
             -v "$PWD/scripts:/work:ro" --entrypoint python recording4-worker:ci \
             /work/verify_sync_matrix.py --directory /audio --out /out \
-            --method shift,align --gate shift --variants long_pauses,slow,noise_5db
+            --method shift,align --gate shift \
+            --variants long_repeated,quiet_voice,noise_15db,music_intro
           cat /tmp/matrix-out/results.json
 
       # 합성 음성만으로는 사람 목소리 정확도를 말할 수 없습니다. 공개 한국어
