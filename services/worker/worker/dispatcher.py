@@ -20,6 +20,8 @@ TOPIC_TASKS: dict[str, str] = {
     "source_asset.import_link": "worker.link_import.import_source_link",
     "source_asset.verify": "worker.tasks.verify_source_asset",
     "media.run": "worker.media_tasks.run_media",
+    # 하이라이트 추천만 유료라 따로 돕니다. 예산을 먼저 잡습니다.
+    "media.highlights": "worker.highlight_tasks.run_highlights",
     "job.start": "worker.workflow_tasks.run_job",
     "job.step": "worker.workflow_tasks.run_job",
     "publication.run": "worker.publication_tasks.run_publication",

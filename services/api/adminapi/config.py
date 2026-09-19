@@ -43,6 +43,13 @@ class Settings(BaseSettings):
     subtitle_min_duration: float = 1.0
     subtitle_max_duration: float = 7.0
 
+    # 더빙은 원본 오디오를 통째로 바꿉니다. 음악과 효과음도 같이 사라집니다.
+    # 켜면 원본에서 목소리만 빼고 남은 소리를 대사 아래에 깝니다. 느려서
+    # (CPU에서 1분 소리에 수십 초) 기본은 꺼 둡니다. 남는 목소리 흔적은
+    # scripts/verify_separation.py가 잽니다.
+    background_audio_enabled: bool = False
+    background_gain_db: float = Field(default=-9.0, le=0)
+
     # Explicit deployment switches: tests and default installs never call paid APIs.
     paid_processing_enabled: bool = False
     max_job_budget_usd: Decimal | None = Field(default=None, ge=0)
@@ -56,6 +63,9 @@ class Settings(BaseSettings):
     translate_usd_per_1k_chars: Decimal | None = None
     tts_usd_per_1k_chars: Decimal | None = None
     lipsync_usd_per_second: Decimal | None = None
+    # 하이라이트 추천(Claude). 실제 청구는 토큰 단위인데 여기는 글자 수로
+    # 잡으므로 **넉넉한 상한**을 적습니다. 비어 있으면 추천이 돌지 않습니다.
+    highlight_usd_per_1k_chars: Decimal | None = None
     youtube_upload_enabled: bool = False
     # 선택 가능한 자막 트랙 업로드. 영상에는 자막이 이미 구워져 있으므로 켜면
     # 시청자 화면에 자막이 두 벌 보일 수 있습니다. 확인한 뒤 켜세요.

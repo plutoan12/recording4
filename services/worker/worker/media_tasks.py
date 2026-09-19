@@ -25,6 +25,8 @@ from worker.analysis import (
     transcribe,
 )
 from worker.celery_app import celery_app
+from worker.faces import MissingDependency as FacesMissing
+from worker.faces import suggest as suggest_focus_point
 from worker.rendering import render_clip
 from worker.subtitle_rules import rules_from_settings
 
@@ -92,6 +94,10 @@ def run_media(task_id: str) -> dict:
                 result = {"storage_key": output_key, "subtitle_rules": asdict(rules)}
             elif kind == "scenes":
                 result = {"scenes": detect_scenes(source)}
+            elif kind == "faces":
+                # 제안만 만듭니다. focus_x를 여기서 바꾸지 않습니다. 검출기가
+                # 틀리면 사람이 맞춘 값을 망칩니다.
+                result = {"focus": asdict(suggest_focus_point(source))}
             elif kind == "diarize":
                 # 누가 말했는지만 찾습니다. 대본 글자는 건드리지 않습니다.
                 turns = diarize(
@@ -234,9 +240,12 @@ def run_media(task_id: str) -> dict:
                 task.state = "failed"
                 # Exceptions from SDKs can contain credentials/URLs. Expose type only.
                 # 설치 안내는 저희가 쓴 고정 문구라 그대로 보여 줍니다.
+                # 설치·설정이 빠졌다는 안내는 모듈마다 자기 예외를 씁니다.
+                # 하나만 적어 두면 나머지는 "처리 실패"로 뭉개져서 무엇을
+                # 설치해야 하는지 알 수 없습니다.
                 task.error = (
                     str(exc)
-                    if isinstance(exc, MissingDependency)
+                    if isinstance(exc, MissingDependency | FacesMissing)
                     else f"{type(exc).__name__}: 처리 실패. 워커 설정과 입력을 확인하세요."
                 )
                 task.finished_at = utcnow()

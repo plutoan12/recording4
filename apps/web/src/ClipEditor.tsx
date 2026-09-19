@@ -7,7 +7,10 @@ type Cue = { start: number; end: number; text: string }
 type Suggestion = { start: number; end: number; title: string; reason: string }
 type Violation = { index: number; kind: string; detail: string }
 type Task = { id: string; source_asset_id: string; clip_edit_id: string | null; kind: string; state: string; error: string | null;
-  result: { artifact_id?: string; scenes?: {start: number; end: number}[]; sync?: {offset_seconds:number; framerate_scale:number; clamped:number} } }
+  result: { artifact_id?: string; scenes?: {start: number; end: number}[];
+    sync?: {offset_seconds:number; framerate_scale:number; clamped:number};
+    focus?: {focus_x: number; samples: number; found: number; reason: string};
+    clips?: Suggestion[]; rejected?: {first: number; last: number; why: string}[] } }
 
 export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWorkflow: (draft:WorkflowDraft)=>void }) {
   const [assetId, setAssetId] = useState('')
@@ -121,6 +124,10 @@ export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWo
           await request(`/source-assets/${assetId}/analyze`, {method:'POST', body: JSON.stringify({kind:'scenes'})}); await refresh()
         })}>장면 감지</button>
         <button disabled={busy} onClick={() => void act(async () => {
+          await request(`/source-assets/${assetId}/analyze`, {method:'POST', body: JSON.stringify({kind:'faces'})})
+          setMessage('얼굴 위치를 찾고 있습니다. 결과는 제안일 뿐이고 좌우 중심은 바뀌지 않습니다.'); await refresh()
+        })}>좌우 중심 제안</button>
+        <button disabled={busy} onClick={() => void act(async () => {
           setCaptions(await request<Cue[]>(`/source-assets/${assetId}/transcript`))
         })}>대본 다시 읽기</button>
       </div>
@@ -187,6 +194,18 @@ export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWo
           setSuggestions(await request<Suggestion[]>(`/source-assets/${assetId}/suggestions`))
           setMessage('저장된 대본의 문장 경계로 후보를 만들었습니다. AI 인기도 예측은 아닙니다.')
         })}>구간 후보 찾기</button>
+        <button disabled={busy} onClick={() => void act(async () => {
+          await request(`/source-assets/${assetId}/highlights`, {method:'POST'})
+          setMessage('AI에게 구간을 물어봤습니다. 유료 호출이고 결과는 아래 목록에 나옵니다. 끝나면 불러오기를 누르세요.'); await refresh()
+        })}>AI 구간 추천 요청 (유료)</button>
+        <button disabled={busy} onClick={() => void act(async () => {
+          const done = tasks.filter(t => t.source_asset_id === assetId && t.kind === 'highlights' && t.state === 'succeeded')
+          const latest = done[done.length - 1]
+          if (!latest?.result.clips) { setMessage('끝난 AI 추천이 없습니다. 먼저 요청하고 기다리세요.'); return }
+          setSuggestions(latest.result.clips)
+          const dropped = latest.result.rejected?.length ?? 0
+          setMessage(`AI 추천 ${latest.result.clips.length}건입니다. 버린 후보 ${dropped}건(대본에 없는 번호·겹침·길이). 자를지는 직접 정하세요.`)
+        })}>AI 추천 결과 불러오기</button>
         <button disabled={busy || end <= start || end-start > 180} onClick={() => void act(async () => {
           await request('/clips', {method:'POST', body: JSON.stringify({source_asset_id:assetId, start, end, mode, focus_x:focus, title, burn_subtitles:burn, caption_language:captionLanguage, cues:captions})})
           setMessage('새 편집본의 렌더를 요청했습니다.'); await refresh()
@@ -203,6 +222,11 @@ export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWo
         {t.result.sync.framerate_scale !== 1 && ` · 속도 ${t.result.sync.framerate_scale}배`}
         {t.result.sync.clamped > 0 && ` · 0초로 잘린 자막 ${t.result.sync.clamped}개`}</span>}
       {t.result.scenes?.map((s,i) => <button key={i} onClick={() => {setStart(s.start);setEnd(Math.min(s.end,s.start+180))}}>{s.start.toFixed(1)}–{s.end.toFixed(1)}초</button>)}
+      {t.result.focus && <> <span>{t.result.focus.reason}</span>
+        {/* 누를 때만 적용합니다. 검출기가 틀리면 맞춰 둔 값을 망칩니다. */}
+        <button disabled={busy} onClick={() => {setMode('crop');setFocus(t.result.focus!.focus_x);
+          setMessage(`좌우 중심을 ${t.result.focus!.focus_x}로 바꿨습니다. 미리보기로 확인하세요.`)}}>
+          이 제안 적용</button></>}
       {t.state === 'failed' && <button disabled={busy} onClick={() => void act(async () => {
         await request(`/media-tasks/${t.id}/retry`, {method:'POST'}); await refresh()
       })}>재시도</button>}
