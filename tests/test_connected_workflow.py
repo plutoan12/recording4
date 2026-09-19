@@ -560,3 +560,45 @@ def test_export_uses_the_same_language_rules_as_the_render(
     parsed = [Cue.model_validate(c) for c in cues]
     assert text == subtitle_file(parsed, 0, 10, "srt", rules_for("en"))
     assert text != subtitle_file(parsed, 0, 10, "srt", DEFAULT_RULES)
+
+
+def test_job_export_uses_the_rules_the_render_used(setup_flow, client, auth_headers, session):
+    """설정을 렌더 뒤에 바꿔도 영상에 구워진 자막과 같은 줄로 내보냅니다.
+
+    편집본 경로와 같은 규칙 기록을 작업 경로에도 둡니다. 기록이 없으면 지금
+    설정을 쓰되 헤더로 그렇다고 알립니다.
+    """
+    create, _ = setup_flow
+    jid = create(source_language="ko")
+    wf.run_job(jid)
+
+    before = client.get(f"/jobs/{jid}/subtitles", headers=auth_headers)
+    assert before.status_code == 200
+    assert before.headers["x-subtitle-rules"] == "settings"
+
+    job = session.get(Job, uuid.UUID(jid))
+    job.workflow_data = {
+        **job.workflow_data,
+        "cues": [{"start": 0, "end": 8, "text": "가나다 라마바 사아자 차카타 파하가 나다라"}],
+        "subtitle_rules": {"max_chars_per_line": 6, "max_lines": 1},
+    }
+    session.commit()
+
+    after = client.get(f"/jobs/{jid}/subtitles", headers=auth_headers)
+    assert after.headers["x-subtitle-rules"] == "rendered"
+    # 기록된 규칙(6자·1줄)이면 한 자막이 여러 개로 쪼개집니다.
+    assert after.text.count("-->") > 1
+
+
+def test_job_export_ignores_a_broken_rules_record(setup_flow, client, auth_headers, session):
+    """기록이 깨졌다고 내려받기가 막히면 안 됩니다. 설정으로 내려주고 알립니다."""
+    create, _ = setup_flow
+    jid = create(source_language="ko")
+    wf.run_job(jid)
+    job = session.get(Job, uuid.UUID(jid))
+    job.workflow_data = {**job.workflow_data, "subtitle_rules": {"max_chars_per_line": 0}}
+    session.commit()
+
+    response = client.get(f"/jobs/{jid}/subtitles", headers=auth_headers)
+    assert response.status_code == 200
+    assert response.headers["x-subtitle-rules"] == "settings"

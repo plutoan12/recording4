@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import tempfile
 import uuid
+from dataclasses import asdict
 from pathlib import Path
 
 from sqlalchemy import func, select, update
@@ -51,17 +52,16 @@ def run_media(task_id: str) -> dict:
             turns: list[SpeakerTurn] = []
             if kind == "render":
                 output = directory / "clip.mp4"
-                render_clip(
-                    source,
-                    output,
-                    EditSpec.model_validate(spec),
-                    rules=rules_from_settings(settings),
-                )
+                # 이 규칙을 결과에 남깁니다. 설정을 렌더 뒤에 바꾸면 자막 파일이
+                # 영상에 구워진 자막과 달라지는데, 사람은 같은 자막이라고 믿고
+                # 올립니다. 남겨 두면 내보내기가 그때 쓴 규칙으로 만듭니다.
+                rules = rules_from_settings(settings)
+                render_clip(source, output, EditSpec.model_validate(spec), rules=rules)
                 with output.open("rb") as stream:
                     checksum = hashlib.file_digest(stream, "sha256").hexdigest()
                 output_key = f"renders/{task_id}/{attempt}.mp4"
                 storage.upload_file(output_key, output, "video/mp4")
-                result = {"storage_key": output_key}
+                result = {"storage_key": output_key, "subtitle_rules": asdict(rules)}
             elif kind == "scenes":
                 result = {"scenes": detect_scenes(source)}
             elif kind == "diarize":

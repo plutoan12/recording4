@@ -760,16 +760,42 @@ CI가 토큰 없이도 이 경로를 점검합니다(`화자 분리 토큰 오�
 
 ### 남은 작업
 
-- 표시 규칙(`R4_SUBTITLE_*`)을 렌더 뒤에 바꾸면 파일 자막이 그 편집본의 화면 자막과 달라집니다. 규칙을 바꾼 편집본은 다시 렌더해야 합니다. 렌더 시점 규칙을 함께 저장하면 없앨 수 있는 차이입니다.
+- ~~표시 규칙을 렌더 뒤에 바꾸면 파일 자막이 화면 자막과 달라집니다.~~ 아래 절에서 처리했습니다.
 - 외부 SRT를 **가져오는** 경로는 없습니다. 생기면 ffsubsync 도입 시점입니다(`docs/OPEN_SOURCE_INTEGRATIONS.md`).
 - 단어별 강조(ASS 전용)와 게시 시 YouTube 자막 트랙 업로드는 이번 범위가 아닙니다.
 
+## 내보낸 자막이 영상과 달라지던 것 (2026-09-19)
+
+- 사용자 요청: "1번부터" — PR #11이 남긴 결함부터 처리. 브랜치 `claude/claude-md-design-review-v8qdz4`.
+- 담당 파일: `services/worker/worker/media_tasks.py`, `services/api/adminapi/routers/editing.py`, `tests/test_editing_api.py`, `docs/{TECH_DECISIONS,SHORT_FORM_EDITING,HANDOFF}.md`.
+- 의존 작업: 없습니다. 마이그레이션도 없습니다(`MediaTask.result`는 이미 JSON입니다).
+
+### 무엇이 잘못됐나
+
+편집본을 렌더한 뒤 `R4_SUBTITLE_*`를 바꾸면, 내려받은 SRT·VTT가 **그 영상에 구워진 자막과 달랐습니다.** 내보내기가 줄바꿈과 분할을 *지금* 설정으로 다시 계산했기 때문입니다. 문서에 "규칙을 바꾼 편집본은 다시 렌더한다"고 적어 두었지만, 사람은 같은 자막이라고 믿고 그대로 올립니다. 경고문은 고침이 아닙니다.
+
+### 고친 방법
+
+렌더가 그때 쓴 규칙을 `MediaTask.result.subtitle_rules`에 남기고, 내보내기가 그것으로 계산합니다. 새 컬럼도 마이그레이션도 필요 없었습니다.
+
+기록이 없는 옛 편집본은 어쩔 수 없이 지금 설정을 씁니다. **그 사실을 숨기지 않습니다** — 응답 헤더 `X-Subtitle-Rules`가 `rendered`(렌더 때 규칙) 또는 `settings`(옛 기록, 지금 설정)로 나옵니다. 기록이 깨져 있어도 내려받기를 막지 않고 설정으로 내려주면서 `settings`로 알립니다.
+
+### 검증
+
+- `pytest -q`: **307 통과 / 5 skip**(새 테스트 3개).
+- 고치기 전 코드로 되돌려 새 테스트가 **실제로 실패하는 것**을 확인했습니다(`x-subtitle-rules`가 `settings`). 통과하는 것만 보면 시험이 헛도는지 알 수 없습니다.
+- `ruff check`·`ruff format --check` 통과.
+
+### 남은 작업
+
+- **화면 자막이 규칙대로 그려지는지는 아직 못 쟀습니다.** 측정기(`scripts/measure_subtitles.py`)는 한 줄이 여백 안에 들어가는지만 봅니다. 두 줄짜리 자막이 우리가 끊은 자리에서 두 줄로 그려지는지는 확인한 적이 없습니다. libass가 다시 줄바꿈하면 규칙이 화면에서 깨집니다.
+- 외부 SRT를 **가져오는** 경로는 여전히 없습니다.
 
 ## 번역·더빙 작업 자막 파일 내보내기 (2026-09-19)
 
 - 사용자 요청: 자막 파일 생성 관련 코드가 더 없는지 확인하고, 남은 곳 중 1번(작업 경로)부터 구현. 브랜치 `claude/subtitle-file-generation-38xjz4`(PR #11 병합 후 최신 main에서 재시작).
 - 담당 파일: `packages/pipeline/pipeline/{subtitle_files,workflow}.py`, `services/api/adminapi/subtitle_rules.py`(신규), `services/api/adminapi/routers/{workflow,editing}.py`, `services/worker/worker/workflow_tasks.py`, `apps/web/src/{api.ts,WorkflowPanel.tsx}`, `tests/{test_subtitle_files,test_connected_workflow}.py`, `README.md`, `docs/{CONNECTED_WORKFLOW,OPEN_SOURCE_INTEGRATIONS,TECH_DECISIONS,HANDOFF}.md`.
-- 의존 작업: PR #11(클립 편집본 내보내기)의 `subtitle_files.py`를 확장했습니다. 작업 도중 병합된 PR #10(언어별 자막 규칙)을 main에서 가져와 렌더 단계의 자막·언어 선택을 `rendered_cues()`·`rendered_language()`로 합쳤습니다(충돌 1건 해결). 새 의존성은 없습니다.
+- 의존 작업: PR #11(클립 편집본 내보내기)의 `subtitle_files.py`를 확장했습니다. 작업 도중 병합된 PR #10(언어별 자막 규칙)과 PR #12(렌더 규칙 기록)를 main에서 가져와 합쳤습니다(충돌 4건 해결). #12의 `rules_used()`는 공용 `rules_from_record()`를 부르도록 바꿔 두 경로가 같은 판단을 쓰게 했습니다. 새 의존성은 없습니다.
 - **Codex 작업과 겹칠 수 있는 파일**: `routers/workflow.py`, `workflow_tasks.py`, `WorkflowPanel.tsx`.
 
 ### 조사 결과: 자막을 만드는 곳이 하나 더 있었습니다
@@ -783,14 +809,16 @@ CI가 토큰 없이도 이 경로를 점검합니다(`화자 분리 토큰 오�
 - `subtitle_files.py` 재구성: 핵심은 `subtitle_file(cues, start, end, format, rules)`이고 편집본용은 `clip_subtitle_file(spec, ...)` 래퍼입니다. 작업은 출력 구간이 `0~duration`이라 `EditSpec`(9:16·180초 제한)에 담을 수 없습니다.
 - `adminapi/subtitle_rules.py`(신규): 설정 → 표시 규칙. `routers/editing.py`에 있던 함수를 옮겨 두 라우터가 함께 씁니다.
 - 관리화면 작업 화면에 **자막 SRT·VTT 내려받기** 버튼. `api.ts:downloadFile()`이 서버가 정한 파일 이름(`job-{id}.{언어}.srt`)을 쓰도록 `Content-Disposition`을 읽습니다.
+- 렌더가 쓴 규칙 기록(작업 경로): 렌더 단계가 `Job.workflow_data.subtitle_rules`에 그때 쓴 규칙을 남기고 내보내기가 그것으로 계산합니다. 되살리는 함수는 편집본 경로(#12)와 같은 `adminapi/subtitle_rules.py:rules_from_record()`이며, 응답 헤더 `X-Subtitle-Rules`도 같은 의미(`rendered`/`settings`)로 내려갑니다. 아직 렌더하지 않은 작업은 `settings`입니다.
 - 언어별 표시 규칙 연결: main에 먼저 들어간 PR #10이 목표 언어마다 다른 규칙(`rules_for`)을 쓰게 했습니다. 내보내기도 같은 언어 규칙을 쓰도록 `adminapi/subtitle_rules.py:subtitle_rules(language)`를 만들어 연결했습니다. 연결하지 않으면 영어 자막을 한국어 규칙으로 끊어 화면 자막과 줄이 달라집니다.
 
 ### 검증 결과
 
-- `pytest -q`: **291 통과 / 6 skip**(SQLite). 새 테스트 4개.
+- `pytest -q`: **310 통과 / 6 skip**(SQLite). 새 테스트 7개(#12 병합분 3개 포함 시 10개).
 - 원어 작업: 대본 단계 직후 `job-{id}.ko.srt`가 나오고 시각이 원본 대본과 같음을 확인했습니다. 대본 단계 전에는 409입니다.
 - 더빙 작업: `aligned`·`translated`·`cues`가 모두 있을 때 **`aligned`만** 나오는 것을 확인했습니다. 렌더가 쓰는 자막과 같습니다.
 - 영어 목표 작업의 내보내기가 `rules_for("en")` 결과와 **글자 단위로 같고** 한국어 기본 규칙 결과와는 다름을 확인했습니다. 언어 인자를 빼고 돌려 이 테스트가 실제로 실패하는 것도 확인했습니다.
+- 규칙 기록이 있으면 `X-Subtitle-Rules: rendered`로 그 규칙(6자·1줄)에 맞춰 쪼개지고, 없거나 깨졌으면 `settings`로 내려가는 것을 확인했습니다. 기록을 쓰지 않도록 되돌려 이 테스트가 실제로 실패하는 것도 확인했습니다.
 - `ruff check`·`ruff format --check` 통과. `npm run typecheck`·`npm run build` 통과.
 - **미검증**: PostgreSQL에서의 실행(CI 대상), 실제 재생기에서의 표시, 브라우저에서의 실제 내려받기, 실제 더빙 음성으로 만든 `aligned` 자막의 품질(유료 공급자 필요).
 
@@ -798,4 +826,4 @@ CI가 토큰 없이도 이 경로를 점검합니다(`화자 분리 토큰 오�
 
 - **YouTube 자막 트랙 업로드 없음.** `worker/youtube.py`는 `videos().insert()`만 씁니다. `captions().insert()`가 없어 구운 자막만 나갑니다. 의존성(`google-api-python-client`)과 OAuth 스코프(`youtube.force-ssl`, `connect_youtube.py`)는 이미 있으므로 코드만 추가하면 됩니다. 실제 게시 흐름을 건드리므로 유료·계정 설정 상태를 먼저 확인해야 합니다.
 - **외부 SRT 가져오기 없음.** 생기면 ffsubsync 도입 시점입니다.
-- 표시 규칙을 렌더 뒤에 바꾸면 파일 자막이 그 결과물의 화면 자막과 달라지는 문제는 두 경로 모두 그대로입니다(PR #11 기록 참조).
+- ~~표시 규칙을 렌더 뒤에 바꾸면 파일 자막이 화면 자막과 달라집니다.~~ 위 절(#12)이 편집본 경로를, 이 작업이 작업 경로를 처리했습니다. 두 경로 모두 렌더가 쓴 규칙을 기록에서 되살립니다.

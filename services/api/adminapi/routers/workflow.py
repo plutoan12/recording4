@@ -25,7 +25,7 @@ from adminapi.models import (
 )
 from adminapi.outbox import enqueue
 from adminapi.services.budget import held_total, release, settle
-from adminapi.subtitle_rules import subtitle_rules
+from adminapi.subtitle_rules import rules_from_record
 from pipeline.editing import Cue
 from pipeline.states import JobState, PublicationState, StageRunState, assert_transition
 from pipeline.subtitle_files import MEDIA_TYPES, SubtitleFormat, subtitle_file
@@ -129,10 +129,11 @@ def subtitles(
         raise HTTPException(
             409, "저장된 자막을 읽을 수 없습니다. 작업 기록을 확인하세요."
         ) from None
-    # 렌더와 같은 언어 규칙을 씁니다. 언어마다 줄 길이·읽기 속도 지침이 달라
-    # 다른 규칙으로 계산하면 화면 자막과 줄이 달라집니다.
+    # 렌더가 그때 쓴 규칙으로 계산합니다. 기록이 없으면(아직 렌더하지 않은 작업)
+    # 지금 설정을 쓰되 렌더와 같은 언어 규칙으로 만들고, 헤더로 그렇다고 알립니다.
     language = rendered_language(data, WorkflowOptions.model_validate(job.workflow_config))
-    text = subtitle_file(cues, 0, float(duration), subtitle_format, subtitle_rules(language))
+    rules, source = rules_from_record(data.get("subtitle_rules"), language)
+    text = subtitle_file(cues, 0, float(duration), subtitle_format, rules)
     if not text.strip():
         raise HTTPException(409, "내보낼 자막이 없습니다.")
     name = (
@@ -143,7 +144,12 @@ def subtitles(
     return Response(
         content=text,
         media_type=f"{MEDIA_TYPES[subtitle_format]}; charset=utf-8",
-        headers={"Content-Disposition": f'attachment; filename="{name}"'},
+        headers={
+            "Content-Disposition": f'attachment; filename="{name}"',
+            # 영상과 같은 규칙인지 받는 쪽이 알 수 있게 합니다. rendered면 렌더
+            # 때 쓴 규칙, settings면 지금 설정(기록이 없거나 깨짐)입니다.
+            "X-Subtitle-Rules": source,
+        },
     )
 
 

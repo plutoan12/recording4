@@ -23,11 +23,11 @@ from adminapi.models import (
 )
 from adminapi.outbox import enqueue
 from adminapi.storage import ObjectStorage, get_storage
-from adminapi.subtitle_rules import subtitle_rules
+from adminapi.subtitle_rules import rules_from_record, subtitle_rules
 from pipeline.editing import Cue, EditSpec, suggest_clips
 from pipeline.states import JobState
 from pipeline.subtitle_files import MEDIA_TYPES, SubtitleFormat, clip_subtitle_file
-from pipeline.subtitles import check
+from pipeline.subtitles import SubtitleRules, check
 from pipeline.time import as_utc
 
 router = APIRouter(tags=["editing"])
@@ -83,6 +83,15 @@ def schedule(session, task):
         dedupe_key=f"media.run:{task.id}:{task.attempt}",
     )
     return task_response(task)
+
+
+def rules_used(task: MediaTask) -> tuple[SubtitleRules, str]:
+    """그 편집본을 렌더할 때 실제로 쓴 표시 규칙과, 그것을 어디서 얻었는지.
+
+    되살리는 규칙은 `adminapi/subtitle_rules.py`가 정합니다. 작업 경로도 같은
+    함수를 쓰므로 두 경로의 판단이 어긋나지 않습니다.
+    """
+    return rules_from_record((task.result or {}).get("subtitle_rules"))
 
 
 def violations(cues: list[Cue]) -> list[dict]:
@@ -328,9 +337,12 @@ def clip_subtitles(
 ) -> Response:
     """편집본 자막을 SRT·VTT 파일로 내려줍니다.
 
-    영상에 굽는 자막과 같은 규칙을 거치고 시각은 클립 시작이 0초입니다. 화면
-    제목은 자막이 아니므로 넣지 않습니다. 표시 규칙을 렌더 뒤에 바꿨다면 줄바꿈과
-    분할이 영상과 달라질 수 있습니다.
+    렌더할 때 쓴 표시 규칙을 그대로 거치고 시각은 클립 시작이 0초입니다. 화면
+    제목은 자막이 아니므로 넣지 않습니다.
+
+    이 기능 전에 렌더한 기록에는 그때 쓴 규칙이 남아 있지 않습니다. 그럴 때만
+    지금 설정을 쓰고, 응답 헤더 `X-Subtitle-Rules`에 `settings`로 적습니다.
+    설정을 그 사이에 바꿨다면 영상과 줄바꿈·분할이 다를 수 있습니다.
     """
     clip = session.get(ClipEdit, clip_edit_id)
     if clip is None:
@@ -345,16 +357,20 @@ def clip_subtitles(
     )
     if task is None:
         raise HTTPException(409, "편집본의 렌더 요청을 찾을 수 없습니다.")
-    text = clip_subtitle_file(
-        EditSpec.model_validate(task.settings), subtitle_format, subtitle_rules()
-    )
+    rules, source = rules_used(task)
+    text = clip_subtitle_file(EditSpec.model_validate(task.settings), subtitle_format, rules)
     if not text.strip():
         raise HTTPException(409, "이 편집본에는 내보낼 자막이 없습니다.")
     return Response(
         content=text,
         media_type=f"{MEDIA_TYPES[subtitle_format]}; charset=utf-8",
         headers={
-            "Content-Disposition": (f'attachment; filename="clip-{clip_edit_id}.{subtitle_format}"')
+            "Content-Disposition": (
+                f'attachment; filename="clip-{clip_edit_id}.{subtitle_format}"'
+            ),
+            # 영상과 같은 규칙인지 받는 쪽이 알 수 있게 합니다. rendered면 렌더
+            # 때 쓴 규칙, settings면 지금 설정(옛 기록이라 남은 것이 없음)입니다.
+            "X-Subtitle-Rules": source,
         },
     )
 
