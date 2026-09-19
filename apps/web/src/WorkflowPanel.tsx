@@ -30,7 +30,7 @@ export function WorkflowPanel({assets,jobs,draft,onCreated}:{assets:SourceAsset[
   const [message,setMessage]=useState('')
   const [busy,setBusy]=useState(false)
   const [useClip,setUseClip]=useState(false)
-  useEffect(()=>{if(draft){setAsset(draft.source_asset_id);setAudio('dub');setUseClip(true)}},[draft])
+  useEffect(()=>{if(draft){setAsset(draft.source_asset_id);setUseClip(true)}},[draft])
   const refresh = useCallback(async ()=>{
     try {
       const [c,p,d] = await Promise.all([
@@ -55,10 +55,11 @@ export function WorkflowPanel({assets,jobs,draft,onCreated}:{assets:SourceAsset[
     {config && <p>유료 처리 {config.paid_enabled?'켜짐':'꺼짐'} · 번역 {config.translation_configured?'준비됨':'설정 필요'} · 더빙 {config.speech_configured?'준비됨':'설정 필요'} · YouTube {config.youtube_configured?'준비됨':'설정 필요'}</p>}
     <form onSubmit={create} className="editor-fields">
       <label>원본<select value={asset} onChange={e=>{setAsset(e.target.value);setUseClip(false)}} required><option value="">선택</option>{assets.filter(a=>a.upload_state==='verified').map(a=><option key={a.id} value={a.id}>{a.original_filename}</option>)}</select></label>
-      <label>음성<select value={audio} onChange={e=>setAudio(e.target.value)}><option value="original">원어 유지·자막 합성</option><option value="dub">번역·더빙</option></select></label>
+      <label>제작 방식<select value={audio} onChange={e=>{setAudio(e.target.value);if(e.target.value==='subtitles')setTarget('ko')}}><option value="original">원어 유지·자막 합성</option><option value="subtitles">자막만 번역·원래 음성 유지</option><option value="dub">번역·더빙</option></select></label>
       <label>대상 언어<input value={target} onChange={e=>setTarget(e.target.value)} required /></label>
+      {audio==='subtitles' && <p>선택 언어로 자막만 번역합니다. 원래 음성과 배경음을 유지하며 번역 비용만 발생합니다.</p>}
+      {audio!=='original' && <label>작업 예산 상한 (USD)<input type="number" min="0" max="10000" step="0.0001" value={budget} onChange={e=>setBudget(e.target.value)} required /></label>}
       {audio==='dub' && <><label>더빙 음성 ID<input value={voice} onChange={e=>setVoice(e.target.value)} required /></label>
-        <label>작업 예산 상한 (USD)<input type="number" min="0" max="10000" step="0.0001" value={budget} onChange={e=>setBudget(e.target.value)} required /></label>
         <label><input type="checkbox" checked={lip} onChange={e=>setLip(e.target.checked)} /> 립싱크 사용</label>
         <p>더빙 경로는 원래 대사와 배경음을 새 음성으로 교체합니다.</p></>}
       {draft&&draft.source_asset_id===asset && <label><input type="checkbox" checked={useClip} onChange={e=>setUseClip(e.target.checked)} /> 편집기에서 고른 {draft.start}~{draft.end}초를 숏폼으로 제작</label>}
@@ -92,7 +93,7 @@ export function WorkflowPanel({assets,jobs,draft,onCreated}:{assets:SourceAsset[
           const result=await request<Job>('/jobs',{method:'POST',body:JSON.stringify({source_asset_id:job.source_asset_id,target_language:job.target_language,
             workflow:{...detail.options,reuse_from_job_id:detail.id,translated_cues:translated,transcript:detail.cues.map(c=>{const start=(detail.options.clip as {start:number}|null)?.start??0;return {...c,start:c.start+start,end:c.end+start}})}})})
           choose(result.id);setMessage('수정한 번역으로 새 작업을 만들었습니다. 새 결과물은 다시 승인해야 합니다.')
-        })}>수정 문장만 다시 더빙해 새 버전 제작</button>
+        })}>{detail.options.audio_mode==='dub'?'수정 문장만 다시 더빙해 새 버전 제작':'수정 자막으로 새 버전 제작'}</button>
       </details>}
       {detail.artifact_id && <>
         <button disabled={busy} onClick={()=>void act(async()=>{const p=await request<{url:string}>(`/artifacts/${detail.artifact_id}/preview`);setUrl(p.url);setPlayed(false)})}>최종 영상 검수</button>

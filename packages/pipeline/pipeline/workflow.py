@@ -13,7 +13,7 @@ from pipeline.editing import Cue, EditSpec
 
 class WorkflowOptions(BaseModel):
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
-    audio_mode: Literal["original", "dub"] = "dub"
+    audio_mode: Literal["original", "subtitles", "dub"] = "dub"
     source_language: str | None = Field(default=None, pattern=r"^[a-z]{2,3}$")
     voice_id: str | None = Field(default=None, max_length=128)
     lipsync: bool = False
@@ -25,6 +25,6 @@ class WorkflowOptions(BaseModel):
 
     @model_validator(mode="after")
     def consistent(self):
-        if self.audio_mode == "original" and self.lipsync:
+        if self.audio_mode != "dub" and self.lipsync:
             raise ValueError("립싱크는 더빙 작업에만 사용할 수 있습니다.")
         return self

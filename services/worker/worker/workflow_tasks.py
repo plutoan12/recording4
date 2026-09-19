@@ -66,6 +66,8 @@ def next_step(data: dict, options: WorkflowOptions) -> str | None:
         return None if "artifact_id" in data else "render"
     if len(data.get("translated", [])) < len(data["cues"]):
         return f"translate:{len(data.get('translated', []))}"
+    if options.audio_mode == "subtitles":
+        return None if "artifact_id" in data else "render"
     if len(data.get("voices", [])) < len(data["cues"]):
         return f"dub:{len(data.get('voices', []))}"
     if "audio_key" not in data:
@@ -251,7 +253,7 @@ def execute_step(name, options, data, asset, directory, stage_id, remote_id, sav
         cues = sorted(cues, key=lambda c: c.start)
         if any(c.end > data["duration"] for c in cues):
             raise Blocked("대본 구간이 출력 길이를 넘습니다. 대본을 수정하세요.")
-        if not cues and options.audio_mode == "dub":
+        if not cues and options.audio_mode != "original":
             raise Blocked("음성이 감지되지 않았습니다. 대본을 입력하세요.")
         return {"cues": [c.model_dump() for c in cues]}
     if name.startswith("translate:"):
