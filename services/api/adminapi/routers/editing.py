@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
 import uuid
 from datetime import UTC, datetime
 from typing import Literal
@@ -28,7 +30,14 @@ from adminapi.storage import ObjectStorage, get_storage
 from adminapi.subtitle_rules import subtitle_rules
 from pipeline.editing import Cue, EditSpec, suggest_clips
 from pipeline.states import JobState
-from pipeline.subtitle_files import MEDIA_TYPES, SubtitleFormat
+from pipeline.subtitle_files import (
+    MEDIA_TYPES,
+    SubtitleFormat,
+    UnknownEncoding,
+    decode_subtitles,
+    encoding_choices,
+    parse_subtitles,
+)
 from pipeline.subtitles import check
 from pipeline.time import as_utc
 
@@ -108,32 +117,101 @@ def get_transcript(asset_id: uuid.UUID, user: CurrentUser, session: SessionDep):
     ]
 
 
-@router.put("/source-assets/{asset_id}/transcript")
-def put_transcript(
-    asset_id: uuid.UUID, payload: TranscriptRequest, user: CurrentUser, session: SessionDep
-):
-    asset = asset_for_edit(session, asset_id)
-    if any(c.end > float(asset.duration_seconds) for c in payload.cues):
+def save_transcript(session, asset, cues: list[Cue]) -> dict:  # noqa: ANN001
+    """대본을 새 버전으로 저장합니다. 기존 버전은 감사용으로 남깁니다."""
+    if any(c.end > float(asset.duration_seconds) for c in cues):
         raise HTTPException(422, "대본 구간이 원본 길이를 넘습니다.")
-    latest = transcript(session, asset_id)
+    latest = transcript(session, asset.id)
     version = latest[0].transcript_version + 1 if latest else 1
     session.add_all(
         [
             TranscriptSegment(
-                source_asset_id=asset_id,
+                source_asset_id=asset.id,
                 start_seconds=c.start,
                 end_seconds=c.end,
                 text=c.text,
                 transcript_version=version,
             )
-            for c in payload.cues
+            for c in cues
         ]
     )
-    return {
-        "version": version,
-        "count": len(payload.cues),
-        "violations": violations(payload.cues),
+    return {"version": version, "count": len(cues), "violations": violations(cues)}
+
+
+@router.put("/source-assets/{asset_id}/transcript")
+def put_transcript(
+    asset_id: uuid.UUID, payload: TranscriptRequest, user: CurrentUser, session: SessionDep
+):
+    return save_transcript(session, asset_for_edit(session, asset_id), payload.cues)
+
+
+class SubtitleImportRequest(BaseModel):
+    """밖에서 만든 자막 파일. 형식은 글자를 보고 판별합니다.
+
+    파일은 바이트 그대로(base64) 받습니다. 브라우저가 글자로 먼저 바꾸면 UTF-8이
+    아닌 파일(한국어 자막에 흔한 CP949)이 그 자리에서 깨집니다.
+    """
+
+    content_base64: str = Field(min_length=1, max_length=2_000_000)
+    encoding: str | None = Field(default=None, max_length=32, pattern=r"^[A-Za-z0-9_.:-]+$")
+
+
+@router.post("/source-assets/{asset_id}/transcript/import")
+def import_subtitles(
+    asset_id: uuid.UUID, payload: SubtitleImportRequest, user: CurrentUser, session: SessionDep
+):
+    """SRT·WebVTT·ASS 파일을 읽어 대본 새 버전으로 저장합니다.
+
+    인코딩은 파일이 밝힌 표시(BOM) → UTF-8 → 판별기 순으로 정합니다. 무엇으로
+    읽었는지 `encoding`으로, 판별기가 고른 것인지 `encoding_detected`로 함께
+    돌려줍니다. **판별은 추측이라 글자가 깨져도 조용히 성공합니다.** 판별로
+    읽었으면 다른 후보를 `choices`로 함께 주니, 화면에서 글자를 확인하고 틀렸으면
+    그중 하나를 `encoding`에 넣어 다시 부르세요.
+
+    판별기까지 실패하면 후보마다 첫 자막이 어떻게 보이는지 붙여 422로
+    돌려줍니다. 글자가 제대로 보이는 것을 골라 `encoding`에 넣어 다시 부르세요.
+
+    시각은 **파일에 적힌 그대로** 씁니다. 원본 음성과 맞는지는 확인하지 않습니다.
+    다른 판본에서 만든 자막이면 통째로 어긋날 수 있으니 편집기에서 확인하세요.
+
+    글자가 없거나 시간이 올바르지 않은 자막은 빼고, 무엇을 왜 뺐는지 `skipped`로
+    함께 돌려줍니다. 조용히 버리지 않습니다.
+    """
+    asset = asset_for_edit(session, asset_id)
+    try:
+        data = base64.b64decode(payload.content_base64, validate=True)
+    except (ValueError, binascii.Error):
+        raise HTTPException(422, "자막 파일을 읽지 못했습니다. 다시 올려 주세요.") from None
+    try:
+        found = decode_subtitles(data, payload.encoding)
+        cues, notes = parse_subtitles(found.text)
+    except UnknownEncoding as exc:
+        raise HTTPException(
+            422,
+            {
+                "message": str(exc),
+                "choices": [
+                    {"encoding": choice.encoding, "preview": choice.preview}
+                    for choice in exc.choices
+                ],
+            },
+        ) from None
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from None
+    saved = {
+        **save_transcript(session, asset, cues),
+        "skipped": notes,
+        "encoding": found.encoding,
+        "encoding_detected": found.detected,
     }
+    if found.detected:
+        # 판별로 읽었으면 다른 후보도 함께 줍니다. 글자가 깨졌을 때 화면에서
+        # 바로 다른 인코딩으로 다시 들일 수 있어야 합니다.
+        saved["choices"] = [
+            {"encoding": choice.encoding, "preview": choice.preview}
+            for choice in encoding_choices(data)
+        ]
+    return saved
 
 
 class AnalysisRequest(BaseModel):
@@ -233,6 +311,31 @@ def diarize(asset_id: uuid.UUID, payload: DiarizeRequest, user: CurrentUser, ses
     )
 
 
+@router.post("/source-assets/{asset_id}/transcript/sync", status_code=202)
+def sync_transcript(asset_id: uuid.UUID, user: CurrentUser, session: SessionDep):
+    """최신 대본의 시각을 원본 음성에 맞춰 통째로 옮긴 새 버전을 만듭니다.
+
+    밖에서 들인 자막이 원본과 어긋날 때 씁니다. **글자는 건드리지 않고** 시각만
+    옮기며, 얼마나 옮겼는지(`result.sync.offset_seconds`)를 작업 결과에 남깁니다.
+
+    기존 대본 버전은 그대로 남습니다. 보정이 마음에 들지 않으면 그 버전을 다시
+    쓰면 됩니다. 유료 호출이 아니며 `[subtitles]` 설치가 필요합니다.
+    """
+    asset_for_edit(session, asset_id)
+    if not transcript(session, asset_id):
+        raise HTTPException(409, "보정할 대본이 없습니다. 먼저 대본을 만들거나 들이세요.")
+    existing = session.scalar(
+        select(MediaTask).where(
+            MediaTask.source_asset_id == asset_id,
+            MediaTask.kind == "sync",
+            MediaTask.state.in_(["pending", "running"]),
+        )
+    )
+    if existing:
+        return task_response(existing)
+    return schedule(session, MediaTask(source_asset_id=asset_id, kind="sync", settings={}))
+
+
 @router.get("/source-assets/{asset_id}/speakers")
 def speakers(asset_id: uuid.UUID, user: CurrentUser, session: SessionDep):
     """최신 대본에 붙은 화자 목록. 화자별 발화 시간과 구간 수를 함께 봅니다."""
@@ -328,7 +431,7 @@ def create_clip(payload: ClipRequest, user: CurrentUser, session: SessionDep):
     clip = ClipEdit(
         source_asset_id=asset.id,
         edit_version=version,
-        output_language=asset.source_language or "und",
+        output_language=payload.caption_language or asset.source_language or "und",
         created_by_id=user.id,
         output_width=spec.width,
         output_height=spec.height,

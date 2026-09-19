@@ -42,13 +42,13 @@ def setup_flow(client, auth_headers, session, user, monkeypatch):
     session.add(asset)
     session.commit()
 
-    def create(**options):
+    def create(target_language="en", **options):
         response = client.post(
             "/jobs",
             headers=auth_headers,
             json={
                 "source_asset_id": str(asset.id),
-                "target_language": "en",
+                "target_language": target_language,
                 "workflow": {
                     "audio_mode": "original",
                     "transcript": [{"start": 1, "end": 2, "text": "hello"}],
@@ -635,14 +635,19 @@ def caption_service(existing=None, state=None, info=None):
     return Service, tracks
 
 
-def publish_ready(client, auth_headers, create, monkeypatch, **overrides):
+def publish_ready(client, auth_headers, create, monkeypatch, burn=None, **overrides):
     """승인까지 끝낸 게시 요청 하나를 만들고 그 ID를 돌려줍니다."""
     from adminapi.routers import workflow
 
     settings = get_settings().model_copy(update={"youtube_channel_id": "channel", **overrides})
     monkeypatch.setattr(workflow, "get_settings", lambda: settings)
     monkeypatch.setattr(pub, "get_settings", lambda: settings)
-    jid = create(source_language="ko")
+    jid = create(
+        source_language="ko",
+        burn_subtitles=burn
+        if burn is not None
+        else not overrides.get("youtube_captions_enabled", False),
+    )
     for _ in range(3):
         wf.run_job(jid)
     aid = client.get(f"/jobs/{jid}/workflow", headers=auth_headers).json()["artifact_id"]
@@ -661,10 +666,10 @@ def publish_ready(client, auth_headers, create, monkeypatch, **overrides):
     return response.json()["id"], jid
 
 
-def test_caption_track_is_uploaded_once_with_the_burned_in_subtitles(
+def test_caption_track_is_uploaded_once_for_track_only_video(
     setup_flow, client, auth_headers, monkeypatch
 ):
-    """설정을 켜면 영상에 구운 자막과 같은 내용을 트랙으로 올립니다. 두 번 올리지 않습니다."""
+    """트랙 전용 결과물은 내보내기와 같은 자막을 한 번만 올립니다."""
     create, _ = setup_flow
     pid, jid = publish_ready(
         client, auth_headers, create, monkeypatch, youtube_captions_enabled=True
@@ -698,10 +703,10 @@ def test_caption_track_is_uploaded_once_with_the_burned_in_subtitles(
     assert len(tracks["inserted"]) == 1
 
 
-def test_caption_failure_does_not_fail_the_publication(
+def test_track_only_caption_failure_blocks_publication(
     setup_flow, client, auth_headers, monkeypatch
 ):
-    """영상은 이미 올라가 있습니다. 자막 때문에 게시를 실패로 만들지 않습니다."""
+    """트랙 전용 영상에서 자막 실패 시 비공개 업로드는 보존하고 예약은 막습니다."""
     create, _ = setup_flow
     pid, _jid = publish_ready(
         client, auth_headers, create, monkeypatch, youtube_captions_enabled=True
@@ -723,9 +728,9 @@ def test_caption_failure_does_not_fail_the_publication(
         raise RuntimeError("quota exceeded: secret-token-in-url")
 
     monkeypatch.setattr(pub, "upload_captions", broken)
-    assert pub.run_publication(pid)["status"] == "scheduled"
+    assert pub.run_publication(pid)["status"] == "failed"
     row = client.get("/publications", headers=auth_headers).json()[0]
-    assert row["state"] == "scheduled"
+    assert row["state"] == "failed"
     assert row["captions"]["state"] == "failed"
     assert "secret-token" not in str(row["captions"])
 
@@ -751,3 +756,125 @@ def test_captions_stay_off_until_the_setting_is_turned_on(
     pub.run_publication(pid)
     assert tracks["inserted"] == []
     assert client.get("/publications", headers=auth_headers).json()[0]["captions"] is None
+
+
+def test_burned_video_never_adds_a_duplicate_track(setup_flow, client, auth_headers, monkeypatch):
+    create, _ = setup_flow
+    pid, _ = publish_ready(
+        client, auth_headers, create, monkeypatch, burn=True, youtube_captions_enabled=True
+    )
+    info = {
+        "snippet": {"channelId": "channel"},
+        "status": {"privacyStatus": "private"},
+        "processingDetails": {"processingStatus": "succeeded"},
+    }
+    Service, tracks = caption_service(info=info)
+    monkeypatch.setattr(pub, "youtube_service", Service)
+    monkeypatch.setattr(pub, "upload_approved", lambda *a, **kw: "video")
+    monkeypatch.setattr(
+        pub,
+        "schedule_video",
+        lambda service, vid, at, **kw: info["status"].update(publishAt=at.isoformat()),
+    )
+    assert pub.run_publication(pid)["status"] == "scheduled"
+    assert tracks["inserted"] == []
+
+
+@pytest.mark.parametrize(
+    "source,target",
+    [(s, t) for s in ("ko", "en", "ja", "zh") for t in ("ko", "en", "ja", "zh") if s != t],
+)
+def test_subtitles_only_languages_keep_audio_and_times(
+    setup_flow, client, auth_headers, session, monkeypatch, source, target
+):
+    from pipeline.subtitle_files import parse_subtitles
+
+    create, _ = setup_flow
+    texts = {"ko": "안녕하세요", "en": "Hello", "ja": "こんにちは", "zh": "你好"}
+    settings = get_settings().model_copy(
+        update={
+            "paid_processing_enabled": True,
+            "google_cloud_project": "test-only",
+            "translate_usd_per_1k_chars": Decimal("0.02"),
+            "elevenlabs_api_key": None,
+        }
+    )
+    monkeypatch.setattr(wf, "get_settings", lambda: settings)
+    calls = []
+
+    class Translator:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def translate(self, inputs, target_code, source_code):
+            calls.append((source_code, target_code))
+            assert inputs == [texts[source]]
+            return [texts[target]]
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("자막 전용 작업에서 더빙이 실행됐습니다.")
+
+    def render(original, output, **kwargs):
+        assert original.read_bytes() == b"source bytes"
+        assert kwargs["cues"][0].text == texts[target]
+        assert kwargs["cues"][0].start == 1
+        assert kwargs["cues"][0].end == 3
+        output.write_bytes(b"final")
+
+    monkeypatch.setattr(wf, "GoogleTranslator", Translator)
+    monkeypatch.setattr(wf, "ElevenLabsSpeech", forbidden)
+    monkeypatch.setattr(wf, "render_final", render)
+    jid = create(
+        audio_mode="subtitles",
+        target_language=target,
+        source_language=source,
+        budget_usd="1",
+        transcript=[{"start": 1, "end": 3, "text": texts[source]}],
+    )
+    assert (
+        client.put(
+            "/workflow/monthly-budget", headers=auth_headers, json={"limit_usd": "10"}
+        ).status_code
+        == 200
+    )
+    assert wf.run_job(jid)["stage"] == "transcribe"
+    assert wf.run_job(jid)["stage"] == "translate:0"
+    assert wf.run_job(jid)["stage"] == "render"
+    assert wf.run_job(jid)["status"] == "review_required"
+    assert calls == [(source, target)]
+    for fmt in ("srt", "vtt"):
+        response = client.get(f"/jobs/{jid}/subtitles?format={fmt}", headers=auth_headers)
+        assert response.status_code == 200
+        cues, _ = parse_subtitles(response.text)
+        assert [(c.start, c.end, c.text) for c in cues] == [(1, 3, texts[target])]
+
+
+def test_subtitles_only_rejects_lipsync():
+    from pydantic import ValidationError
+
+    from pipeline.workflow import WorkflowOptions
+
+    with pytest.raises(ValidationError, match="립싱크"):
+        WorkflowOptions(audio_mode="subtitles", lipsync=True)
+
+
+def test_subtitles_budget_blocks_before_translation(setup_flow, monkeypatch):
+    create, _ = setup_flow
+    settings = get_settings().model_copy(
+        update={
+            "paid_processing_enabled": True,
+            "google_cloud_project": "test-only",
+            "translate_usd_per_1k_chars": Decimal("0.02"),
+        }
+    )
+    monkeypatch.setattr(wf, "get_settings", lambda: settings)
+    monkeypatch.setattr(wf, "GoogleTranslator", lambda *a, **kw: pytest.fail("예산 없이 호출됨"))
+    jid = create(audio_mode="subtitles", source_language="ko", budget_usd="0")
+    assert wf.run_job(jid)["stage"] == "transcribe"
+    assert wf.run_job(jid)["status"] == "blocked_or_failed"
+
+
+def test_subtitles_empty_transcript_does_not_render(setup_flow):
+    create, _ = setup_flow
+    jid = create(audio_mode="subtitles", transcript=[])
+    assert wf.run_job(jid)["status"] == "blocked_or_failed"

@@ -169,6 +169,7 @@ def render_final(
     width: int = 1920,
     height: int = 1080,
     rules: SubtitleRules = DEFAULT_RULES,
+    burn_subtitles: bool = True,
 ) -> None:
     with tempfile.TemporaryDirectory(prefix="r4-final-") as directory:
         temp = Path(directory)
@@ -183,6 +184,7 @@ def render_final(
             start=0,
             end=duration,
             cues=cues,
+            burn_subtitles=burn_subtitles,
             title=clip.title if clip else "",
             font_size=clip.font_size if clip else max(20, height // 24),
         )

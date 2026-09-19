@@ -1,3 +1,4 @@
+import base64
 import uuid
 from decimal import Decimal
 
@@ -5,6 +6,7 @@ import pytest
 from sqlalchemy import select
 
 from adminapi.models import Approval, Artifact, SourceAsset
+from pipeline import subtitle_files
 
 
 @pytest.fixture
@@ -281,3 +283,161 @@ def test_highlights_needs_a_transcript_and_is_queued_not_called(
     assert task.kind == "highlights"
     topics = [m.topic for m in session.scalars(select(OutboxMessage))]
     assert "media.highlights" in topics
+
+
+def upload(text: str, encoding: str = "utf-8") -> dict:
+    """브라우저가 보내는 모양대로 파일 바이트를 base64로 싣습니다."""
+    return {"content_base64": base64.b64encode(text.encode(encoding)).decode()}
+
+
+def test_imported_subtitles_become_a_new_transcript_version(client, auth_headers, asset):
+    """밖에서 만든 자막 파일을 대본으로 들입니다. 기존 버전은 남습니다."""
+    path = f"/source-assets/{asset.id}/transcript"
+    client.put(
+        path, headers=auth_headers, json={"cues": [{"start": 1, "end": 2, "text": "옛 대본"}]}
+    )
+    srt = "1\n00:00:03,000 --> 00:00:05,000\n들여온 자막\n둘째 줄\n"
+
+    response = client.post(f"{path}/import", headers=auth_headers, json=upload(srt))
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["version"] == 2 and body["count"] == 1 and body["skipped"] == []
+    assert client.get(path, headers=auth_headers).json() == [
+        {"start": 3.0, "end": 5.0, "text": "들여온 자막 둘째 줄"}
+    ]
+
+
+def test_import_reports_what_it_skipped_and_refuses_what_it_cannot_use(client, auth_headers, asset):
+    path = f"/source-assets/{asset.id}/transcript/import"
+    assert client.post(path, json=upload("x")).status_code == 401
+    assert client.post(path, headers=auth_headers, json=upload("자막 아님")).status_code == 422
+    assert (
+        client.post(path, headers=auth_headers, json={"content_base64": "***"}).status_code == 422
+    )
+
+    # 원본 길이(120초)를 넘는 자막은 저장하지 않습니다.
+    too_long = "1\n00:02:30,000 --> 00:02:35,000\n원본보다 뒤\n"
+    assert client.post(path, headers=auth_headers, json=upload(too_long)).status_code == 422
+
+    mixed = (
+        "1\n00:00:01,000 --> 00:00:02,000\n쓸 자막\n\n2\n00:00:03,000 --> 00:00:03,000\n길이 0\n"
+    )
+    body = client.post(path, headers=auth_headers, json=upload(mixed)).json()
+    assert body["count"] == 1
+    assert len(body["skipped"]) == 1 and "2번" in body["skipped"][0]
+
+
+def test_a_cp949_file_is_read_by_the_detector_and_says_it_guessed(client, auth_headers, asset):
+    """한국어 자막에 흔한 CP949는 판별기가 읽습니다. 무엇으로 읽었는지 함께 돌려줍니다."""
+    path = f"/source-assets/{asset.id}/transcript/import"
+    srt = "1\n00:00:01,000 --> 00:00:02,000\n안녕하세요 자막입니다\n"
+
+    saved = client.post(path, headers=auth_headers, json=upload(srt, "cp949"))
+    assert saved.status_code == 200, saved.text
+    body = saved.json()
+    assert body["count"] == 1 and body["encoding"] == "cp949"
+    # 판별은 추측이라 밝힙니다. 화면이 이 표시를 보고 사람에게 확인을 청합니다.
+    assert body["encoding_detected"] is True
+    assert client.get(f"/source-assets/{asset.id}/transcript", headers=auth_headers).json() == [
+        {"start": 1.0, "end": 2.0, "text": "안녕하세요 자막입니다"}
+    ]
+
+
+def test_a_utf8_file_is_not_marked_as_a_guess(client, auth_headers, asset):
+    path = f"/source-assets/{asset.id}/transcript/import"
+    srt = "1\n00:00:01,000 --> 00:00:02,000\n안녕하세요\n"
+    body = client.post(path, headers=auth_headers, json=upload(srt)).json()
+    assert body["encoding"] == "utf-8" and body["encoding_detected"] is False
+
+
+def test_a_file_the_detector_cannot_place_asks_instead_of_saving_broken_text(
+    client, auth_headers, asset, monkeypatch
+):
+    """판별까지 실패하면 추측해서 저장하지 않습니다. 후보를 미리보기와 함께 돌려줍니다.
+
+    잘못 고르면 글자가 조용히 깨진 채로 저장되고 나중에 영상에 그대로 구워집니다.
+    이름만 보고는 못 골라도 자기 자막 글자는 알아봅니다.
+    """
+    monkeypatch.setattr(subtitle_files, "detect_encoding", lambda data: None)
+    path = f"/source-assets/{asset.id}/transcript/import"
+    srt = "1\n00:00:01,000 --> 00:00:02,000\n안녕하세요 자막입니다\n"
+
+    asked = client.post(path, headers=auth_headers, json=upload(srt, "cp949"))
+    assert asked.status_code == 422
+    detail = asked.json()["detail"]
+    assert "인코딩" in detail["message"]
+    correct = [c for c in detail["choices"] if c["preview"] == "안녕하세요 자막입니다"]
+    assert correct and correct[0]["encoding"] == "cp949"
+    # 글자가 깨져 보이는 후보도 함께 보여 주어 사람이 고를 수 있게 합니다.
+    assert len(detail["choices"]) > 1
+    assert client.get(f"/source-assets/{asset.id}/transcript", headers=auth_headers).json() == []
+
+    saved = client.post(
+        path, headers=auth_headers, json={**upload(srt, "cp949"), "encoding": "cp949"}
+    )
+    assert saved.status_code == 200 and saved.json()["count"] == 1
+    assert saved.json()["encoding_detected"] is False
+    assert client.get(f"/source-assets/{asset.id}/transcript", headers=auth_headers).json() == [
+        {"start": 1.0, "end": 2.0, "text": "안녕하세요 자막입니다"}
+    ]
+
+
+def test_a_wrong_encoding_choice_is_reported_not_saved(client, auth_headers, asset):
+    path = f"/source-assets/{asset.id}/transcript/import"
+    srt = "1\n00:00:01,000 --> 00:00:02,000\n안녕하세요\n"
+    response = client.post(
+        path, headers=auth_headers, json={**upload(srt, "cp949"), "encoding": "utf-8"}
+    )
+    assert response.status_code == 422 and "utf-8" in response.json()["detail"]
+
+
+def test_sync_needs_a_transcript_and_does_not_queue_twice(client, auth_headers, asset, monkeypatch):
+    """보정은 최신 대본을 대상으로 합니다. 대본이 없으면 요청을 만들지 않습니다."""
+    path = f"/source-assets/{asset.id}/transcript/sync"
+    assert client.post(path).status_code == 401
+    assert client.post(path, headers=auth_headers).status_code == 409
+
+    client.put(
+        f"/source-assets/{asset.id}/transcript",
+        headers=auth_headers,
+        json={"cues": [{"start": 3, "end": 5, "text": "어긋난 자막"}]},
+    )
+    first = client.post(path, headers=auth_headers)
+    assert first.status_code == 202 and first.json()["kind"] == "sync"
+    # 같은 요청을 다시 눌러도 작업이 늘지 않습니다.
+    assert client.post(path, headers=auth_headers).json()["id"] == first.json()["id"]
+
+
+def test_sync_saves_a_new_version_and_keeps_the_old_one(client, auth_headers, asset, monkeypatch):
+    """보정은 새 대본 버전을 만듭니다. 마음에 들지 않으면 옛 버전을 다시 쓰면 됩니다."""
+    import worker.media_tasks as module
+    from pipeline.editing import Cue
+
+    class Storage:
+        def download_file(self, key, path):
+            path.write_bytes(b"media")
+
+    monkeypatch.setattr(module, "get_storage", lambda: Storage())
+    # 보정기는 여기서 대역입니다. 실제 보정 품질은 test_subtitle_sync.py가 봅니다.
+    monkeypatch.setattr(
+        module,
+        "sync_subtitles",
+        lambda source, cues: (
+            [Cue(start=c.start + 2, end=c.end + 2, text=c.text) for c in cues],
+            {"offset_seconds": 2.0, "framerate_scale": 1.0, "clamped": 0},
+        ),
+    )
+    client.put(
+        f"/source-assets/{asset.id}/transcript",
+        headers=auth_headers,
+        json={"cues": [{"start": 3, "end": 5, "text": "어긋난 자막"}]},
+    )
+    created = client.post(f"/source-assets/{asset.id}/transcript/sync", headers=auth_headers).json()
+
+    result = module.run_media.run(created["id"])
+    assert result["status"] == "succeeded"
+    assert result["sync"] == {"offset_seconds": 2.0, "framerate_scale": 1.0, "clamped": 0}
+    assert result["transcript_version"] == 2
+    assert client.get(f"/source-assets/{asset.id}/transcript", headers=auth_headers).json() == [
+        {"start": 5.0, "end": 7.0, "text": "어긋난 자막"}
+    ]

@@ -5,6 +5,7 @@ from __future__ import annotations
 import inspect
 import re
 import subprocess
+import tempfile
 from pathlib import Path
 
 from pipeline.alignment import (
@@ -17,6 +18,7 @@ from pipeline.alignment import (
 )
 from pipeline.editing import Cue
 from pipeline.speakers import SpeakerTurn, cluster, turns_from_labels, windows
+from pipeline.subtitle_files import dump_subtitles, parse_subtitles
 from worker.rendering import ffmpeg_binary
 
 # getattr 기본값. 속성 이름이 버전마다 달라도 "없음"과 "None"을 구분합니다.
@@ -399,3 +401,53 @@ def detect_scenes(source: Path, *, threshold: float = 27.0) -> list[dict]:
             str(source), ContentDetector(threshold=threshold), start_in_scene=True
         )
     ]
+
+
+def sync_subtitles(source: Path, cues: list[Cue]) -> tuple[list[Cue], dict]:
+    """이미 있는 자막의 시각을 원본 음성에 맞춰 통째로 옮깁니다(ffsubsync).
+
+    **글자는 건드리지 않습니다.** 돌아온 파일에서 시각만 가져와 원래 자막에
+    붙입니다. 보정기는 자막을 다시 쓸 수 있지만 대본은 사람이 정한 것입니다.
+
+    자막 개수가 달라지면 시각을 원래 자막에 도로 맞출 수 없으므로 실패로 봅니다.
+    보정기가 맞추지 못했다고 하면(`sync_was_successful=False`) 그 결과를 쓰지
+    않습니다. 엉뚱한 값으로 맞는 자막을 흔드는 것보다 안 하는 편이 낫습니다.
+
+    얼마나 옮겼는지(`offset_seconds`)를 함께 돌려줍니다. 사람이 그 값을 보고
+    쓸지 말지 정합니다.
+    """
+    if not cues:
+        raise ValueError("보정할 자막이 없습니다.")
+    try:
+        from ffsubsync.ffsubsync import make_parser, run
+    except ImportError as exc:
+        raise MissingDependency(
+            "자막 싱크 보정 의존성이 없습니다. pip install '.[subtitles]'를 실행하세요."
+        ) from exc
+
+    with tempfile.TemporaryDirectory(prefix="r4-sync-") as directory:
+        temp = Path(directory)
+        before, after = temp / "in.srt", temp / "out.srt"
+        before.write_text(dump_subtitles(cues), encoding="utf-8")
+        parser = make_parser()
+        report = run(parser.parse_args([str(source), "-i", str(before), "-o", str(after)]))
+        if report.get("retval") or not report.get("sync_was_successful", True):
+            raise ValueError("자막을 음성에 맞추지 못했습니다. 원본과 자막이 맞는지 확인하세요.")
+        moved, _ = parse_subtitles(after.read_text(encoding="utf-8"))
+
+    if len(moved) != len(cues):
+        raise ValueError("보정 결과의 자막 개수가 달라 시각을 맞출 수 없습니다.")
+    shifted: list[Cue] = []
+    clamped = 0
+    for old, new in zip(cues, moved, strict=True):
+        start, end = new.start, new.end
+        if start < 0:
+            # 앞으로 당겨져 0초보다 이르면 잘립니다. 길이를 늘리지 않습니다.
+            clamped += 1
+            start, end = 0.0, max(end - start, end, 0.001)
+        shifted.append(Cue(start=start, end=end, text=old.text))
+    return shifted, {
+        "offset_seconds": round(float(report.get("offset_seconds", 0.0)), 3),
+        "framerate_scale": round(float(report.get("framerate_scale_factor", 1.0)), 6),
+        "clamped": clamped,
+    }

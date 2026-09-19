@@ -250,6 +250,17 @@ jobs:
             --entrypoint python recording4-worker:ci /work/verify_align.py \
             --directory /audio --model small --no-diagnose
 
+      # 보정은 맞는 자막을 흔들면 안 됩니다. 아는 만큼 밀어 둔 자막이 돌아오는지와,
+      # 이미 맞는 자막이 그대로인지를 함께 잽니다. 실제 오차를 항상 찍습니다.
+      - name: 자막 싱크 보정 검증
+        if: |
+          contains(github.event.pull_request.labels.*.name, 'verify-align') ||
+          contains(github.event.head_commit.message, '[verify-align]')
+        run: |
+          docker run --rm -v /tmp/align-sample:/audio -v "$PWD/scripts:/work:ro" \
+            --entrypoint python recording4-worker:ci /work/verify_sync.py \
+            --directory /audio --offset 2.5
+
       # 합성 음성만으로는 사람 목소리 정확도를 말할 수 없습니다. 공개 한국어
       # 낭독 음성을 받아 같은 검사를 한 번 더 돌립니다. 받지 못하면 실패합니다.
       # 건너뛴 것과 통과한 것은 구분해야 합니다.

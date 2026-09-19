@@ -1,4 +1,20 @@
+## 2026-09-19: 다국어 자막 전용 번역 (Codex)
+
+- PR: https://github.com/plutoan12/recording4/pull/24 . 로컬 운영 서버에 반영 완료(같은 영구 체크아웃). API·worker·dispatcher·monitor·web 재빌드/재시작, 모든 서비스 healthy. 네 언어 실제 FFmpeg 자막 렌더 및 오디오/비디오 디코딩 통과. GitHub Python/Web 검사 통과, 이미지/스택 CI는 기록 시점 진행 중으로 PR은 아직 미병합.
+
+- 브랜치 `codex/multilingual-subtitles`. 담당: WorkflowOptions, workflow_tasks, WorkflowPanel, test_connected_workflow, 관련 문서.
+- 자막만 번역 모드와 ko/en/ja/zh 선택을 연결. 원음·원문 시각 유지, 더빙·립싱크 제외, 기존 검수·수정·SRT/VTT·YouTube 트랙 경로 재사용.
+- 365개 테스트 통과, 5개 조건부 skip. 네 언어 간 12방향을 공급자 대역으로 검증. TypeScript·Vite build·Ruff 통과. 실제 유료 번역 호출은 하지 않았으며 번역 품질 검증은 남아 있습니다.
+- ffsubsync 0.4.27, stable-ts 2.19.1 설치 및 다국어 small 모델 로드 확인. 사람 목소리 싱크 실패는 이번 변경으로 해결되지 않음. PR #23의 별도 싱크 수정과 합치지 않았습니다.
+- 기존 PR #20의 자막 전용 모드와 일부 중복되므로 추후 병합 시 중복을 정리해야 합니다. PR #20의 CI 조건 수정과 PR #17·#21의 별도 기능은 포함하지 않습니다.
+
 # 협업 인수인계
+
+## 2026-09-19: API·워커 재빌드 및 자막 표시 방식
+
+`codex/caption-delivery`는 병합된 PR #19 이후 main에서 분리했습니다. 자막 굽기/트랙만 옵션, 언어 지정, 중복 트랙 방지, 트랙 실패 시 예약 중단을 구현했습니다. Docker 이미지 빌드·브라우저 CP949/Shift_JIS 업로드·실제 비공개 YouTube 자막 트랙은 확인했습니다. 사람 목소리 싱크 검증은 실패해 수치와 재현 방법을 [별도 기록](CAPTION_DELIVERY.md)에 남겼습니다. PR #20/#21은 별도 브랜치이며 이번 변경에는 포함하지 않았습니다.
+
+PR #22 병합 후 Mac 운영 배포 완료(`83d94b1`). 자동 시작 경로는 `recording4-caption-delivery` 체크아웃입니다. API/워커 의존성·0006_sync 마이그레이션·트랙 설정 반영 확인. 350개 테스트 통과, 5개 조건부 skip. 실제 운영 싱크 작업은 안전하게 실패하고 대본 보존을 확인했습니다. **남은 품질 문제는 사람 목소리의 자동 싱크 정확도**이며, 실패를 성공으로 처리하거나 측정 기준을 완화하지 않았습니다.
 
 최종 갱신: 2026-09-19
 
@@ -1083,12 +1099,134 @@ OpenCV의 **Haar 캐스케이드**입니다.
 - 외부 SRT를 **가져오는** 경로는 여전히 없습니다(ffsubsync 자리).
 - 관리화면에는 자막 트랙 결과를 아직 보여 주지 않습니다. `GET /publications` 응답에는 들어 있습니다.
 
+
+## 외부 자막 파일 반입 (2026-09-19)
+
+- 사용자 요청: 자막 조사에서 남은 3번(외부 SRT 가져오기). 브랜치 `claude/subtitle-file-generation-38xjz4`(PR #16 병합 후 최신 main에서 재시작).
+- 담당 파일: `packages/pipeline/pipeline/subtitle_files.py`, `services/api/adminapi/routers/editing.py`, `apps/web/src/ClipEditor.tsx`, `tests/{test_subtitle_files,test_editing_api}.py`, `README.md`, `docs/{CONNECTED_WORKFLOW,OPEN_SOURCE_INTEGRATIONS,TECH_DECISIONS,HANDOFF}.md`.
+- 의존 작업: 없습니다. 새 의존성도 없습니다(pysubs2가 읽습니다).
+
+### 구현한 것
+
+- `pipeline/subtitle_files.py:parse_subtitles()`: SRT·WebVTT·ASS를 형식 표시 없이 읽습니다. 꾸밈 표기를 벗기고, 파일의 줄바꿈을 공백으로 합치고, 못 쓰는 자막은 **몇 번째를 왜 뺐는지와 함께** 돌려줍니다.
+- `POST /source-assets/{id}/transcript/import`: 대본 새 버전으로 저장합니다. 직접 편집과 같은 저장 경로(`save_transcript`)라 원본 길이 검사와 가독성 보고가 똑같이 적용됩니다.
+- 편집기에 **자막 파일 가져오기**(파일 선택). 들인 뒤 대본을 다시 읽고 뺀 자막을 알립니다.
+
+### 검증 결과
+
+- `pytest -q`: **330 통과 / 5 skip**(SQLite). 새 테스트 9개.
+- 우리가 내보낸 SRT를 다시 들이면 시각·글자가 같음을 확인했습니다(왕복).
+- WebVTT 화자 태그(`<v 진행자>`)와 SRT 기울임 표기가 벗겨지는 것, 순서가 뒤섞인 파일이 시간순으로 정렬되는 것을 확인했습니다.
+- 자막이 아닌 글자, 쓸 자막이 하나도 없는 파일, 원본 길이를 넘는 자막은 422로 막고 저장하지 않는 것을 확인했습니다.
+- `ruff check`·`ruff format --check`, `npm run typecheck`·`npm run build` 통과.
+- **미검증**: 실제 외부 도구(Aegisub·유튜브 내려받기 등)가 만든 파일로 시험해 본 적은 없습니다. 인코딩이 UTF-8이 아닌 파일(한국어 SRT에 흔한 CP949)은 **읽지 못합니다.** 브라우저가 `file.text()`로 UTF-8로 읽기 때문입니다.
+
+### 남은 작업
+
+- ~~**인코딩**: CP949·EUC-KR 자막 파일을 어떻게 받을지 정하지 않았습니다.~~ 아래 절에서 처리했습니다.
+- **싱크 보정(ffsubsync)**: 반입 경로는 생겼지만 들인 자막이 실제로 얼마나 어긋나는지 재 본 적이 없습니다. 재기 전에 넣으면 맞는 자막을 흔듭니다.
+- 자막 두 벌(구운 자막 + YouTube 트랙) 문제는 그대로입니다. 구운 자막 없이 렌더하는 선택지가 필요합니다.
+
+
+## 자막 파일 인코딩 (2026-09-19)
+
+- 사용자 요청: 앞 절에서 남긴 인코딩 문제. 브랜치 `claude/subtitle-file-generation-38xjz4`(PR #18 병합 후 최신 main에서 재시작).
+- 담당 파일: `packages/pipeline/pipeline/subtitle_files.py`, `services/api/adminapi/routers/editing.py`, `apps/web/src/{api.ts,ClipEditor.tsx}`, `tests/{test_subtitle_files,test_editing_api}.py`, `docs/{CONNECTED_WORKFLOW,OPEN_SOURCE_INTEGRATIONS,TECH_DECISIONS,HANDOFF}.md`.
+- 의존 작업: PR #18의 반입 경로를 고쳤습니다. 새 의존성은 없습니다.
+
+### 무엇이 문제였나
+
+브라우저가 `file.text()`로 파일을 **UTF-8로 읽어** 보냈습니다. 한국어 자막에 흔한 CP949 파일은 그 자리에서 깨지고, 서버는 깨진 글자만 받습니다. 손쓸 방법이 없습니다.
+
+### 고친 방법
+
+- 파일을 **바이트 그대로**(base64) 보냅니다. 요청 본문이 `text`에서 `content_base64`+`encoding`으로 바뀌었습니다.
+- 서버는 BOM과 UTF-8까지만 스스로 판단하고, 그 밖에는 **추측하지 않습니다.** 후보 인코딩마다 첫 자막을 디코딩해 미리보기를 붙여 422로 돌려줍니다.
+- 편집기가 그 후보를 버튼으로 보여 주고, 사람이 **글자가 제대로 보이는 것**을 고르면 그 인코딩으로 다시 들입니다.
+
+### 검증 결과
+
+- `pytest -q`: **336 통과 / 5 skip**(SQLite). 새 테스트 6개.
+- CP949 파일이 저장되지 않고 후보와 함께 422로 돌아오는 것, 그중 `cp949` 후보의 미리보기가 원래 글자(`안녕하세요 자막입니다`)와 같은 것을 확인했습니다.
+- 인코딩을 잘못 지정하면(`utf-8`로 CP949) 저장하지 않고 이유를 돌려주는 것을 확인했습니다.
+- 자막으로 읽히지 않는 후보는 내놓지 않는 것(고를 수 없는 선택지), 같은 글자가 나오는 후보를 한 번만 보여 주는 것을 확인했습니다.
+- `ruff check`·`ruff format --check`, `npm run typecheck`·`npm run build` 통과.
+- **미검증**: 실제 CP949 자막 파일(외부 도구가 만든 것)을 브라우저에서 올려 본 적은 없습니다. 대역 바이트로만 확인했습니다.
+
+### 남은 작업
+
+- ~~싱크 보정(ffsubsync)~~ 아래 절에서 처리했습니다. 보정과 함께 그 보정을 재는 검증도 넣었습니다.
+- 자막 두 벌(구운 자막 + YouTube 트랙) 문제도 그대로입니다.
+
+
+## 자막 싱크 보정 (ffsubsync) (2026-09-19)
+
+- 사용자 요청: ffsubsync 넣기. 앞 절에서 제가 "재기 전에 넣으면 맞는 자막을 흔든다"고 적었으므로 **보정과 그것을 재는 검증을 함께** 넣었습니다. 브랜치 `claude/subtitle-file-generation-38xjz4`.
+- 담당 파일: `packages/pipeline/pipeline/subtitle_files.py`, `services/worker/worker/{analysis,media_tasks}.py`, `services/api/adminapi/{models.py,routers/editing.py}`, `migrations/versions/0006_sync_media_task.py`(신규), `apps/web/src/ClipEditor.tsx`, `scripts/verify_sync.py`(신규), `.github/workflows/ci.yml`, `pyproject.toml`, `tests/{test_subtitle_sync(신규),test_editing_api}.py`, `docs/{CONNECTED_WORKFLOW,OPEN_SOURCE_INTEGRATIONS,TECH_DECISIONS,HANDOFF}.md`.
+- 의존 작업: `[subtitles]` extra에 `ffsubsync==0.4.27`을 추가했습니다. MIT이며 새 모델 다운로드는 없습니다.
+
+### 구현한 것
+
+- `worker/analysis.py:sync_subtitles()`: ffsubsync 파이썬 API로 시각만 옮깁니다. 글자는 원래 자막에서 가져오고, 자막 개수가 달라지거나 보정기가 실패를 알리면 결과를 쓰지 않습니다.
+- `POST /source-assets/{id}/transcript/sync` + `sync` 작업 종류(마이그레이션 `0006_sync`). 결과는 **새 대본 버전**이라 기존 버전이 남습니다.
+- 편집기에 **자막 싱크 보정** 버튼. 작업 목록에 "뒤로 2.50초 옮김"처럼 보정값이 나옵니다.
+- `pipeline/subtitle_files.py:dump_subtitles()`: 표시 규칙을 거치지 않은 날것 SRT. 규칙을 적용해 보내면 자막이 나뉘어 돌아온 시각을 맞출 수 없습니다.
+
+### 검증 결과
+
+- `pytest -q`: **343 통과 / 5 skip**(SQLite). 새 테스트 7개.
+- **실제 ffsubsync로 잽니다.** 기준을 SRT로 주면 오디오·ffmpeg 없이 같은 코드 경로가 돌아, +2.5초와 -2.5초로 밀어 둔 자막이 0.1초 안으로 돌아오는 것을 확인했습니다.
+- 보정기가 글자를 다시 써도 우리 글자가 남는 것, 날것 덤프가 자막을 나누지 않는 것을 확인했습니다.
+- 마이그레이션 `0006_sync` SQLite 왕복 통과. `ruff check`·`format`, `npm run typecheck` 통과.
+- **미검증**: **실제 음성을 기준으로 한 보정은 아직 재지 못했습니다.** `scripts/verify_sync.py`가 CI의 `verify-align` 라벨에서 돌며, 아는 만큼 밀어 둔 자막이 돌아오는지와 **이미 맞는 자막이 흔들리지 않는지**를 함께 봅니다. 이 PR에 라벨을 붙여 실측값을 남기는 것이 다음 차례입니다.
+
+### 남은 작업
+
+- 위 실측(라벨을 붙인 CI 실행). 합성 음성이라 사람 목소리보다 불리한 조건이며, 사람 목소리로도 재려면 `fetch_korean_speech.py` 표본에 같은 검사를 붙이면 됩니다.
+- 자막 두 벌(구운 자막 + YouTube 트랙) 문제는 그대로입니다.
+
+
+## 자막 인코딩 자동 판별 (charset-normalizer) (2026-09-19)
+
+- 사용자 요청: 자동 판별 라이브러리 넣기. 앞 절에서 제가 "추측하지 않는다"고 적었으므로 **판별을 쓰되 무엇으로 읽었는지 밝히고 되돌릴 수 있게** 붙였습니다. 브랜치 `claude/subtitle-file-generation-38xjz4`.
+- 담당 파일: `packages/pipeline/pipeline/subtitle_files.py`, `services/api/adminapi/routers/editing.py`, `apps/web/src/{api.ts,ClipEditor.tsx}`, `pyproject.toml`, `tests/{test_subtitle_files,test_editing_api}.py`, `docs/{OPEN_SOURCE_INTEGRATIONS,TECH_DECISIONS,HANDOFF}.md`.
+- 의존 작업: **핵심** 의존성에 `charset-normalizer==3.5.1`을 추가했습니다. MIT입니다. chardet은 LGPL이라 쓰지 않았습니다.
+
+### 구현한 것
+
+- `decode_subtitles()`가 **BOM → UTF-8 → 판별기** 순으로 읽고, 글자만이 아니라 `Decoded(text, encoding, detected)`를 돌려줍니다.
+- 판별기가 고른 인코딩으로 읽은 글자가 **자막으로 읽히는지** 확인합니다. 읽히지 않으면 쓰지 않고 후보 목록으로 넘어갑니다.
+- `encoding_choices()`를 따로 빼서, 판별에 성공했을 때도 같은 후보 목록을 응답에 함께 실어 줍니다.
+- 들여오기 응답에 `encoding`·`encoding_detected`·(판별일 때) `choices`가 붙습니다. 편집기는 "cp949로 자동 판별해 읽었습니다. 글자가 제대로 보이는지 확인하세요"를 띄우고 다른 인코딩 버튼을 함께 보여 줍니다. 다시 들이면 대본 새 버전이라 원래 것이 남습니다.
+
+### 검증 결과
+
+- `pytest -q`: **348 통과 / 5 skip**(SQLite).
+- CP949로 만든 한국어 자막이 이제 묻지 않고 `cp949`로 들어오며, 응답이 `encoding_detected=true`로 표시하는 것을 확인했습니다. UTF-8은 `false`입니다.
+- 판별기가 고르지 못하는 경우(판별 함수를 막고 시험)에는 예전처럼 후보 미리보기와 함께 422로 돌아오고, 저장되지 않는 것을 확인했습니다.
+- 판별기가 고른 인코딩으로 **읽히지 않으면** 그 결과를 쓰지 않는 것을 확인했습니다.
+- `ruff check`·`ruff format --check`, `npm run typecheck`·`npm run build` 통과.
+- **한계(테스트로 남겨 둠)**: 구조 확인은 시간 줄만 봅니다. 글자가 깨져도 자막 파일로는 읽히므로 **판별이 틀린 것을 서버가 걸러내지 못합니다.** `test_decode_marks_a_guess_because_the_check_cannot_catch_garbled_text`가 이 사실을 고정합니다. 그래서 화면에서 사람이 확인하게 했습니다.
+- **미검증**: 실제 외부 도구가 만든 CP949·Shift_JIS 파일을 브라우저에서 올려 본 적은 없습니다. 대역 바이트로만 확인했습니다.
+
+### 워커 이미지 빌드 실패와 수정
+
+- ffsubsync를 넣은 커밋에서 **워커 이미지 빌드와 스택 기동 검증이 깨졌습니다**(CI에서 드러났습니다).
+- 원인: ffsubsync가 **webrtcvad**(C 확장)를 끌어오는데 PyPI에 파이썬 3.11용 휠이 없어 설치할 때 컴파일해야 합니다. `python:3.11-slim`에는 컴파일러가 없습니다.
+- 수정: `infra/Dockerfile.worker`의 설치 층에서만 `build-essential`을 넣었다가 **같은 층에서 지웁니다.** 최종 이미지에는 남지 않습니다.
+- ffsubsync는 **chardet(LGPL)** 도 끌어옵니다. 우리 코드는 부르지 않지만 `[subtitles]`를 설치한 워커 이미지에는 들어갑니다. 배포물 라이선스를 따질 때 함께 봐야 합니다(문서에 적어 두었습니다).
+- **미검증**: 이 저장소 컨테이너에 도커가 없어 이미지 빌드를 직접 돌려 보지 못했습니다. CI 결과로 확인합니다.
+
+### 남은 작업
+
+- 싱크 보정 실측(`verify-align` 라벨 CI)과 자막 두 벌(구운 자막 + YouTube 트랙) 문제는 그대로입니다.
+
 ---
 
 ## 2026-09-19 — LLM 하이라이트 추천 (미구현 세 가지 중 마지막)
 
 - 사용자 요청: 미구현 기능 세 가지 중 세 번째. 공급자는 **Claude API**, 적용 범위는 **제안까지**(사용자가 고름). 브랜치 `claude/claude-md-design-review-v8qdz4`.
-- 담당 파일: `packages/pipeline/pipeline/highlights.py`(신규), `services/worker/worker/{highlight_tasks.py(신규),providers.py,dispatcher.py}`, `services/api/adminapi/{config.py,models.py,routers/editing.py}`, `migrations/versions/0006_faces_highlights_media_task.py`(신규), `apps/web/src/ClipEditor.tsx`, `tests/{test_highlights.py,test_highlight_task.py}`(신규), `tests/test_editing_api.py`.
+- 담당 파일: `packages/pipeline/pipeline/highlights.py`(신규), `services/worker/worker/{highlight_tasks.py(신규),providers.py,dispatcher.py}`, `services/api/adminapi/{config.py,models.py,routers/editing.py}`, `migrations/versions/0007_faces_highlights_media_task.py`(신규), `apps/web/src/ClipEditor.tsx`, `tests/{test_highlights.py,test_highlight_task.py}`(신규), `tests/test_editing_api.py`.
 - 의존: 없음. `pyproject.toml`의 `providers` 묶음에 `anthropic==1.7.0`을 넣었습니다.
 
 ### 먼저: 얼굴 제안이 **돌지 않고 있었습니다**
@@ -1101,7 +1239,7 @@ sqlalchemy.exc.IntegrityError: CHECK constraint failed: ck_media_task_kind
 
 관리화면의 "좌우 중심 제안" 버튼은 누르면 500이 났을 것입니다. 검출기도, 규칙도, CI 오검출 점검도 만들어 놓고 **사람이 누르는 길을 한 번도 밟아 보지 않았습니다.** 시험이 그 종류로 행을 넣어 본 적이 없어 드러나지 않았습니다.
 
-고친 것: 마이그레이션 `0006`에서 `faces`와 `highlights`를 제약에 넣고, **API가 받는 모든 종류가 실제로 저장되는지 보는 시험**을 넣었습니다. 그 시험은 고치기 전 코드에서 실패하는 것을 확인했습니다.
+고친 것: 마이그레이션 `0007`에서 `faces`와 `highlights`를 제약에 넣고, **API가 받는 모든 종류가 실제로 저장되는지 보는 시험**을 넣었습니다. 그 시험은 고치기 전 코드에서 실패하는 것을 확인했습니다.
 
 ### 무엇을 만들었나
 

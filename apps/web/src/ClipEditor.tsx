@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { downloadFile, request, type SourceAsset } from './api'
+import { downloadFile, importSubtitles, request, type EncodingChoice, type ImportResult, type SourceAsset } from './api'
 import { PublicationForm } from './PublicationForm'
 import type { WorkflowDraft } from './WorkflowPanel'
 
@@ -8,6 +8,7 @@ type Suggestion = { start: number; end: number; title: string; reason: string }
 type Violation = { index: number; kind: string; detail: string }
 type Task = { id: string; source_asset_id: string; clip_edit_id: string | null; kind: string; state: string; error: string | null;
   result: { artifact_id?: string; scenes?: {start: number; end: number}[];
+    sync?: {offset_seconds:number; framerate_scale:number; clamped:number};
     focus?: {focus_x: number; samples: number; found: number; reason: string};
     clips?: Suggestion[]; rejected?: {first: number; last: number; why: string}[] } }
 
@@ -18,6 +19,8 @@ export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWo
   const [end, setEnd] = useState(30)
   const [mode, setMode] = useState('pad')
   const [focus, setFocus] = useState(0.5)
+  const [burn,setBurn] = useState(true)
+  const [captionLanguage,setCaptionLanguage] = useState('ko')
   const [title, setTitle] = useState('')
   const [captions, setCaptions] = useState<Cue[]>([])
   const [suggestions, setSuggestions] = useState<Suggestion[]>([])
@@ -29,6 +32,9 @@ export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWo
   const [previewId, setPreviewId] = useState('')
   const [approvedId,setApprovedId] = useState('')
   const [message, setMessage] = useState('')
+  // 인코딩을 물어야 하는 파일. used가 있으면 판별기가 고른 것으로 이미 들인 뒤라
+  // 글자를 확인하고 되돌릴 수 있게 남겨 둡니다.
+  const [pending, setPending] = useState<{file: File; choices: EncodingChoice[]; used?: string} | null>(null)
   const [busy, setBusy] = useState(false)
   const video = useRef<HTMLVideoElement>(null)
   const selection = useRef('')
@@ -62,6 +68,27 @@ export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWo
       ])
       if (selection.current !== id) return
       setSourceUrl(preview.url); setCaptions(cues)
+    })
+  }
+  async function bring(file: File, encoding?: string) {
+    await act(async () => {
+      const imported: ImportResult = await importSubtitles(assetId, file, encoding)
+      if (!imported.ok) {
+        setPending({file, choices: imported.choices})
+        setMessage(imported.message)
+        return
+      }
+      // 판별기가 고른 인코딩이면 다른 후보를 남겨 둡니다. 글자가 깨져도 파일
+      // 모양은 멀쩡해서 서버가 못 거릅니다. 사람이 보고 되돌려야 합니다.
+      setPending(imported.encoding_detected
+        ? {file, used: imported.encoding,
+           choices: (imported.choices ?? []).filter(c => c.encoding !== imported.encoding)}
+        : null)
+      setCaptions(await request<Cue[]>(`/source-assets/${assetId}/transcript`))
+      setViolations(imported.violations)
+      setMessage(`자막 ${imported.count}개를 대본 ${imported.version}번으로 들였습니다`
+        + ` (${imported.encoding}${imported.encoding_detected ? ' 자동 판별' : ''}).`
+        + (imported.skipped.length ? ` 뺀 자막 ${imported.skipped.length}개: ${imported.skipped.join(' ')}` : ''))
     })
   }
   function updateCue(index: number, patch: Partial<Cue>) {
@@ -105,10 +132,33 @@ export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWo
         })}>대본 다시 읽기</button>
       </div>
       <details>
+        <summary>자막 파일 가져오기 (SRT·VTT·ASS)</summary>
+        <p>밖에서 만든 자막 파일을 대본으로 들입니다. 시각은 파일에 적힌 그대로 씁니다. 원본과 맞는지는 확인하지 않으니 들인 뒤 확인하세요.</p>
+        <input type="file" accept=".srt,.vtt,.ass,.ssa,text/plain" disabled={busy} onChange={e => {
+          const file = e.target.files?.[0]
+          e.target.value = ''
+          if (file) void bring(file)
+        }} />
+        {pending && <div className="error">
+          {pending.used
+            ? <p><b>{pending.used}</b>(으)로 자동 판별해 읽었습니다. <b>대본 글자가 제대로 보이는지 확인하세요.</b> 깨졌다면 아래에서 다시 고르면 새 대본 버전으로 들입니다.</p>
+            : <p>이 파일의 인코딩을 알 수 없습니다. <b>글자가 제대로 보이는 것</b>을 고르세요. 잘못 고르면 깨진 채로 저장됩니다.</p>}
+          {pending.choices.map(choice => <button key={choice.encoding} disabled={busy}
+            onClick={() => void bring(pending.file, choice.encoding)}>
+            {choice.encoding}: {choice.preview}
+          </button>)}
+          <button disabled={busy} onClick={() => setPending(null)}>{pending.used ? '확인했습니다' : '취소'}</button>
+        </div>}
+      </details>
+      <details>
         <summary>시간 없는 대본 붙여넣기</summary>
         <p>이미 있는 대본을 원본 음성에 맞춰 시각을 찾습니다. 글자는 그대로 두고 시간만 붙입니다. 유료 호출이 아닙니다.</p>
         <textarea rows={6} maxLength={50000} value={plainScript} placeholder="대본을 붙여넣으세요"
           onChange={e => setPlainScript(e.target.value)} />
+        <button disabled={busy} onClick={() => void act(async () => {
+          await request(`/source-assets/${assetId}/transcript/sync`, {method:'POST'})
+          setMessage('자막 싱크 보정을 요청했습니다. 끝나면 아래 결과에 옮긴 초가 나옵니다. 대본 다시 읽기를 누르세요.'); await refresh()
+        })}>자막 싱크 보정 (원본 음성에 맞추기)</button>
         <button disabled={busy || !plainScript.trim()} onClick={() => void act(async () => {
           await request(`/source-assets/${assetId}/align`, {method:'POST', body: JSON.stringify({text: plainScript})})
           setMessage('대본 정렬을 요청했습니다. 완료 후 대본 다시 읽기를 누르세요.'); await refresh()
@@ -120,6 +170,8 @@ export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWo
       </div>}
       <h3>자막 편집</h3>
       <p>시간은 원본 영상 기준입니다. 선택 구간 밖의 자막은 최종 영상에서 자동으로 제외됩니다.</p>
+      <label>자막 표시<select value={burn?'burn':'track'} onChange={e=>setBurn(e.target.value==='burn')}><option value="burn">영상에 굽기 · 트랙 업로드 안 함</option><option value="track">YouTube 트랙만 · 영상에 굽지 않음</option></select></label>
+      <label>자막 언어<input value={captionLanguage} onChange={e=>setCaptionLanguage(e.target.value)} pattern="[a-z]{2,3}" placeholder="ko, en, ja" /></label>
       {captions.map((cue, index) => <div className="caption-row" key={index}>
         <label>시작(초)<input type="number" min="0" step="0.01" value={cue.start} onChange={e => updateCue(index,{start:Number(e.target.value)})} /></label>
         <label>종료(초)<input type="number" min="0" step="0.01" value={cue.end} onChange={e => updateCue(index,{end:Number(e.target.value)})} /></label>
@@ -155,17 +207,20 @@ export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWo
           setMessage(`AI 추천 ${latest.result.clips.length}건입니다. 버린 후보 ${dropped}건(대본에 없는 번호·겹침·길이). 자를지는 직접 정하세요.`)
         })}>AI 추천 결과 불러오기</button>
         <button disabled={busy || end <= start || end-start > 180} onClick={() => void act(async () => {
-          await request('/clips', {method:'POST', body: JSON.stringify({source_asset_id:assetId, start, end, mode, focus_x:focus, title, cues:captions})})
+          await request('/clips', {method:'POST', body: JSON.stringify({source_asset_id:assetId, start, end, mode, focus_x:focus, title, burn_subtitles:burn, caption_language:captionLanguage, cues:captions})})
           setMessage('새 편집본의 렌더를 요청했습니다.'); await refresh()
         })}>숏폼 렌더</button>
       </div>
-      <button disabled={busy||end<=start||end-start>180} onClick={()=>{onWorkflow({source_asset_id:assetId,start,end,mode,focus_x:focus,title,cues:captions});setMessage('아래 단계별 제작 화면에 선택 구간을 전달했습니다.')}}>선택 구간을 번역·더빙 단계로 보내기</button>
+      <button disabled={busy||end<=start||end-start>180} onClick={()=>{onWorkflow({source_asset_id:assetId,start,end,mode,focus_x:focus,title,burn_subtitles:burn,caption_language:captionLanguage,cues:captions});setMessage('아래 단계별 제작 화면에 선택 구간을 전달했습니다.')}}>선택 구간을 번역·더빙 단계로 보내기</button>
       {suggestions.map((s,i) => <button key={i} onClick={() => {setStart(s.start);setEnd(s.end);setTitle(s.title)}}>{s.start.toFixed(1)}–{s.end.toFixed(1)}초 · {s.title}</button>)}
     </>}
     {message && <p role="status">{message}</p>}
     <h3>분석·렌더 결과</h3>
     <ul>{tasks.filter(t => !assetId || t.source_asset_id === assetId).map(t => <li key={t.id}>
       {t.kind} · {t.state} {t.error}
+      {t.result.sync && <span> · {t.result.sync.offset_seconds >= 0 ? '뒤로' : '앞으로'} {Math.abs(t.result.sync.offset_seconds).toFixed(2)}초 옮김
+        {t.result.sync.framerate_scale !== 1 && ` · 속도 ${t.result.sync.framerate_scale}배`}
+        {t.result.sync.clamped > 0 && ` · 0초로 잘린 자막 ${t.result.sync.clamped}개`}</span>}
       {t.result.scenes?.map((s,i) => <button key={i} onClick={() => {setStart(s.start);setEnd(Math.min(s.end,s.start+180))}}>{s.start.toFixed(1)}–{s.end.toFixed(1)}초</button>)}
       {t.result.focus && <> <span>{t.result.focus.reason}</span>
         {/* 누를 때만 적용합니다. 검출기가 틀리면 맞춰 둔 값을 망칩니다. */}
