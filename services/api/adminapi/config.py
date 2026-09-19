@@ -57,9 +57,9 @@ class Settings(BaseSettings):
     #   위 경우를 원리상 맞출 수 없습니다. 대본 글자가 실제 발화와 다른
     #   번역 자막에는 이쪽만 쓸 수 있습니다.
     #
-    # **기본값은 아직 shift입니다.** align이 한국어 낭독에서 더 나은지 같은
-    # 조건으로 재기 전에는 바꾸지 않습니다. 측정 방법과 지금까지의 숫자는
-    # docs/TECH_DECISIONS.md에 있습니다.
+    # **기본값은 shift입니다.** 같은 조건에서 재 보니 align이 졌습니다(한국어
+    # 사람 목소리 세 조건에서 align 1.63~3.10초, shift 0.03~0.50초). 측정과
+    # 그 해석은 docs/TECH_DECISIONS.md에 있습니다.
     sync_method: str = "shift"
     sync_fix_framerate: bool = False
     # 찾을 이동의 상한. 넓게 열어 두면 엉뚱한 최고점을 고릅니다. ffsubsync 기본값
