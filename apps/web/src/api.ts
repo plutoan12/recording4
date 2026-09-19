@@ -106,7 +106,11 @@ export async function downloadFile(path: string, filename: string): Promise<void
 
 export type EncodingChoice = { encoding: string; preview: string }
 export type ImportResult =
-  | { ok: true; version: number; count: number; skipped: string[]; violations: {index:number;kind:string;detail:string}[] }
+  | { ok: true; version: number; count: number; skipped: string[];
+      violations: {index:number;kind:string;detail:string}[];
+      // encoding_detected가 true면 판별기가 고른 것이라 글자가 깨졌을 수 있습니다.
+      // choices는 그때 함께 오는 다른 후보입니다.
+      encoding: string; encoding_detected: boolean; choices?: EncodingChoice[] }
   | { ok: false; message: string; choices: EncodingChoice[] }
 
 export async function importSubtitles(

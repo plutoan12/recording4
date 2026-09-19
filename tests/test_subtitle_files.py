@@ -3,6 +3,7 @@
 import pysubs2
 import pytest
 
+from pipeline import subtitle_files
 from pipeline.editing import Cue, EditSpec
 from pipeline.subtitle_files import (
     FORMATS,
@@ -171,19 +172,49 @@ def test_import_round_trips_what_we_export():
     assert notes == []
 
 
+KOREAN_SRT = "1\n00:00:01,000 --> 00:00:02,000\n안녕하세요 자막입니다\n"
+
+
 def test_decode_reads_utf8_and_files_that_declare_themselves():
     """BOM이 있으면 파일이 스스로 밝힌 것이라 추측할 필요가 없습니다."""
-    text = "1\n00:00:01,000 --> 00:00:02,000\n안녕하세요\n"
-    assert decode_subtitles(text.encode("utf-8")) == text
-    assert decode_subtitles(text.encode("utf-8-sig")) == text
-    assert decode_subtitles(text.encode("utf-16")) == text
+    for raw in ("utf-8", "utf-8-sig", "utf-16"):
+        found = decode_subtitles(KOREAN_SRT.encode(raw))
+        assert found.text == KOREAN_SRT
+        # 판별기를 거치지 않았으므로 사람이 확인할 일이 없습니다.
+        assert found.detected is False
 
 
-def test_decode_asks_instead_of_guessing_a_legacy_encoding():
-    """CP949를 UTF-8로 읽으면 실패합니다. 여기서 추측하면 글자가 조용히 깨집니다."""
-    text = "1\n00:00:01,000 --> 00:00:02,000\n안녕하세요 자막입니다\n"
+def test_decode_detects_a_legacy_encoding_and_says_it_guessed():
+    """한국어 자막에 흔한 CP949를 판별기가 맞춥니다. 판별은 추측이라 밝혀 둡니다."""
+    found = decode_subtitles(KOREAN_SRT.encode("cp949"))
+    assert found.text == KOREAN_SRT
+    assert found.encoding == "cp949"
+    # 글자가 깨져도 조용히 성공하는 길이라 사람이 되돌릴 수 있게 표시합니다.
+    assert found.detected is True
+
+
+def test_decode_does_not_use_a_detector_answer_it_cannot_read(monkeypatch):
+    """판별기가 고른 인코딩으로 읽히지 않으면 그대로 쓰지 않고 후보를 내놓습니다."""
+    monkeypatch.setattr(subtitle_files, "detect_encoding", lambda data: "utf-32")
     with pytest.raises(UnknownEncoding) as caught:
-        decode_subtitles(text.encode("cp949"))
+        decode_subtitles(KOREAN_SRT.encode("cp949"))
+    assert any(choice.encoding == "cp949" for choice in caught.value.choices)
+
+
+def test_decode_marks_a_guess_because_the_check_cannot_catch_garbled_text():
+    """구조 확인은 시간 줄만 봅니다. 글자가 깨져도 자막 파일로는 읽히므로 못 거릅니다.
+
+    그래서 판별로 읽었다는 사실을 남깁니다. 사람이 글자를 보고 되돌려야 합니다.
+    """
+    garbled = "1\n00:00:01,000 --> 00:00:02,000\n¾È³çÇÏ¼¼¿ä\n"
+    assert subtitle_files._preview(garbled) is not None
+
+
+def test_decode_asks_when_the_detector_cannot_choose(monkeypatch):
+    """판별기가 못 고르면 추측하지 않고 후보마다 어떻게 보이는지 붙여 넘깁니다."""
+    monkeypatch.setattr(subtitle_files, "detect_encoding", lambda data: None)
+    with pytest.raises(UnknownEncoding) as caught:
+        decode_subtitles(KOREAN_SRT.encode("cp949"))
     choices = {choice.encoding: choice.preview for choice in caught.value.choices}
     assert choices["cp949"] == "안녕하세요 자막입니다"
     # 글자가 깨져 보이는 후보도 함께 내놓아 사람이 보고 고를 수 있게 합니다.
@@ -192,12 +223,12 @@ def test_decode_asks_instead_of_guessing_a_legacy_encoding():
 
 
 def test_decode_uses_the_encoding_it_is_given():
-    text = "1\n00:00:01,000 --> 00:00:02,000\n안녕하세요\n"
-    assert decode_subtitles(text.encode("cp949"), "cp949") == text
+    found = decode_subtitles(KOREAN_SRT.encode("cp949"), "cp949")
+    assert (found.text, found.encoding, found.detected) == (KOREAN_SRT, "cp949", False)
     with pytest.raises(ValueError):
-        decode_subtitles(text.encode("cp949"), "utf-8")
+        decode_subtitles(KOREAN_SRT.encode("cp949"), "utf-8")
     with pytest.raises(ValueError):
-        decode_subtitles(text.encode("utf-8"), "그런 인코딩 없음")
+        decode_subtitles(KOREAN_SRT.encode("utf-8"), "그런 인코딩 없음")
 
 
 def test_decode_offers_only_candidates_that_parse_as_subtitles():

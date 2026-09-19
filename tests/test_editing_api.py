@@ -6,6 +6,7 @@ import pytest
 from sqlalchemy import select
 
 from adminapi.models import Approval, Artifact, SourceAsset
+from pipeline import subtitle_files
 
 
 @pytest.fixture
@@ -283,14 +284,38 @@ def test_import_reports_what_it_skipped_and_refuses_what_it_cannot_use(client, a
     assert len(body["skipped"]) == 1 and "2번" in body["skipped"][0]
 
 
-def test_a_cp949_file_asks_which_encoding_instead_of_saving_broken_text(
-    client, auth_headers, asset
+def test_a_cp949_file_is_read_by_the_detector_and_says_it_guessed(client, auth_headers, asset):
+    """한국어 자막에 흔한 CP949는 판별기가 읽습니다. 무엇으로 읽었는지 함께 돌려줍니다."""
+    path = f"/source-assets/{asset.id}/transcript/import"
+    srt = "1\n00:00:01,000 --> 00:00:02,000\n안녕하세요 자막입니다\n"
+
+    saved = client.post(path, headers=auth_headers, json=upload(srt, "cp949"))
+    assert saved.status_code == 200, saved.text
+    body = saved.json()
+    assert body["count"] == 1 and body["encoding"] == "cp949"
+    # 판별은 추측이라 밝힙니다. 화면이 이 표시를 보고 사람에게 확인을 청합니다.
+    assert body["encoding_detected"] is True
+    assert client.get(f"/source-assets/{asset.id}/transcript", headers=auth_headers).json() == [
+        {"start": 1.0, "end": 2.0, "text": "안녕하세요 자막입니다"}
+    ]
+
+
+def test_a_utf8_file_is_not_marked_as_a_guess(client, auth_headers, asset):
+    path = f"/source-assets/{asset.id}/transcript/import"
+    srt = "1\n00:00:01,000 --> 00:00:02,000\n안녕하세요\n"
+    body = client.post(path, headers=auth_headers, json=upload(srt)).json()
+    assert body["encoding"] == "utf-8" and body["encoding_detected"] is False
+
+
+def test_a_file_the_detector_cannot_place_asks_instead_of_saving_broken_text(
+    client, auth_headers, asset, monkeypatch
 ):
-    """UTF-8이 아닌 파일은 추측해서 저장하지 않습니다. 후보를 미리보기와 함께 돌려줍니다.
+    """판별까지 실패하면 추측해서 저장하지 않습니다. 후보를 미리보기와 함께 돌려줍니다.
 
     잘못 고르면 글자가 조용히 깨진 채로 저장되고 나중에 영상에 그대로 구워집니다.
     이름만 보고는 못 골라도 자기 자막 글자는 알아봅니다.
     """
+    monkeypatch.setattr(subtitle_files, "detect_encoding", lambda data: None)
     path = f"/source-assets/{asset.id}/transcript/import"
     srt = "1\n00:00:01,000 --> 00:00:02,000\n안녕하세요 자막입니다\n"
 
@@ -308,6 +333,7 @@ def test_a_cp949_file_asks_which_encoding_instead_of_saving_broken_text(
         path, headers=auth_headers, json={**upload(srt, "cp949"), "encoding": "cp949"}
     )
     assert saved.status_code == 200 and saved.json()["count"] == 1
+    assert saved.json()["encoding_detected"] is False
     assert client.get(f"/source-assets/{asset.id}/transcript", headers=auth_headers).json() == [
         {"start": 1.0, "end": 2.0, "text": "안녕하세요 자막입니다"}
     ]

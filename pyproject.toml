@@ -22,6 +22,8 @@ dependencies = [
     "pyjwt==2.10.1",
     "python-multipart==0.0.20",
     "pysubs2==1.8.0",
+    # 자막 파일 인코딩 판별. 라이선스가 MIT입니다(chardet은 LGPL이라 쓰지 않습니다).
+    "charset-normalizer==3.5.1",
     "httpx==0.28.1",
 ]
 

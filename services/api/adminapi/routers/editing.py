@@ -35,6 +35,7 @@ from pipeline.subtitle_files import (
     SubtitleFormat,
     UnknownEncoding,
     decode_subtitles,
+    encoding_choices,
     parse_subtitles,
 )
 from pipeline.subtitles import check
@@ -161,8 +162,13 @@ def import_subtitles(
 ):
     """SRT·WebVTT·ASS 파일을 읽어 대본 새 버전으로 저장합니다.
 
-    인코딩은 파일이 밝힌 표시(BOM)와 UTF-8까지만 스스로 판단합니다. 거기서
-    실패하면 **추측하지 않고** 후보마다 첫 자막이 어떻게 보이는지 붙여 422로
+    인코딩은 파일이 밝힌 표시(BOM) → UTF-8 → 판별기 순으로 정합니다. 무엇으로
+    읽었는지 `encoding`으로, 판별기가 고른 것인지 `encoding_detected`로 함께
+    돌려줍니다. **판별은 추측이라 글자가 깨져도 조용히 성공합니다.** 판별로
+    읽었으면 다른 후보를 `choices`로 함께 주니, 화면에서 글자를 확인하고 틀렸으면
+    그중 하나를 `encoding`에 넣어 다시 부르세요.
+
+    판별기까지 실패하면 후보마다 첫 자막이 어떻게 보이는지 붙여 422로
     돌려줍니다. 글자가 제대로 보이는 것을 골라 `encoding`에 넣어 다시 부르세요.
 
     시각은 **파일에 적힌 그대로** 씁니다. 원본 음성과 맞는지는 확인하지 않습니다.
@@ -177,8 +183,8 @@ def import_subtitles(
     except (ValueError, binascii.Error):
         raise HTTPException(422, "자막 파일을 읽지 못했습니다. 다시 올려 주세요.") from None
     try:
-        text = decode_subtitles(data, payload.encoding)
-        cues, notes = parse_subtitles(text)
+        found = decode_subtitles(data, payload.encoding)
+        cues, notes = parse_subtitles(found.text)
     except UnknownEncoding as exc:
         raise HTTPException(
             422,
@@ -192,7 +198,20 @@ def import_subtitles(
         ) from None
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from None
-    return {**save_transcript(session, asset, cues), "skipped": notes}
+    saved = {
+        **save_transcript(session, asset, cues),
+        "skipped": notes,
+        "encoding": found.encoding,
+        "encoding_detected": found.detected,
+    }
+    if found.detected:
+        # 판별로 읽었으면 다른 후보도 함께 줍니다. 글자가 깨졌을 때 화면에서
+        # 바로 다른 인코딩으로 다시 들일 수 있어야 합니다.
+        saved["choices"] = [
+            {"encoding": choice.encoding, "preview": choice.preview}
+            for choice in encoding_choices(data)
+        ]
+    return saved
 
 
 class AnalysisRequest(BaseModel):

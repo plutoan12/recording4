@@ -27,7 +27,9 @@ export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWo
   const [previewId, setPreviewId] = useState('')
   const [approvedId,setApprovedId] = useState('')
   const [message, setMessage] = useState('')
-  const [pending, setPending] = useState<{file: File; choices: EncodingChoice[]} | null>(null)
+  // 인코딩을 물어야 하는 파일. used가 있으면 판별기가 고른 것으로 이미 들인 뒤라
+  // 글자를 확인하고 되돌릴 수 있게 남겨 둡니다.
+  const [pending, setPending] = useState<{file: File; choices: EncodingChoice[]; used?: string} | null>(null)
   const [busy, setBusy] = useState(false)
   const video = useRef<HTMLVideoElement>(null)
   const selection = useRef('')
@@ -71,10 +73,16 @@ export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWo
         setMessage(imported.message)
         return
       }
-      setPending(null)
+      // 판별기가 고른 인코딩이면 다른 후보를 남겨 둡니다. 글자가 깨져도 파일
+      // 모양은 멀쩡해서 서버가 못 거릅니다. 사람이 보고 되돌려야 합니다.
+      setPending(imported.encoding_detected
+        ? {file, used: imported.encoding,
+           choices: (imported.choices ?? []).filter(c => c.encoding !== imported.encoding)}
+        : null)
       setCaptions(await request<Cue[]>(`/source-assets/${assetId}/transcript`))
       setViolations(imported.violations)
-      setMessage(`자막 ${imported.count}개를 대본 ${imported.version}번으로 들였습니다.`
+      setMessage(`자막 ${imported.count}개를 대본 ${imported.version}번으로 들였습니다`
+        + ` (${imported.encoding}${imported.encoding_detected ? ' 자동 판별' : ''}).`
         + (imported.skipped.length ? ` 뺀 자막 ${imported.skipped.length}개: ${imported.skipped.join(' ')}` : ''))
     })
   }
@@ -123,12 +131,14 @@ export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWo
           if (file) void bring(file)
         }} />
         {pending && <div className="error">
-          <p>이 파일의 인코딩을 알 수 없습니다. <b>글자가 제대로 보이는 것</b>을 고르세요. 잘못 고르면 깨진 채로 저장됩니다.</p>
+          {pending.used
+            ? <p><b>{pending.used}</b>(으)로 자동 판별해 읽었습니다. <b>대본 글자가 제대로 보이는지 확인하세요.</b> 깨졌다면 아래에서 다시 고르면 새 대본 버전으로 들입니다.</p>
+            : <p>이 파일의 인코딩을 알 수 없습니다. <b>글자가 제대로 보이는 것</b>을 고르세요. 잘못 고르면 깨진 채로 저장됩니다.</p>}
           {pending.choices.map(choice => <button key={choice.encoding} disabled={busy}
             onClick={() => void bring(pending.file, choice.encoding)}>
             {choice.encoding}: {choice.preview}
           </button>)}
-          <button disabled={busy} onClick={() => setPending(null)}>취소</button>
+          <button disabled={busy} onClick={() => setPending(null)}>{pending.used ? '확인했습니다' : '취소'}</button>
         </div>}
       </details>
       <details>

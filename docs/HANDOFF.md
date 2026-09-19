@@ -1019,3 +1019,31 @@ CI가 토큰 없이도 이 경로를 점검합니다(`화자 분리 토큰 오�
 
 - 위 실측(라벨을 붙인 CI 실행). 합성 음성이라 사람 목소리보다 불리한 조건이며, 사람 목소리로도 재려면 `fetch_korean_speech.py` 표본에 같은 검사를 붙이면 됩니다.
 - 자막 두 벌(구운 자막 + YouTube 트랙) 문제는 그대로입니다.
+
+
+## 자막 인코딩 자동 판별 (charset-normalizer) (2026-09-19)
+
+- 사용자 요청: 자동 판별 라이브러리 넣기. 앞 절에서 제가 "추측하지 않는다"고 적었으므로 **판별을 쓰되 무엇으로 읽었는지 밝히고 되돌릴 수 있게** 붙였습니다. 브랜치 `claude/subtitle-file-generation-38xjz4`.
+- 담당 파일: `packages/pipeline/pipeline/subtitle_files.py`, `services/api/adminapi/routers/editing.py`, `apps/web/src/{api.ts,ClipEditor.tsx}`, `pyproject.toml`, `tests/{test_subtitle_files,test_editing_api}.py`, `docs/{OPEN_SOURCE_INTEGRATIONS,TECH_DECISIONS,HANDOFF}.md`.
+- 의존 작업: **핵심** 의존성에 `charset-normalizer==3.5.1`을 추가했습니다. MIT입니다. chardet은 LGPL이라 쓰지 않았습니다.
+
+### 구현한 것
+
+- `decode_subtitles()`가 **BOM → UTF-8 → 판별기** 순으로 읽고, 글자만이 아니라 `Decoded(text, encoding, detected)`를 돌려줍니다.
+- 판별기가 고른 인코딩으로 읽은 글자가 **자막으로 읽히는지** 확인합니다. 읽히지 않으면 쓰지 않고 후보 목록으로 넘어갑니다.
+- `encoding_choices()`를 따로 빼서, 판별에 성공했을 때도 같은 후보 목록을 응답에 함께 실어 줍니다.
+- 들여오기 응답에 `encoding`·`encoding_detected`·(판별일 때) `choices`가 붙습니다. 편집기는 "cp949로 자동 판별해 읽었습니다. 글자가 제대로 보이는지 확인하세요"를 띄우고 다른 인코딩 버튼을 함께 보여 줍니다. 다시 들이면 대본 새 버전이라 원래 것이 남습니다.
+
+### 검증 결과
+
+- `pytest -q`: **348 통과 / 5 skip**(SQLite).
+- CP949로 만든 한국어 자막이 이제 묻지 않고 `cp949`로 들어오며, 응답이 `encoding_detected=true`로 표시하는 것을 확인했습니다. UTF-8은 `false`입니다.
+- 판별기가 고르지 못하는 경우(판별 함수를 막고 시험)에는 예전처럼 후보 미리보기와 함께 422로 돌아오고, 저장되지 않는 것을 확인했습니다.
+- 판별기가 고른 인코딩으로 **읽히지 않으면** 그 결과를 쓰지 않는 것을 확인했습니다.
+- `ruff check`·`ruff format --check`, `npm run typecheck`·`npm run build` 통과.
+- **한계(테스트로 남겨 둠)**: 구조 확인은 시간 줄만 봅니다. 글자가 깨져도 자막 파일로는 읽히므로 **판별이 틀린 것을 서버가 걸러내지 못합니다.** `test_decode_marks_a_guess_because_the_check_cannot_catch_garbled_text`가 이 사실을 고정합니다. 그래서 화면에서 사람이 확인하게 했습니다.
+- **미검증**: 실제 외부 도구가 만든 CP949·Shift_JIS 파일을 브라우저에서 올려 본 적은 없습니다. 대역 바이트로만 확인했습니다.
+
+### 남은 작업
+
+- 싱크 보정 실측(`verify-align` 라벨 CI)과 자막 두 벌(구운 자막 + YouTube 트랙) 문제는 그대로입니다.

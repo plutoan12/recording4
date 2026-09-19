@@ -22,6 +22,7 @@ from dataclasses import dataclass
 from typing import Literal, get_args
 
 import pysubs2
+from charset_normalizer import from_bytes
 
 from pipeline.editing import Cue, EditSpec, clip_cues
 from pipeline.subtitles import DEFAULT_RULES, SubtitleRules, apply_rules, normalize
@@ -162,6 +163,15 @@ class EncodingChoice:
     preview: str
 
 
+@dataclass(frozen=True, slots=True)
+class Decoded:
+    """읽은 글자와, 무엇으로 어떻게 읽었는지."""
+
+    text: str
+    encoding: str
+    detected: bool  # True면 판별기가 고른 것입니다. 사람이 확인해야 합니다.
+
+
 class UnknownEncoding(ValueError):
     """인코딩을 알 수 없습니다. 추측하지 않고 후보를 들어 사람에게 넘깁니다."""
 
@@ -193,29 +203,13 @@ def _preview(text: str) -> str | None:
     return cues[0].text[:PREVIEW_CHARS]
 
 
-def decode_subtitles(data: bytes, encoding: str | None = None) -> str:
-    """자막 파일 바이트를 글자로 바꿉니다.
+def encoding_choices(data: bytes) -> list[EncodingChoice]:
+    """고를 만한 인코딩과, 그것으로 읽었을 때 첫 자막이 어떻게 보이는지.
 
-    인코딩을 정해 주면 그것으로만 읽습니다. 안 주면 파일이 밝힌 표시(BOM)와
-    UTF-8까지만 스스로 판단합니다.
-
-    **거기서 실패하면 추측하지 않습니다.** 인코딩을 잘못 고르면 글자가 조용히
-    깨진 채로 저장되고, 나중에 영상에 그대로 구워집니다. 대신 후보마다 첫 자막이
-    어떻게 보이는지 붙여 `UnknownEncoding`으로 올립니다. 이름(CP949·EUC-KR)만
-    보고는 고를 수 없어도 자기 자막 글자는 알아봅니다.
+    자막으로 읽히지 않는 후보는 내놓지 않습니다. 고를 수 없는 선택지입니다.
+    판별기가 골랐을 때도 이 목록을 함께 보여 주어, 글자가 깨졌으면 사람이 다른
+    인코딩으로 되돌릴 수 있게 합니다.
     """
-    if encoding:
-        try:
-            return data.decode(encoding)
-        except (UnicodeDecodeError, LookupError) as exc:
-            raise ValueError(f"{encoding}으로 읽지 못했습니다: {type(exc).__name__}") from None
-    marked = _bom_encoding(data)
-    if marked:
-        return data.decode(marked)
-    try:
-        return data.decode("utf-8")
-    except UnicodeDecodeError:
-        pass
     choices: list[EncodingChoice] = []
     seen: set[str] = set()
     for candidate in IMPORT_ENCODINGS:
@@ -229,4 +223,55 @@ def decode_subtitles(data: bytes, encoding: str | None = None) -> str:
             continue
         seen.add(preview)
         choices.append(EncodingChoice(candidate, preview))
-    raise UnknownEncoding(choices)
+    return choices
+
+
+def detect_encoding(data: bytes) -> str | None:
+    """판별기가 고른 인코딩. 고르지 못하면 None입니다.
+
+    판별은 추측입니다. 여기서는 이름만 돌려주고, 그 이름으로 읽은 글자가 실제로
+    자막으로 읽히는지는 부르는 쪽이 확인합니다.
+    """
+    best = from_bytes(data).best()
+    return best.encoding if best else None
+
+
+def decode_subtitles(data: bytes, encoding: str | None = None) -> Decoded:
+    """자막 파일 바이트를 글자로 바꿉니다.
+
+    순서는 이렇습니다. 인코딩을 정해 주면 그것으로만 읽습니다. 안 주면 파일이
+    밝힌 표시(BOM) → UTF-8 → 판별기(charset-normalizer) 순으로 봅니다.
+
+    **판별기 결과는 그대로 믿지 않습니다.** 그 인코딩으로 읽은 글자가 자막으로
+    읽히는지 확인합니다. 다만 이 확인은 시간 줄 같은 뼈대만 봅니다. 한국어 자막을
+    cp1252로 읽으면 글자는 깨져도 파일 모양은 멀쩡해서 걸러지지 않습니다. 그래서
+    판별로 읽었다는 사실(`detected=True`)을 함께 돌려줍니다. 잘못 고른 인코딩은
+    조용히 저장됐다가 영상에 그대로 구워지므로, 사람이 글자를 보고 되돌릴 수
+    있어야 합니다.
+
+    판별기까지 실패하면 후보마다 첫 자막이 어떻게 보이는지 붙여 `UnknownEncoding`
+    으로 올립니다. 이름(CP949·EUC-KR)만 보고는 고를 수 없어도 자기 자막 글자는
+    알아봅니다.
+    """
+    if encoding:
+        try:
+            return Decoded(data.decode(encoding), encoding, detected=False)
+        except (UnicodeDecodeError, LookupError) as exc:
+            raise ValueError(f"{encoding}으로 읽지 못했습니다: {type(exc).__name__}") from None
+    marked = _bom_encoding(data)
+    if marked:
+        return Decoded(data.decode(marked), marked, detected=False)
+    try:
+        return Decoded(data.decode("utf-8"), "utf-8", detected=False)
+    except UnicodeDecodeError:
+        pass
+    guess = detect_encoding(data)
+    if guess:
+        try:
+            text = data.decode(guess)
+        except (UnicodeDecodeError, LookupError):
+            text = ""
+        # 자막으로 읽히지 않으면 판별이 틀린 것입니다. 그대로 쓰지 않습니다.
+        if text and _preview(text) is not None:
+            return Decoded(text, guess, detected=True)
+    raise UnknownEncoding(encoding_choices(data))
