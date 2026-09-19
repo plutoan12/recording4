@@ -1,0 +1,178 @@
+[
+  {
+    "id": "fleurs-ko-new-0",
+    "language": "ko",
+    "reference_characters": 57,
+    "errors": 0,
+    "cer": 0.0,
+    "sha256": "41e4cf09c533da6c179c895fa3ac1c08a0019910f5ab9364a55ba8c5fb9dcc05",
+    "quantized": true,
+    "ctc_weight": 0.0,
+    "model_revision": "00a09c622bf58c34fdc76c3b5676f4da706f2a8e"
+  },
+  {
+    "id": "fleurs-ko-new-1",
+    "language": "ko",
+    "reference_characters": 49,
+    "errors": 0,
+    "cer": 0.0,
+    "sha256": "98fac95dfd931ea9ef1c11e72fac878354487da29255301efb0ce3b05d99485f",
+    "quantized": true,
+    "ctc_weight": 0.0,
+    "model_revision": "00a09c622bf58c34fdc76c3b5676f4da706f2a8e"
+  },
+  {
+    "id": "fleurs-ko-new-2",
+    "language": "ko",
+    "reference_characters": 65,
+    "errors": 10,
+    "cer": 0.15384615384615385,
+    "sha256": "d948e11072d0396ceba2d58492ac005ea89cd816f11e6778d1e20293ecb5c8b0",
+    "quantized": true,
+    "ctc_weight": 0.0,
+    "model_revision": "00a09c622bf58c34fdc76c3b5676f4da706f2a8e"
+  },
+  {
+    "id": "fleurs-en-new-0",
+    "language": "en",
+    "reference_characters": 78,
+    "errors": 0,
+    "cer": 0.0,
+    "sha256": "2996b30003674944307ea042300f1224d60bd411e5f33ca7eb9cbed57f02d8ab",
+    "quantized": true,
+    "ctc_weight": 0.0,
+    "model_revision": "00a09c622bf58c34fdc76c3b5676f4da706f2a8e"
+  },
+  {
+    "id": "fleurs-en-new-1",
+    "language": "en",
+    "reference_characters": 76,
+    "errors": 1,
+    "cer": 0.013157894736842105,
+    "sha256": "28e291120bec24004f1534250d4bf1c046201e715057d04ad173c2b355d31cd4",
+    "quantized": true,
+    "ctc_weight": 0.0,
+    "model_revision": "00a09c622bf58c34fdc76c3b5676f4da706f2a8e"
+  },
+  {
+    "id": "fleurs-en-new-2",
+    "language": "en",
+    "reference_characters": 57,
+    "errors": 0,
+    "cer": 0.0,
+    "sha256": "38a79e2428ea1beafea2e62e895b3751a8caa7bd3293c0308661c08733c08520",
+    "quantized": true,
+    "ctc_weight": 0.0,
+    "model_revision": "00a09c622bf58c34fdc76c3b5676f4da706f2a8e"
+  },
+  {
+    "id": "fleurs-ja-new-0",
+    "language": "ja",
+    "reference_characters": 41,
+    "errors": 8,
+    "cer": 0.1951219512195122,
+    "sha256": "829f5b14722f72703a929948fa6fc1eb278c5a3a9c0dd759d19df58e9b79afe9",
+    "quantized": true,
+    "ctc_weight": 0.0,
+    "model_revision": "00a09c622bf58c34fdc76c3b5676f4da706f2a8e"
+  },
+  {
+    "id": "fleurs-ja-new-1",
+    "language": "ja",
+    "reference_characters": 56,
+    "errors": 1,
+    "cer": 0.017857142857142856,
+    "sha256": "2afafa466e9f9ae5b6720ece9da73f5d7f4855c928d7d90eab33fc84249067a9",
+    "quantized": true,
+    "ctc_weight": 0.0,
+    "model_revision": "00a09c622bf58c34fdc76c3b5676f4da706f2a8e"
+  },
+  {
+    "id": "fleurs-ja-new-2",
+    "language": "ja",
+    "reference_characters": 30,
+    "errors": 2,
+    "cer": 0.06666666666666667,
+    "sha256": "f7cf529b161cd4ecca1e497865381e630bf5430fe781e085654e17e6aa5e65dd",
+    "quantized": true,
+    "ctc_weight": 0.0,
+    "model_revision": "00a09c622bf58c34fdc76c3b5676f4da706f2a8e"
+  },
+  {
+    "id": "fleurs-zh-new-0",
+    "language": "zh",
+    "reference_characters": 30,
+    "errors": 12,
+    "cer": 0.4,
+    "sha256": "c351c84eb77e185ba1e66934a936fbf9ad7575d968523a4ab28796bac481f6a7",
+    "quantized": true,
+    "ctc_weight": 0.0,
+    "model_revision": "00a09c622bf58c34fdc76c3b5676f4da706f2a8e"
+  },
+  {
+    "id": "fleurs-zh-new-1",
+    "language": "zh",
+    "reference_characters": 35,
+    "errors": 2,
+    "cer": 0.05714285714285714,
+    "sha256": "bdebfa99fe4e2645f1503ae4a5e142445f96c916e9f19ee9e53107629e357ec9",
+    "quantized": true,
+    "ctc_weight": 0.0,
+    "model_revision": "00a09c622bf58c34fdc76c3b5676f4da706f2a8e"
+  },
+  {
+    "id": "fleurs-zh-new-2",
+    "language": "zh",
+    "reference_characters": 56,
+    "errors": 30,
+    "cer": 0.5357142857142857,
+    "sha256": "0ccda87e70e2e4e7716d9eda4fcae0ded99b3d439085f2fa037b8ce59c4464d9",
+    "quantized": true,
+    "ctc_weight": 0.0,
+    "model_revision": "00a09c622bf58c34fdc76c3b5676f4da706f2a8e"
+  },
+  {
+    "id": "overlap_25pct-0",
+    "language": "en",
+    "reference_characters": 227,
+    "errors": 0,
+    "cer": 0.0,
+    "sha256": "e28fb61739f5c602d918abd48b0f54df5cb5c1b835df845317c0e54d5ae82904",
+    "quantized": true,
+    "ctc_weight": 0.0,
+    "model_revision": "00a09c622bf58c34fdc76c3b5676f4da706f2a8e"
+  },
+  {
+    "id": "overlap_25pct-1",
+    "language": "en",
+    "reference_characters": 172,
+    "errors": 6,
+    "cer": 0.03488372093023256,
+    "sha256": "e28fb61739f5c602d918abd48b0f54df5cb5c1b835df845317c0e54d5ae82904",
+    "quantized": true,
+    "ctc_weight": 0.0,
+    "model_revision": "00a09c622bf58c34fdc76c3b5676f4da706f2a8e"
+  },
+  {
+    "id": "overlap_50pct-0",
+    "language": "en",
+    "reference_characters": 227,
+    "errors": 62,
+    "cer": 0.27312775330396477,
+    "sha256": "1bca3b6a07d4218748bf73caadcc4201a020ed3c06e1de38f3ffb75dd44c473e",
+    "quantized": true,
+    "ctc_weight": 0.0,
+    "model_revision": "00a09c622bf58c34fdc76c3b5676f4da706f2a8e"
+  },
+  {
+    "id": "overlap_50pct-1",
+    "language": "en",
+    "reference_characters": 172,
+    "errors": 64,
+    "cer": 0.37209302325581395,
+    "sha256": "1bca3b6a07d4218748bf73caadcc4201a020ed3c06e1de38f3ffb75dd44c473e",
+    "quantized": true,
+    "ctc_weight": 0.0,
+    "model_revision": "00a09c622bf58c34fdc76c3b5676f4da706f2a8e"
+  }
+]

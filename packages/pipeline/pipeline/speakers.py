@@ -157,3 +157,143 @@ def turns_from_labels(
         if finish > begin:
             turns.append(SpeakerTurn(start=begin, end=finish, speaker=name))
     return turns
+
+
+MULTIPLE_SPEAKERS = "복수 화자"
+
+
+def review_speakers(cues, turns, words_by_cue, *, stage=2):
+    """단어마다 근거가 있는 단일 화자만 배정합니다. 불확실하면 검수합니다."""
+    from pipeline.alignment import squeeze
+
+    if len(cues) != len(words_by_cue):
+        raise ValueError("대본과 단어 정렬 개수가 다릅니다.")
+    reviewed = []
+    for cue, words in zip(cues, words_by_cue, strict=True):
+        candidates = sorted({t.speaker for t in turns if _overlap(cue.start, cue.end, t) > 0})
+        overlaps = []
+        relevant = [t for t in turns if _overlap(cue.start, cue.end, t) > 0]
+        for index, left in enumerate(relevant):
+            for right in relevant[index + 1 :]:
+                begin, finish = (
+                    max(cue.start, left.start, right.start),
+                    min(cue.end, left.end, right.end),
+                )
+                if left.speaker != right.speaker and finish > begin:
+                    overlaps.append({"start": begin, "end": finish})
+        # Map only unambiguous exact text spans. Missing/invalid words stay in the
+        # output so callers cannot accidentally count a smaller denominator.
+        text = squeeze(cue.text)
+        cursor = 0
+        # In whitespace-delimited text do not match "one" inside "someone".
+        boundaries = {0}
+        edge = 0
+        for token_text in cue.text.split():
+            edge += len(squeeze(token_text))
+            boundaries.add(edge)
+        assignments = []
+        previous_end = cue.start
+        for word in words:
+            token = squeeze(word.text)
+            if not token:
+                continue
+            begin = text.find(token, cursor)
+            if begin < 0 or (begin != cursor and text.find(token, begin + 1) >= 0):
+                continue
+            if len(cue.text.split()) > 1 and (
+                begin not in boundaries or begin + len(token) not in boundaries
+            ):
+                continue
+            if begin > cursor:
+                assignments.append(
+                    dict(
+                        start=cue.start,
+                        end=cue.end,
+                        text=text[cursor:begin],
+                        speaker=None,
+                        candidates=[],
+                        needs_review=True,
+                        timing_valid=False,
+                    )
+                )
+            valid_word = (
+                cue.start <= word.start < word.end <= cue.end and word.start >= previous_end - 0.001
+            )
+            if valid_word:
+                previous_end = word.end
+            labels = sorted(
+                {t.speaker for t in turns if valid_word and _overlap(word.start, word.end, t) > 0}
+            )
+            label = labels[0] if len(labels) == 1 else MULTIPLE_SPEAKERS if labels else None
+            if stage >= 2 and len(labels) > 1:
+                simultaneous = any(
+                    min(word.end, o["end"]) > max(word.start, o["start"]) for o in overlaps
+                )
+                # A sequential boundary is not simultaneous speech. Require a
+                # strong duration majority; ties and true overlaps remain unresolved.
+                if not simultaneous:
+                    spans = {lab: [] for lab in labels}
+                    for turn in relevant:
+                        if turn.speaker in spans and _overlap(word.start, word.end, turn) > 0:
+                            spans[turn.speaker].append(
+                                (max(word.start, turn.start), min(word.end, turn.end))
+                            )
+                    durations = {}
+                    for lab, intervals in spans.items():
+                        edge, duration = word.start, 0.0
+                        for left, right in sorted(intervals):
+                            duration += max(0.0, right - max(edge, left))
+                            edge = max(edge, right)
+                        durations[lab] = duration
+                    best = max(durations, key=durations.get)
+                    if durations[best] / (word.end - word.start) >= 0.8:
+                        label = best
+            assignments.append(
+                dict(
+                    start=word.start if valid_word else cue.start,
+                    end=word.end if valid_word else cue.end,
+                    text=word.text,
+                    speaker=label,
+                    candidates=labels,
+                    needs_review=label in (None, MULTIPLE_SPEAKERS),
+                    timing_valid=valid_word,
+                )
+            )
+            cursor = begin + len(token)
+        if cursor < len(text):
+            assignments.append(
+                dict(
+                    start=cue.start,
+                    end=cue.end,
+                    text=text[cursor:],
+                    speaker=None,
+                    candidates=[],
+                    needs_review=True,
+                    timing_valid=False,
+                )
+            )
+        valid = any(w["timing_valid"] for w in assignments)
+        resolved = {
+            w["speaker"] for w in assignments if w["speaker"] not in (None, MULTIPLE_SPEAKERS)
+        }
+        needs_review = bool(overlaps) or not valid or any(w["needs_review"] for w in assignments)
+        if valid and len(resolved) == 1 and not needs_review:
+            label = next(iter(resolved))
+        elif len(candidates) > 1 or len(resolved) > 1:
+            label = MULTIPLE_SPEAKERS
+        else:
+            label = None
+        reviewed.append(
+            {
+                "start": cue.start,
+                "end": cue.end,
+                "text": cue.text,
+                "speaker": label,
+                "candidates": candidates,
+                "needs_review": needs_review or label == MULTIPLE_SPEAKERS,
+                "alignment_available": bool(valid),
+                "overlaps": overlaps,
+                "words": assignments if valid else [],
+            }
+        )
+    return reviewed

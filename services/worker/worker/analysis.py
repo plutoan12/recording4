@@ -699,3 +699,56 @@ def sync_subtitles(
     from worker.sync_verification import verify_sync
 
     return verify_sync(source, cues, options or SyncOptions(), _sync_acoustic, align_text)
+
+
+def align_speaker_words(source, cues, *, model="small", language=None, device="cpu"):
+    """기존 문구를 자막별로 정렬합니다. 실패한 자막은 빈 목록으로 검수에 남깁니다."""
+    if not language:
+        raise MissingDependency("단어별 화자 검수에는 원문 음성 언어가 필요합니다.")
+    try:
+        import stable_whisper
+    except ImportError as exc:
+        raise MissingDependency("단어 정렬 의존성이 없습니다. [subtitles]를 설치하세요.") from exc
+    engine = stable_whisper.load_faster_whisper(
+        model, device=device, compute_type="int8" if device == "cpu" else "float16"
+    )
+    aligned = []
+    with tempfile.TemporaryDirectory(prefix="r4-speaker-words-") as temp:
+        for cue in cues:
+            clip = Path(temp) / "cue.wav"
+            subprocess.run(
+                [
+                    ffmpeg_binary(),
+                    "-v",
+                    "error",
+                    "-y",
+                    "-ss",
+                    str(cue.start),
+                    "-i",
+                    str(source),
+                    "-t",
+                    str(cue.end - cue.start),
+                    "-vn",
+                    "-ac",
+                    "1",
+                    "-ar",
+                    "16000",
+                    str(clip),
+                ],
+                check=True,
+                capture_output=True,
+            )
+            try:
+                result = engine.align(
+                    str(clip), cue.text, language=language, failure_threshold=0.1, verbose=None
+                )
+                words = word_timings(result) if result is not None else []
+                aligned.append(
+                    [
+                        WordTiming(start=w.start + cue.start, end=w.end + cue.start, text=w.text)
+                        for w in words
+                    ]
+                )
+            except (ValueError, RuntimeError):
+                aligned.append([])
+    return aligned
