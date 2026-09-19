@@ -6,6 +6,7 @@ import hashlib
 import json
 import tempfile
 import uuid
+from dataclasses import asdict
 from datetime import timedelta
 from decimal import ROUND_UP, Decimal
 from pathlib import Path
@@ -33,7 +34,7 @@ from pipeline.budget import BudgetShortfall
 from pipeline.editing import Cue, clip_cues
 from pipeline.hashing import StageInputs
 from pipeline.states import JobState, StageRunState
-from pipeline.workflow import WorkflowOptions
+from pipeline.workflow import WorkflowOptions, rendered_cues, rendered_language
 from worker.analysis import transcribe
 from worker.celery_app import celery_app
 from worker.composition import TimingError, compose_dub, mix_speech, render_final
@@ -341,24 +342,28 @@ def execute_step(name, options, data, asset, directory, stage_id, remote_id, sav
         dubbed = options.audio_mode == "dub"
         # 자막이 어느 언어인지에 따라 표시 규칙이 다릅니다. 번역한 자막이면
         # 목표 언어, 원본 대본 그대로면 원본 언어입니다.
-        shown = "aligned" if "aligned" in data else ("translated" if "translated" in data else None)
-        language = data.get("target") if shown else options.source_language
+        language = rendered_language(data, options)
+        # 이 규칙을 결과에 남깁니다. 설정을 렌더 뒤에 바꾸면 자막 파일이 영상에
+        # 구워진 자막과 달라지는데, 사람은 같은 자막이라고 믿고 올립니다.
+        # 남겨 두면 내보내기가 그때 쓴 규칙으로 만듭니다(편집본 경로와 같습니다).
+        rules = rules_from_settings(settings, language)
         render_final(
             source,
             output,
-            cues=[Cue.model_validate(c) for c in data.get(shown or "cues", data["cues"])],
+            cues=[Cue.model_validate(c) for c in rendered_cues(data)],
             duration=data["duration"],
             start=0 if dubbed else data["start"],
             clip=options.clip,
             width=asset.width or 1920,
             height=asset.height or 1080,
-            rules=rules_from_settings(settings, language),
+            rules=rules,
         )
         with output.open("rb") as stream:
             checksum = hashlib.file_digest(stream, "sha256").hexdigest()
         return {
             "final_key": upload(storage, f"{prefix}/final.mp4", output, "video/mp4"),
             "checksum": checksum,
+            "subtitle_rules": asdict(rules),
         }
     raise ValueError(f"알 수 없는 단계: {name}")
 

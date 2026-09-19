@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import uuid
-from dataclasses import fields
 from datetime import UTC, datetime
 from typing import Literal
 
@@ -11,7 +10,6 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 
-from adminapi.config import get_settings
 from adminapi.deps import CurrentUser, SessionDep
 from adminapi.models import (
     Approval,
@@ -25,9 +23,10 @@ from adminapi.models import (
 )
 from adminapi.outbox import enqueue
 from adminapi.storage import ObjectStorage, get_storage
+from adminapi.subtitle_rules import rules_from_record, subtitle_rules
 from pipeline.editing import Cue, EditSpec, suggest_clips
 from pipeline.states import JobState
-from pipeline.subtitle_files import MEDIA_TYPES, SubtitleFormat, subtitle_file
+from pipeline.subtitle_files import MEDIA_TYPES, SubtitleFormat, clip_subtitle_file
 from pipeline.subtitles import SubtitleRules, check
 from pipeline.time import as_utc
 
@@ -86,36 +85,13 @@ def schedule(session, task):
     return task_response(task)
 
 
-def subtitle_rules() -> SubtitleRules:
-    s = get_settings()
-    return SubtitleRules(
-        max_chars_per_line=s.subtitle_max_chars_per_line,
-        max_lines=s.subtitle_max_lines,
-        max_cps=s.subtitle_max_cps,
-        min_duration=s.subtitle_min_duration,
-        max_duration=s.subtitle_max_duration,
-    )
-
-
 def rules_used(task: MediaTask) -> tuple[SubtitleRules, str]:
     """그 편집본을 렌더할 때 실제로 쓴 표시 규칙과, 그것을 어디서 얻었는지.
 
-    설정(`R4_SUBTITLE_*`)을 렌더 뒤에 바꾸면 지금 설정으로 다시 계산한 자막은
-    영상에 구워진 자막과 줄바꿈·분할이 달라집니다. 사람은 같은 자막이라고 믿고
-    올립니다. 그래서 렌더가 남긴 규칙이 있으면 그것을 씁니다.
-
-    남은 것이 없으면(이 기능 전에 렌더한 기록) 지금 설정을 쓰되, 그 사실을
-    함께 돌려줍니다. 모르는 것을 아는 척하지 않습니다.
+    되살리는 규칙은 `adminapi/subtitle_rules.py`가 정합니다. 작업 경로도 같은
+    함수를 쓰므로 두 경로의 판단이 어긋나지 않습니다.
     """
-    saved = (task.result or {}).get("subtitle_rules")
-    if isinstance(saved, dict):
-        names = {f.name for f in fields(SubtitleRules)}
-        try:
-            return SubtitleRules(**{k: v for k, v in saved.items() if k in names}), "rendered"
-        except (TypeError, ValueError):
-            # 기록이 깨졌습니다. 지금 설정으로 만들되 그렇다고 알립니다.
-            pass
-    return subtitle_rules(), "settings"
+    return rules_from_record((task.result or {}).get("subtitle_rules"))
 
 
 def violations(cues: list[Cue]) -> list[dict]:
@@ -382,7 +358,7 @@ def clip_subtitles(
     if task is None:
         raise HTTPException(409, "편집본의 렌더 요청을 찾을 수 없습니다.")
     rules, source = rules_used(task)
-    text = subtitle_file(EditSpec.model_validate(task.settings), subtitle_format, rules)
+    text = clip_subtitle_file(EditSpec.model_validate(task.settings), subtitle_format, rules)
     if not text.strip():
         raise HTTPException(409, "이 편집본에는 내보낼 자막이 없습니다.")
     return Response(

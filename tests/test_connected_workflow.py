@@ -492,3 +492,113 @@ def test_tts_hash_changes_for_voice_and_model_revision():
             settings.model_copy(update={"tts_model_version": "new-revision"}),
         ).digest()
     )
+
+
+def test_original_job_exports_source_language_subtitles(setup_flow, client, auth_headers):
+    """원어 작업은 번역 단계가 없어 원본 대본을 원본 언어로 내보냅니다."""
+    create, _ = setup_flow
+    jid = create(source_language="ko")
+    empty = client.get(f"/jobs/{jid}/subtitles", headers=auth_headers)
+    assert empty.status_code == 409 and "대본 단계" in empty.json()["detail"]
+    assert wf.run_job(jid)["stage"] == "transcribe"
+
+    srt = client.get(f"/jobs/{jid}/subtitles", headers=auth_headers)
+    assert srt.status_code == 200
+    assert srt.headers["content-type"] == "application/x-subrip; charset=utf-8"
+    assert srt.headers["content-disposition"] == f'attachment; filename="job-{jid}.ko.srt"'
+    assert srt.text.startswith("1\n00:00:01,000 --> 00:00:02,000\nhello")
+
+    vtt = client.get(f"/jobs/{jid}/subtitles?format=vtt", headers=auth_headers)
+    assert vtt.text.startswith("WEBVTT\n\n1\n00:00:01.000 --> 00:00:02.000\n")
+    assert client.get(f"/jobs/{jid}/subtitles?format=ass", headers=auth_headers).status_code == 422
+    assert client.get(f"/jobs/{uuid.uuid4()}/subtitles", headers=auth_headers).status_code == 404
+    assert client.get(f"/jobs/{jid}/subtitles").status_code == 401
+
+
+def test_dubbed_job_exports_the_speech_aligned_translation(
+    setup_flow, client, auth_headers, session
+):
+    """더빙 작업은 합성 음성에 맞춰 재정렬한 번역 자막을 목표 언어로 내보냅니다."""
+    create, _ = setup_flow
+    jid = create()
+    wf.run_job(jid)
+    job = session.get(Job, uuid.UUID(jid))
+    # 렌더가 쓰는 우선순위(aligned → translated → cues)를 그대로 확인합니다.
+    job.workflow_data = {
+        **job.workflow_data,
+        "translated": [{"start": 1, "end": 2, "text": "번역 자막"}],
+        "aligned": [{"start": 3, "end": 5, "text": "음성에 맞춘 자막"}],
+    }
+    session.commit()
+
+    response = client.get(f"/jobs/{jid}/subtitles", headers=auth_headers)
+    assert response.status_code == 200
+    assert response.headers["content-disposition"] == f'attachment; filename="job-{jid}.en.srt"'
+    assert "음성에 맞춘 자막" in response.text
+    assert "번역 자막" not in response.text
+    assert "hello" not in response.text
+
+
+def test_export_uses_the_same_language_rules_as_the_render(
+    setup_flow, client, auth_headers, session
+):
+    """영어 자막은 영어 규칙으로 나옵니다. 렌더가 목표 언어로 줄을 끊기 때문입니다."""
+    from pipeline.editing import Cue
+    from pipeline.subtitle_files import subtitle_file
+    from pipeline.subtitles import DEFAULT_RULES, rules_for
+
+    create, _ = setup_flow
+    jid = create()
+    wf.run_job(jid)
+    long_line = "This sentence is long enough to be wrapped and split by the display rules."
+    cues = [{"start": 0, "end": 9, "text": long_line}]
+    job = session.get(Job, uuid.UUID(jid))
+    job.workflow_data = {**job.workflow_data, "translated": cues}
+    session.commit()
+
+    text = client.get(f"/jobs/{jid}/subtitles", headers=auth_headers).text
+    parsed = [Cue.model_validate(c) for c in cues]
+    assert text == subtitle_file(parsed, 0, 10, "srt", rules_for("en"))
+    assert text != subtitle_file(parsed, 0, 10, "srt", DEFAULT_RULES)
+
+
+def test_job_export_uses_the_rules_the_render_used(setup_flow, client, auth_headers, session):
+    """설정을 렌더 뒤에 바꿔도 영상에 구워진 자막과 같은 줄로 내보냅니다.
+
+    편집본 경로와 같은 규칙 기록을 작업 경로에도 둡니다. 기록이 없으면 지금
+    설정을 쓰되 헤더로 그렇다고 알립니다.
+    """
+    create, _ = setup_flow
+    jid = create(source_language="ko")
+    wf.run_job(jid)
+
+    before = client.get(f"/jobs/{jid}/subtitles", headers=auth_headers)
+    assert before.status_code == 200
+    assert before.headers["x-subtitle-rules"] == "settings"
+
+    job = session.get(Job, uuid.UUID(jid))
+    job.workflow_data = {
+        **job.workflow_data,
+        "cues": [{"start": 0, "end": 8, "text": "가나다 라마바 사아자 차카타 파하가 나다라"}],
+        "subtitle_rules": {"max_chars_per_line": 6, "max_lines": 1},
+    }
+    session.commit()
+
+    after = client.get(f"/jobs/{jid}/subtitles", headers=auth_headers)
+    assert after.headers["x-subtitle-rules"] == "rendered"
+    # 기록된 규칙(6자·1줄)이면 한 자막이 여러 개로 쪼개집니다.
+    assert after.text.count("-->") > 1
+
+
+def test_job_export_ignores_a_broken_rules_record(setup_flow, client, auth_headers, session):
+    """기록이 깨졌다고 내려받기가 막히면 안 됩니다. 설정으로 내려주고 알립니다."""
+    create, _ = setup_flow
+    jid = create(source_language="ko")
+    wf.run_job(jid)
+    job = session.get(Job, uuid.UUID(jid))
+    job.workflow_data = {**job.workflow_data, "subtitle_rules": {"max_chars_per_line": 0}}
+    session.commit()
+
+    response = client.get(f"/jobs/{jid}/subtitles", headers=auth_headers)
+    assert response.status_code == 200
+    assert response.headers["x-subtitle-rules"] == "settings"

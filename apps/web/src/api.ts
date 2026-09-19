@@ -75,6 +75,12 @@ export async function request<T>(path: string, init: RequestInit = {}): Promise<
   return response.status === 204 ? (undefined as T) : ((await response.json()) as T)
 }
 
+function serverFilename(header: string | null): string | null {
+  // 서버가 정한 이름을 씁니다(작업 자막은 언어가 붙습니다). 경로 조각은 버립니다.
+  const name = header?.match(/filename="([^"]+)"/)?.[1]?.split(/[\\/]/).pop()
+  return name && name !== '.' && name !== '..' ? name : null
+}
+
 export async function downloadFile(path: string, filename: string): Promise<void> {
   // 자막 파일은 토큰이 필요해 <a href>로 바로 받을 수 없습니다. 받아서 저장만 합니다.
   const token = getToken()
@@ -91,7 +97,7 @@ export async function downloadFile(path: string, filename: string): Promise<void
   const url = URL.createObjectURL(await response.blob())
   const link = document.createElement('a')
   link.href = url
-  link.download = filename
+  link.download = serverFilename(response.headers.get('Content-Disposition')) ?? filename
   document.body.appendChild(link)
   link.click()
   link.remove()

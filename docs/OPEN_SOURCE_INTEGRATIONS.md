@@ -32,7 +32,7 @@
   - **Hugging Face 토큰이 필요합니다.** pyannote 화자 분리 모델은 게이트 모델이라 약관 동의 후 발급한 토큰을 `R4_HF_TOKEN`에 넣어야 합니다. 토큰이 없으면 모델을 내려받기 전에 막고 안내를 보여 줍니다. 모델 자체의 이용 조건은 whisperx의 BSD 라이선스와 별개입니다.
   - 검증 범위: 화자 배정 규칙과 작업 연결은 대역으로 테스트했고, 워커 이미지 안에서 `DiarizationPipeline` 진입점이 실제로 있는지 CI가 확인합니다. **실제 pyannote 추론 품질은 토큰이 필요해 아직 검증하지 못했습니다.**
 - kss → `pipeline/subtitles.py:sentences()`. 자막을 나눌 때 문장 경계를 먼저 찾습니다. kss가 없으면 구두점 기준으로 내려갑니다.
-- pysubs2 → `worker/rendering.py:write_subtitles()`(영상에 굽는 ASS)와 `pipeline/subtitle_files.py:subtitle_file()`(내려받는 SRT·WebVTT). 두 경로가 같은 `clip_cues()`·`apply_rules()`를 거치므로 파일 자막과 화면 자막의 시각·줄바꿈이 같습니다.
+- pysubs2 → `worker/rendering.py:write_subtitles()`(영상에 굽는 ASS)와 `pipeline/subtitle_files.py:subtitle_file()`(내려받는 SRT·WebVTT). 두 경로가 같은 `clip_cues()`·`apply_rules()`를 거치므로 파일 자막과 화면 자막의 시각·줄바꿈이 같습니다. 숏폼 편집본과 번역·더빙 작업 모두 이 함수를 씁니다. 작업 쪽에서 어느 자막이 구워졌는지는 `pipeline/workflow.py:rendered_cues()`가 정하고 렌더와 내보내기가 함께 씁니다.
 
 검토한 뒤 채택하지 않은 후보도 남깁니다. [aeneas](https://github.com/readbeyond/aeneas)는 **AGPL v3**이라 네트워크 서비스 제공 시 서버 소스 공개 의무가 생깁니다. [ctc-forced-aligner](https://github.com/MahmoudAshraf97/ctc-forced-aligner)는 코드가 BSD이나 **기본 모델이 CC-BY-NC 4.0(비상업)** 입니다. 두 경우 모두 이 저장소의 사용 형태와 맞지 않아 제외했습니다.
 
@@ -111,7 +111,7 @@
 - `/clips`: 구간·화면·자막·제목을 검증하고 불변 편집본 및 렌더 요청 생성.
 - `media.run` → Celery 워커: S3 다운로드 → 로컬 처리 → 결과 업로드 → DB 결과물 등록.
 - `/source-assets/{id}/analyze`: 로컬 STT 또는 장면 감지. 분석 의존성 설치가 필요하며 STT 첫 실행은 모델을 다운로드할 수 있습니다.
-- `/clips/{id}/subtitles?format=srt|vtt`: 편집본 자막을 SRT·WebVTT 파일로 내려받습니다. 생성은 `pipeline/subtitle_files.py:subtitle_file()`이며 pysubs2가 형식을 씁니다. 저장하지 않고 요청할 때 만듭니다.
+- `/clips/{id}/subtitles?format=srt|vtt`, `/jobs/{id}/subtitles?format=srt|vtt`: 숏폼 편집본과 번역·더빙 작업의 자막을 SRT·WebVTT 파일로 내려받습니다. 생성은 `pipeline/subtitle_files.py:subtitle_file()`이며 pysubs2가 형식을 씁니다. 저장하지 않고 요청할 때 만듭니다.
 
 ## `[subtitles]` 설치 방법
 

@@ -28,3 +28,26 @@ class WorkflowOptions(BaseModel):
         if self.audio_mode == "original" and self.lipsync:
             raise ValueError("립싱크는 더빙 작업에만 사용할 수 있습니다.")
         return self
+
+
+def rendered_cues(data: dict) -> list[dict]:
+    """영상에 구운 자막.
+
+    더빙 음성에 맞춰 재정렬한 자막이 있으면 그것, 없으면 번역본, 없으면 원본
+    대본입니다. 렌더와 내보내기가 같은 자막을 쓰도록 이 순서를 한곳에 둡니다.
+    키가 있으면 그 값을 씁니다. 빈 목록도 렌더가 쓴 값이므로 건너뛰지 않습니다.
+    """
+    for key in ("aligned", "translated", "cues"):
+        if key in data:
+            return data[key]
+    return []
+
+
+def rendered_language(data: dict, options: WorkflowOptions) -> str | None:
+    """구운 자막의 언어. 번역 단계를 지난 자막은 목표 언어입니다.
+
+    번역 전 자막은 원본 언어인데, 자동 감지에 맡겼다면 알 수 없어 None입니다.
+    """
+    if "aligned" in data or "translated" in data:
+        return data.get("target")
+    return options.source_language
