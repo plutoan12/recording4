@@ -30,17 +30,27 @@ from pathlib import Path
 
 # 업로드에 필요한 권한. 하나라도 빠지면 업로드 때 거절당합니다.
 NEEDED_SCOPES = ("https://www.googleapis.com/auth/youtube.upload",)
+# 자막 트랙을 올릴 때만 더 필요한 권한입니다. captions.insert가 요구합니다.
+CAPTION_SCOPES = ("https://www.googleapis.com/auth/youtube.force-ssl",)
+
+
+def is_on(value: str | None) -> bool:
+    return (value or "").strip().lower() in ("1", "true", "yes", "on")
 
 
 def check_enabled(value: str | None) -> list[str]:
     """실행 설정. 꺼져 있으면 워커가 업로드 직전에 막습니다."""
-    if (value or "").strip().lower() in ("1", "true", "yes", "on"):
+    if is_on(value):
         return []
     return ["R4_YOUTUBE_UPLOAD_ENABLED이 켜져 있지 않습니다. 켜지 않으면 워커가 업로드를 막습니다."]
 
 
-def check_credentials_file(path: Path) -> list[str]:
-    """인증 파일의 모양만 봅니다. 값은 읽어도 찍지 않습니다."""
+def check_credentials_file(path: Path, *, captions: bool = False) -> list[str]:
+    """인증 파일의 모양만 봅니다. 값은 읽어도 찍지 않습니다.
+
+    자막 트랙을 올리도록 설정했다면 그 권한(force-ssl)까지 함께 봅니다. 없으면
+    영상은 올라가고 자막만 조용히 실패합니다.
+    """
     if not path.exists():
         return [f"인증 파일이 없습니다: {path}"]
     problems: list[str] = []
@@ -69,8 +79,10 @@ def check_credentials_file(path: Path) -> list[str]:
             "인증 파일에 권한 목록이 없어 업로드 권한을 확인하지 못했습니다. "
             "채널 조회가 통과해도 업로드에서 거절당할 수 있습니다."
         )
-    elif missing := [scope for scope in NEEDED_SCOPES if scope not in granted]:
-        problems.append("업로드 권한이 없습니다: " + ", ".join(missing))
+    else:
+        needed = NEEDED_SCOPES + (CAPTION_SCOPES if captions else ())
+        if missing := [scope for scope in needed if scope not in granted]:
+            problems.append("업로드 권한이 없습니다: " + ", ".join(missing))
     return problems
 
 
@@ -118,7 +130,10 @@ def main() -> int:
 
     problems = check_enabled(os.environ.get("R4_YOUTUBE_UPLOAD_ENABLED"))
     print(f"인증 파일 {credentials}")
-    problems += check_credentials_file(Path(credentials))
+    captions = is_on(os.environ.get("R4_YOUTUBE_CAPTIONS_ENABLED"))
+    if captions:
+        print("자막 트랙 업로드가 켜져 있습니다. force-ssl 권한도 함께 봅니다.")
+    problems += check_credentials_file(Path(credentials), captions=captions)
 
     if args.offline:
         print("네트워크 확인은 건너뜁니다(--offline).")

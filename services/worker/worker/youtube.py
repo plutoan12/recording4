@@ -93,3 +93,45 @@ def schedule_video(service, video_id: str, publish_at: datetime, *, made_for_kid
         )
         .execute()
     )
+
+
+def upload_captions(
+    service,
+    video_id: str,
+    *,
+    path: Path,
+    language: str,
+    name: str = "",
+    allow_upload: bool = False,
+) -> tuple[str | None, str]:
+    """자막 트랙을 올리고 (트랙 ID, 결과)를 돌려줍니다. 영상은 건드리지 않습니다.
+
+    같은 언어 트랙이 이미 있으면 올리지 않습니다. 사람이 손으로 올린 트랙을
+    덮어쓰거나 같은 언어를 두 벌 만들지 않기 위해서입니다. 이미 우리가 올린
+    경우에도 같은 판정으로 걸러지므로 다시 실행해도 트랙이 늘지 않습니다.
+
+    `sync=False`로 우리가 만든 시각을 그대로 씁니다. 켜면 YouTube가 음성에 맞춰
+    타이밍을 다시 잡는데, 그러면 영상에 구워진 자막과 어긋납니다.
+    """
+    if not allow_upload:
+        raise ValueError("자막 트랙 업로드 실행 설정이 필요합니다.")
+    if not language:
+        raise ValueError("자막 트랙에는 언어가 필요합니다.")
+    existing = service.captions().list(part="snippet", videoId=video_id).execute()
+    for item in existing.get("items", []):
+        snippet = item.get("snippet", {})
+        if snippet.get("language") == language:
+            return item.get("id"), "exists"
+    from googleapiclient.http import MediaFileUpload
+
+    response = (
+        service.captions()
+        .insert(
+            part="snippet",
+            sync=False,
+            body={"snippet": {"videoId": video_id, "language": language, "name": name}},
+            media_body=MediaFileUpload(str(path), mimetype="application/octet-stream"),
+        )
+        .execute()
+    )
+    return response.get("id"), "uploaded"

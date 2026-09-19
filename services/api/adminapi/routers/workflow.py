@@ -8,9 +8,10 @@ from decimal import Decimal
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Query, Response
-from pydantic import BaseModel, Field, ValidationError, model_validator
+from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import select
 
+from adminapi.artifact_subtitles import Missing, job_subtitles
 from adminapi.config import get_settings
 from adminapi.deps import CurrentUser, SessionDep
 from adminapi.models import (
@@ -25,12 +26,9 @@ from adminapi.models import (
 )
 from adminapi.outbox import enqueue
 from adminapi.services.budget import held_total, release, settle
-from adminapi.subtitle_rules import rules_from_record
-from pipeline.editing import Cue
 from pipeline.states import JobState, PublicationState, StageRunState, assert_transition
-from pipeline.subtitle_files import MEDIA_TYPES, SubtitleFormat, subtitle_file
+from pipeline.subtitle_files import MEDIA_TYPES, SubtitleFormat
 from pipeline.time import as_utc
-from pipeline.workflow import WorkflowOptions, rendered_cues, rendered_language
 
 router = APIRouter(tags=["workflow"])
 
@@ -119,36 +117,22 @@ def subtitles(
     job = session.get(Job, job_id)
     if job is None:
         raise HTTPException(404, "작업을 찾을 수 없습니다.")
-    data = job.workflow_data or {}
-    rows, duration = rendered_cues(data), data.get("duration")
-    if not rows or not duration:
-        raise HTTPException(409, "아직 자막이 없습니다. 대본 단계를 먼저 끝내세요.")
-    try:
-        cues = [Cue.model_validate(row) for row in rows]
-    except ValidationError:
-        raise HTTPException(
-            409, "저장된 자막을 읽을 수 없습니다. 작업 기록을 확인하세요."
-        ) from None
-    # 렌더가 그때 쓴 규칙으로 계산합니다. 기록이 없으면(아직 렌더하지 않은 작업)
-    # 지금 설정을 쓰되 렌더와 같은 언어 규칙으로 만들고, 헤더로 그렇다고 알립니다.
-    language = rendered_language(data, WorkflowOptions.model_validate(job.workflow_config))
-    rules, source = rules_from_record(data.get("subtitle_rules"), language)
-    text = subtitle_file(cues, 0, float(duration), subtitle_format, rules)
-    if not text.strip():
-        raise HTTPException(409, "내보낼 자막이 없습니다.")
+    found = job_subtitles(job, subtitle_format)
+    if isinstance(found, Missing):
+        raise HTTPException(409, found.reason)
     name = (
-        f"job-{job_id}.{language}.{subtitle_format}"
-        if language
+        f"job-{job_id}.{found.language}.{subtitle_format}"
+        if found.language
         else f"job-{job_id}.{subtitle_format}"
     )
     return Response(
-        content=text,
+        content=found.text,
         media_type=f"{MEDIA_TYPES[subtitle_format]}; charset=utf-8",
         headers={
             "Content-Disposition": f'attachment; filename="{name}"',
             # 영상과 같은 규칙인지 받는 쪽이 알 수 있게 합니다. rendered면 렌더
             # 때 쓴 규칙, settings면 지금 설정(기록이 없거나 깨짐)입니다.
-            "X-Subtitle-Rules": source,
+            "X-Subtitle-Rules": found.rules_source,
         },
     )
 
@@ -305,6 +289,8 @@ def publication_response(row):
         "publish_at": row.scheduled_at_utc,
         "title": row.metadata_snapshot.get("title"),
         "error": row.error,
+        # 자막 트랙을 올렸는지, 건너뛰었다면 왜인지. 설정을 끈 경우에는 없습니다.
+        "captions": row.checkpoint.get("captions"),
     }
 
 

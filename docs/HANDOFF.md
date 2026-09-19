@@ -904,3 +904,32 @@ CI가 토큰 없이도 이 경로를 점검합니다(`화자 분리 토큰 오�
 
 - **재생 화면의 UI 안전 영역은 여전히 모릅니다.** YouTube Shorts는 아래쪽과 오른쪽을 제목·채널·버튼이 덮습니다. 여기서 보는 것은 우리가 설정한 여백이 지켜지는지일 뿐, 그 여백이 플랫폼 UI를 피하기에 충분한지는 **잰 적이 없습니다.** 숫자를 지어내지 않았습니다. 실제 게시 뒤 화면을 보고 정해야 합니다.
 - 실제 재생기의 자막 렌더러는 다릅니다. 여기서 재는 것은 우리가 굽는 libass입니다.
+
+## YouTube 자막 트랙 업로드 (2026-09-19)
+
+- 사용자 요청: 자막 조사에서 남은 2번(게시 시 자막 트랙 업로드). 브랜치 `claude/subtitle-file-generation-38xjz4`(PR #13 병합 후 최신 main에서 재시작).
+- 담당 파일: `services/api/adminapi/artifact_subtitles.py`(신규), `services/api/adminapi/config.py`, `services/api/adminapi/routers/{editing,workflow}.py`, `services/worker/worker/{youtube,publication_tasks}.py`, `scripts/preflight_publish.py`, `tests/{test_youtube_captions(신규),test_connected_workflow,test_editing_api,test_preflight_publish}.py`, `docs/{PUBLISH_RUNBOOK,CONNECTED_WORKFLOW,OPEN_SOURCE_INTEGRATIONS,TECH_DECISIONS,HANDOFF}.md`.
+- 의존 작업: 없습니다. 새 의존성도 없습니다(`google-api-python-client`와 `youtube.force-ssl` 스코프는 이미 있었습니다).
+
+### 구현한 것
+
+- `adminapi/artifact_subtitles.py`(신규): 결과물의 자막을 파일 글자로 만듭니다. 편집본(`MediaTask.settings`)과 작업(`Job.workflow_data`) 양쪽을 다루고, **내려받기 두 엔드포인트와 게시가 모두 이 함수를 씁니다.** 게시용으로 따로 만들면 영상·파일·트랙이 세 갈래로 갈라집니다.
+- `worker/youtube.py:upload_captions()`: `captions.insert`. 같은 언어 트랙이 이미 있으면 올리지 않고 `exists`로 돌려줍니다. `sync=False`로 우리 시각을 씁니다.
+- `publication_tasks.py:publish_captions()`: 처리 완료 뒤·예약 전에 올립니다. 결과를 `checkpoint.captions`에 남기고, 실패해도 게시를 실패로 만들지 않습니다. 게시 목록 응답에 `captions`로 나옵니다.
+- `R4_YOUTUBE_CAPTIONS_ENABLED`(기본 꺼짐)과, 켠 경우에만 `youtube.force-ssl`을 보는 게시 전 점검.
+
+### 검증 결과
+
+- `pytest -q`: **321 통과 / 5 skip**(SQLite, providers 설치 시). 새 테스트 7개.
+- 올린 자막 파일이 `GET /jobs/{id}/subtitles` 응답과 **글자 단위로 같음**을 확인했습니다. 같은 함수를 쓰는지 시험으로 고정한 것입니다.
+- 같은 언어 트랙이 있으면 `insert`를 부르지 않고, 다시 실행해도 트랙이 늘지 않음을 확인했습니다.
+- 자막 업로드가 예외를 던져도 게시 상태는 `scheduled`로 남고 기록에 `failed`가 남는 것을 확인했습니다. 오류 메시지에 자격증명 값이 섞이지 않는 것도 확인했습니다.
+- 설정이 꺼져 있으면 `insert`를 부르지 않고 응답의 `captions`가 비어 있음을 확인했습니다.
+- `ruff check`·`ruff format --check` 통과.
+- **미검증**: **실제 YouTube 계정에 자막 트랙을 올려 본 적은 없습니다.** 대역으로 규약만 확인했습니다. 실제 업로드는 OAuth 연결과 `force-ssl` 권한이 있는 토큰이 필요합니다. 트랙 이름을 빈 값으로 보내는데 실제 API가 어떻게 표시하는지도 확인하지 못했습니다.
+
+### 남은 작업
+
+- **구운 자막과 트랙이 두 벌로 보이는 문제**는 설정을 켜는 사람이 판단해야 합니다. 구운 자막 없이 렌더하는 선택지는 아직 없습니다. 필요하면 편집본·작업에 "자막 굽지 않기" 설정을 넣는 것이 다음 단계입니다.
+- 외부 SRT를 **가져오는** 경로는 여전히 없습니다(ffsubsync 자리).
+- 관리화면에는 자막 트랙 결과를 아직 보여 주지 않습니다. `GET /publications` 응답에는 들어 있습니다.

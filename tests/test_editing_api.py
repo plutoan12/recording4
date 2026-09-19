@@ -230,14 +230,11 @@ def test_subtitle_export_says_when_the_rendered_rules_are_unknown(client, auth_h
 
 def test_broken_rules_record_falls_back_instead_of_failing() -> None:
     """기록이 깨졌다고 자막 내려받기가 막히면 안 됩니다. 설정으로 내려주고 알립니다."""
-    from adminapi.models import MediaTask
-    from adminapi.routers.editing import rules_used
+    from adminapi.subtitle_rules import rules_from_record
 
     for saved in ({"max_chars_per_line": 0}, {"max_cps": "여섯"}, "규칙 아님", None):
-        task = MediaTask(kind="render", result={"subtitle_rules": saved})
-        rules, source = rules_used(task)
+        rules, source = rules_from_record(saved)
         assert source == "settings" and rules.max_chars_per_line == 16
 
-    task = MediaTask(kind="render", result={"subtitle_rules": {"max_chars_per_line": 9}})
-    rules, source = rules_used(task)
+    rules, source = rules_from_record({"max_chars_per_line": 9})
     assert source == "rendered" and rules.max_chars_per_line == 9
