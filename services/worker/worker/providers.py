@@ -23,6 +23,16 @@ def require_paid(enabled: bool) -> None:
         )
 
 
+def video_terms(original: str, translated: str, source: str | None, target: str) -> str:
+    """Resolve only explicit video recording, never ambiguous or mixed audio/video cues."""
+    if target.split("-")[0] != "zh":
+        return translated
+    explicit = {"ko": ("녹화", "녹음"), "ja": ("録画", "録音")}.get(source)
+    if explicit and explicit[0] in original and explicit[1] not in original:
+        return translated.replace("录音", "录像").replace("錄音", "錄影")
+    return translated
+
+
 class GoogleTranslator:
     def __init__(self, project: str, *, client=None, allow_paid: bool = False):
         self.project, self.client, self.allow_paid = project, client, allow_paid
@@ -48,7 +58,10 @@ class GoogleTranslator:
         output = [item.translated_text for item in response.translations]
         if len(output) != len(texts):
             raise ProviderError("번역 응답 수가 입력과 다릅니다.")
-        return output
+        return [
+            video_terms(original, translated, source, target)
+            for original, translated in zip(texts, output, strict=True)
+        ]
 
 
 class ElevenLabsSpeech:

@@ -16,7 +16,7 @@ from pipeline.subtitle_files import dump_subtitles, parse_subtitles
 
 pytest.importorskip("ffsubsync", reason="subtitles extra가 있어야 보정기를 돌립니다.")
 
-from worker.analysis import sync_subtitles  # noqa: E402
+from worker.analysis import SyncOptions, sync_subtitles  # noqa: E402
 
 TRUE_CUES = [
     Cue(start=5, end=7, text="첫 문장입니다"),
@@ -64,3 +64,57 @@ def test_dump_keeps_one_cue_per_cue(tmp_path):
     long_line = Cue(start=0, end=8, text="가나다 라마바 사아자 차카타 파하가 나다라 마바사 아자차")
     again, _ = parse_subtitles(dump_subtitles([long_line]))
     assert len(again) == 1
+
+
+def test_default_options_turn_off_framerate_fixing():
+    """대본은 이 원본에서 나왔습니다. 프레임률이 다를 수 없으므로 맞추지 않습니다.
+
+    켜 두면 보정기가 없는 차이를 맞추려고 자막을 늘였다 줄입니다. 합성 음성
+    측정에서 배율 0.999가 나와 이미 맞는 자막을 0.013초 흔들었고, 끄면 오차가
+    0.000초였습니다.
+    """
+    assert "--no-fix-framerate" in SyncOptions().arguments()
+    assert "--no-fix-framerate" not in SyncOptions(fix_framerate=True).arguments()
+
+
+def test_options_bound_the_search_instead_of_leaving_it_wide_open():
+    """ffsubsync 기본값 60초는 다른 판본에서 받은 자막을 위한 값입니다."""
+    assert SyncOptions().max_offset_seconds < 60
+    assert "--max-offset-seconds" in SyncOptions().arguments()
+
+
+def test_options_reject_a_vad_name_the_tool_does_not_know():
+    """모르는 이름을 넘기면 argparse가 그 자리에서 워커를 끝냅니다. 미리 막습니다."""
+    with pytest.raises(ValueError, match="발화 검출기"):
+        SyncOptions(vad="webrtcvad").arguments()
+    assert SyncOptions(vad="auditok").arguments()[-2:] == ["--vad", "auditok"]
+
+
+def test_options_reject_a_search_bound_that_cannot_work():
+    with pytest.raises(ValueError):
+        SyncOptions(max_offset_seconds=0).arguments()
+
+
+def test_sync_refuses_a_correction_that_pushes_subtitles_before_the_start(tmp_path, monkeypatch):
+    """원본 앞으로 밀린 자막은 파일에서 사라집니다.
+
+    그러면 "개수가 다르다"는 말만 남고 무엇이 잘못됐는지 안 보입니다. 사람
+    목소리 34초 표본에서 보정기가 -23.25초를 **성공이라고** 내놓은 적이 있어
+    실제로 겪은 실패입니다.
+    """
+    import worker.analysis as analysis
+
+    def pretend(args):
+        # 보정기가 자신 있게 터무니없는 값을 돌려주는 상황입니다.
+        Path(args.srtout).write_text(dump_subtitles(TRUE_CUES), encoding="utf-8")
+        return {"retval": 0, "sync_was_successful": True, "offset_seconds": -23.25}
+
+    monkeypatch.setattr(analysis, "_run_sync", pretend)
+    with pytest.raises(ValueError, match="원본 시작 앞으로"):
+        sync_subtitles(reference(tmp_path), shifted(2.5))
+
+
+@pytest.mark.parametrize("limit", [float("nan"), float("inf"), -1])
+def test_options_reject_nonfinite_bounds(limit):
+    with pytest.raises(ValueError):
+        SyncOptions(max_offset_seconds=limit).arguments()

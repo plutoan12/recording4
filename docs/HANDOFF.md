@@ -1,3 +1,10 @@
+## 2026-09-19: 품질 문제 수정 (Codex)
+
+- 브랜치 `codex/subtitle-quality-fixes`. 담당: pipeline/subtitles, worker/providers·analysis·media_tasks, api/config, 관련 테스트와 보고서.
+- 숫자/금액/시각 분할 방지, ko/ja의 명시적 녹화 표현→zh 용어 보정. PR #23의 SyncOptions 관련 코드/테스트를 가져와 탐색 제한·입력 검사를 보강했습니다.
+- 382개 테스트 통과, 5개 조건부 skip. 실제 음성 보정 최대 오차 0.30초로 기존 0.5초 기준 통과. 실제 번역 두 방향 추가 비용 $0.0040, 녹화 용어 개선 확인.
+- [화면 증거·변경 범위·한계](quality/subtitles-2026-09-19/FIXES.md). 전체 문체 통일과 언어별 완전한 의미 단위 분할은 이번 수정 범위 밖입니다.
+
 ## 2026-09-19: 실제 다국어 품질 검사 (Codex)
 
 - PR #24 병합 확인, 운영 체크아웃을 main c1c8827로 fast-forward. 이번 변경은 보고서뿐이며 애플리케이션 코드 수정 없음.
