@@ -43,3 +43,18 @@ def test_candidates_have_sentence_boundaries_and_do_not_overlap():
     assert len(candidates) == 5
     assert all(c["end"] - c["start"] <= 45 for c in candidates)
     assert all(a["end"] <= b["start"] for a, b in zip(candidates, candidates[1:], strict=False))
+
+
+def test_track_only_keeps_title_but_does_not_burn_dialogue(tmp_path):
+    import pysubs2
+
+    from pipeline.subtitle_files import clip_subtitle_file
+    from pipeline.subtitles import DEFAULT_RULES
+
+    spec = EditSpec(
+        start=0, end=6, title="제목", burn_subtitles=False, cues=[Cue(start=1, end=3, text="대사")]
+    )
+    path = tmp_path / "captions.ass"
+    write_subtitles(path, spec)
+    assert [e.plaintext for e in pysubs2.load(str(path))] == ["제목"]
+    assert "대사" in clip_subtitle_file(spec, "srt", DEFAULT_RULES)

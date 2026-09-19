@@ -635,14 +635,19 @@ def caption_service(existing=None, state=None, info=None):
     return Service, tracks
 
 
-def publish_ready(client, auth_headers, create, monkeypatch, **overrides):
+def publish_ready(client, auth_headers, create, monkeypatch, burn=None, **overrides):
     """승인까지 끝낸 게시 요청 하나를 만들고 그 ID를 돌려줍니다."""
     from adminapi.routers import workflow
 
     settings = get_settings().model_copy(update={"youtube_channel_id": "channel", **overrides})
     monkeypatch.setattr(workflow, "get_settings", lambda: settings)
     monkeypatch.setattr(pub, "get_settings", lambda: settings)
-    jid = create(source_language="ko")
+    jid = create(
+        source_language="ko",
+        burn_subtitles=burn
+        if burn is not None
+        else not overrides.get("youtube_captions_enabled", False),
+    )
     for _ in range(3):
         wf.run_job(jid)
     aid = client.get(f"/jobs/{jid}/workflow", headers=auth_headers).json()["artifact_id"]
@@ -661,10 +666,10 @@ def publish_ready(client, auth_headers, create, monkeypatch, **overrides):
     return response.json()["id"], jid
 
 
-def test_caption_track_is_uploaded_once_with_the_burned_in_subtitles(
+def test_caption_track_is_uploaded_once_for_track_only_video(
     setup_flow, client, auth_headers, monkeypatch
 ):
-    """설정을 켜면 영상에 구운 자막과 같은 내용을 트랙으로 올립니다. 두 번 올리지 않습니다."""
+    """트랙 전용 결과물은 내보내기와 같은 자막을 한 번만 올립니다."""
     create, _ = setup_flow
     pid, jid = publish_ready(
         client, auth_headers, create, monkeypatch, youtube_captions_enabled=True
@@ -698,10 +703,10 @@ def test_caption_track_is_uploaded_once_with_the_burned_in_subtitles(
     assert len(tracks["inserted"]) == 1
 
 
-def test_caption_failure_does_not_fail_the_publication(
+def test_track_only_caption_failure_blocks_publication(
     setup_flow, client, auth_headers, monkeypatch
 ):
-    """영상은 이미 올라가 있습니다. 자막 때문에 게시를 실패로 만들지 않습니다."""
+    """트랙 전용 영상에서 자막 실패 시 비공개 업로드는 보존하고 예약은 막습니다."""
     create, _ = setup_flow
     pid, _jid = publish_ready(
         client, auth_headers, create, monkeypatch, youtube_captions_enabled=True
@@ -723,9 +728,9 @@ def test_caption_failure_does_not_fail_the_publication(
         raise RuntimeError("quota exceeded: secret-token-in-url")
 
     monkeypatch.setattr(pub, "upload_captions", broken)
-    assert pub.run_publication(pid)["status"] == "scheduled"
+    assert pub.run_publication(pid)["status"] == "failed"
     row = client.get("/publications", headers=auth_headers).json()[0]
-    assert row["state"] == "scheduled"
+    assert row["state"] == "failed"
     assert row["captions"]["state"] == "failed"
     assert "secret-token" not in str(row["captions"])
 
@@ -751,3 +756,25 @@ def test_captions_stay_off_until_the_setting_is_turned_on(
     pub.run_publication(pid)
     assert tracks["inserted"] == []
     assert client.get("/publications", headers=auth_headers).json()[0]["captions"] is None
+
+
+def test_burned_video_never_adds_a_duplicate_track(setup_flow, client, auth_headers, monkeypatch):
+    create, _ = setup_flow
+    pid, _ = publish_ready(
+        client, auth_headers, create, monkeypatch, burn=True, youtube_captions_enabled=True
+    )
+    info = {
+        "snippet": {"channelId": "channel"},
+        "status": {"privacyStatus": "private"},
+        "processingDetails": {"processingStatus": "succeeded"},
+    }
+    Service, tracks = caption_service(info=info)
+    monkeypatch.setattr(pub, "youtube_service", Service)
+    monkeypatch.setattr(pub, "upload_approved", lambda *a, **kw: "video")
+    monkeypatch.setattr(
+        pub,
+        "schedule_video",
+        lambda service, vid, at, **kw: info["status"].update(publishAt=at.isoformat()),
+    )
+    assert pub.run_publication(pid)["status"] == "scheduled"
+    assert tracks["inserted"] == []

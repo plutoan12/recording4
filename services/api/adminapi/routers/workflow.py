@@ -57,6 +57,7 @@ def configuration(user: CurrentUser):
             s.youtube_upload_enabled and s.youtube_credentials_file and s.youtube_channel_id
         ),
         "youtube_channel_id": s.youtube_channel_id,
+        "youtube_captions_enabled": s.youtube_captions_enabled,
     }
 
 
@@ -304,6 +305,18 @@ def create_publication(payload: PublicationRequest, user: CurrentUser, session: 
     )
     if artifact is None or not artifact.checksum:
         raise HTTPException(409, "검증된 결과물이 필요합니다.")
+    from adminapi.artifact_subtitles import Missing, artifact_burns_subtitles, artifact_subtitles
+
+    if not artifact_burns_subtitles(session, artifact):
+        captions = artifact_subtitles(session, artifact, "srt")
+        if (
+            not settings.youtube_captions_enabled
+            or isinstance(captions, Missing)
+            or not captions.language
+        ):
+            raise HTTPException(
+                409, "트랙 전용 게시에는 YouTube 자막 설정과 언어가 있는 자막이 필요합니다."
+            )
     approval = session.scalar(select(Approval).where(Approval.artifact_id == artifact.id))
     if approval is None:
         raise HTTPException(409, "이 결과물 버전의 승인이 필요합니다.")

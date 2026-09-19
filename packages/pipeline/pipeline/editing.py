@@ -30,6 +30,8 @@ class EditSpec(BaseModel):
     width: int = Field(default=1080, ge=180, le=2160, multiple_of=2)
     height: int = Field(default=1920, ge=320, le=3840, multiple_of=2)
     title: str = Field(default="", max_length=120)
+    burn_subtitles: bool = True
+    caption_language: str | None = Field(default=None, pattern=r"^[a-z]{2,3}$")
     font_size: int = Field(default=64, ge=20, le=120)
     cues: list[Cue] = Field(default_factory=list, max_length=3000)
 

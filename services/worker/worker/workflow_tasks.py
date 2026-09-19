@@ -354,6 +354,7 @@ def execute_step(name, options, data, asset, directory, stage_id, remote_id, sav
             duration=data["duration"],
             start=0 if dubbed else data["start"],
             clip=options.clip,
+            burn_subtitles=options.burn_subtitles,
             width=asset.width or 1920,
             height=asset.height or 1080,
             rules=rules,

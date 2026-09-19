@@ -3,7 +3,7 @@ import { downloadFile, request, type Job, type SourceAsset } from './api'
 import { PublicationForm } from './PublicationForm'
 
 export type WorkflowDraft = {source_asset_id:string; start:number; end:number; mode:string; focus_x:number;
-  title:string; cues:{start:number;end:number;text:string}[]}
+  title:string; burn_subtitles?:boolean; caption_language?:string; cues:{start:number;end:number;text:string}[]}
 type Cue = {start:number;end:number;text:string}
 type Detail = {id:string;state:string;stage:string|null;reason:string|null;artifact_id:string|null;approval_id:string|null;
   options:Record<string,unknown>;cues:Cue[];translated:Cue[];
@@ -15,6 +15,8 @@ type Configuration = {paid_enabled:boolean;translation_configured:boolean;speech
 export function WorkflowPanel({assets,jobs,draft,onCreated}:{assets:SourceAsset[];jobs:Job[];draft:WorkflowDraft|null;onCreated:()=>Promise<void>}) {
   const [asset,setAsset]=useState('')
   const [audio,setAudio]=useState('original')
+  const [burn,setBurn] = useState(true)
+  const [sourceLanguage,setSourceLanguage] = useState('ko')
   const [target,setTarget]=useState('en')
   const [voice,setVoice]=useState('')
   const [lip,setLip]=useState(false)
@@ -30,7 +32,7 @@ export function WorkflowPanel({assets,jobs,draft,onCreated}:{assets:SourceAsset[
   const [message,setMessage]=useState('')
   const [busy,setBusy]=useState(false)
   const [useClip,setUseClip]=useState(false)
-  useEffect(()=>{if(draft){setAsset(draft.source_asset_id);setAudio('dub');setUseClip(true)}},[draft])
+  useEffect(()=>{if(draft){setAsset(draft.source_asset_id);setBurn(draft.burn_subtitles??true);setSourceLanguage(draft.caption_language??'ko');setUseClip(true)}},[draft])
   const refresh = useCallback(async ()=>{
     try {
       const [c,p,d] = await Promise.all([
@@ -50,7 +52,7 @@ export function WorkflowPanel({assets,jobs,draft,onCreated}:{assets:SourceAsset[
   }
   async function create(event:React.FormEvent){event.preventDefault();await act(async()=>{
     const job = await request<Job>('/jobs',{method:'POST',body:JSON.stringify({source_asset_id:asset,target_language:target,
-      workflow:{audio_mode:audio,voice_id:voice||null,lipsync:audio==='dub'&&lip,budget_usd:budget,
+      workflow:{audio_mode:audio,burn_subtitles:burn,source_language:sourceLanguage||null,voice_id:voice||null,lipsync:audio==='dub'&&lip,budget_usd:budget,
         ...(useClip&&draft ? {clip:{start:draft.start,end:draft.end,mode:draft.mode,focus_x:draft.focus_x,title:draft.title},transcript:draft.cues} : {})}})})
     setSelected(job.id);setUrl('');setPlayed(false);setMessage('작업을 시작했습니다. 단계별 결과가 아래에 표시됩니다.')
   })}
@@ -62,6 +64,8 @@ export function WorkflowPanel({assets,jobs,draft,onCreated}:{assets:SourceAsset[
     <form onSubmit={create} className="editor-fields">
       <label>원본<select value={asset} onChange={e=>{setAsset(e.target.value);setUseClip(false)}} required><option value="">선택</option>{assets.filter(a=>a.upload_state==='verified').map(a=><option key={a.id} value={a.id}>{a.original_filename}</option>)}</select></label>
       <label>음성<select value={audio} onChange={e=>setAudio(e.target.value)}><option value="original">원어 유지·자막 합성</option><option value="dub">번역·더빙</option></select></label>
+      <label>자막 표시<select value={burn?'burn':'track'} onChange={e=>setBurn(e.target.value==='burn')}><option value="burn">영상에 굽기 · 트랙 업로드 안 함</option><option value="track">YouTube 트랙만 · 영상에 굽지 않음</option></select></label>
+      <label>원본 언어<input value={sourceLanguage} onChange={e=>setSourceLanguage(e.target.value)} pattern="[a-z]{2,3}" placeholder="ko, en, ja" required={!burn&&audio==='original'} /></label>
       <label>대상 언어<input value={target} onChange={e=>setTarget(e.target.value)} required /></label>
       {audio==='dub' && <><label>더빙 음성 ID<input value={voice} onChange={e=>setVoice(e.target.value)} required /></label>
         <label>작업 예산 상한 (USD)<input type="number" min="0" max="10000" step="0.0001" value={budget} onChange={e=>setBudget(e.target.value)} required /></label>
