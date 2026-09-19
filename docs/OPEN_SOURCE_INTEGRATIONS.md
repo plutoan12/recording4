@@ -27,6 +27,8 @@
 | kss 6.0.6 | 한국어 문장 분리. 자막 줄바꿈을 어절·문장 경계에 맞춤 | [GitHub](https://github.com/hyunwoongko/kss), BSD-3-Clause |
 | ffsubsync 0.4.27 | 이미 있는 자막의 싱크를 원본 음성에 맞춰 보정 | [GitHub](https://github.com/smacke/ffsubsync), MIT |
 
+ffsubsync는 **chardet(LGPL)** 과 **webrtcvad**를 의존성으로 끌어옵니다. chardet은 우리 코드가 부르지 않지만 `[subtitles]`를 설치한 워커 이미지에는 들어가므로 배포물 라이선스를 따질 때 함께 봅니다. webrtcvad는 C 확장인데 PyPI에 파이썬 3.11용 휠이 없어 워커 이미지가 설치 단계에서 컴파일합니다(`infra/Dockerfile.worker`가 그 층에서만 build-essential을 넣었다 지웁니다).
+
 연결한 범위는 다음과 같습니다.
 
 - stable-ts → `worker/analysis.py:align_text()`. `POST /source-assets/{id}/align`이 타이밍 없는 대본을 원본 음성에 맞춰 새 대본 버전을 만듭니다. 전사가 아니라 정렬이라 글자는 그대로 둡니다.

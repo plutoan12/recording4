@@ -24,7 +24,14 @@ WORKDIR /app
 
 COPY pyproject.toml ./
 COPY packages ./packages
-RUN pip install --no-cache-dir ".[analysis,providers,imports,subtitles]"
+# ffsubsync가 webrtcvad(C 확장)를 끌어옵니다. PyPI에 3.11용 휠이 없어 여기서
+# 컴파일해야 하는데 slim 이미지에는 컴파일러가 없습니다. 빌드 도구는 설치가
+# 끝나면 같은 층에서 지워 최종 이미지에 남기지 않습니다.
+RUN apt-get update \
+    && apt-get install --no-install-recommends -y build-essential \
+    && pip install --no-cache-dir ".[analysis,providers,imports,subtitles]" \
+    && apt-get purge -y --auto-remove build-essential \
+    && rm -rf /var/lib/apt/lists/*
 
 COPY services ./services
 
