@@ -674,7 +674,13 @@ CI가 토큰 없이도 이 경로를 점검합니다(`화자 분리 토큰 오�
 
 판단 규칙은 순수 함수로 빼서 테스트했습니다. 네트워크 호출은 읽기 한 번(`channels.list`)뿐입니다.
 
+### 점검이 찾아낸 진짜 결함 두 가지 (CI `a18fd3d`)
+
+1. **토큰이 있어도 화자 분리는 시작조차 못 했습니다.** `DiarizationPipeline.__init__() got an unexpected keyword argument 'use_auth_token'`. 설치된 whisperx(pyannote.audio 4.x)는 그 인자를 받지 않습니다. 토큰이 없어 한 번도 돌지 않아 드러나지 않았습니다. 이제 이 버전이 받는 이름만 골라 넘깁니다(`diarization_arguments`). VAD 설정에서 쓴 방식과 같습니다.
+
+2. **동의해야 할 모델 페이지가 문서와 달랐습니다.** 실제로 받으러 가는 모델은 `pyannote/speaker-diarization-community-1`입니다(`speaker-diarization-3.1`이 아닙니다). 3.1에서만 동의하면 증상이 그대로입니다. 코드가 실행 시점에 모델 이름을 찾아 안내 맨 앞에 넣고, CI가 그 이름을 찍습니다.
+
 ### 여전히 사람이 해야 하는 것
 
-- **HF 토큰**: huggingface.co 로그인 → 두 모델 페이지에서 약관 동의 → 읽기 토큰 발급 → 저장소 시크릿 `HF_TOKEN`. 계정이 필요한 일이라 대신할 수 없습니다.
+- **HF 토큰**: huggingface.co 로그인 → **`pyannote/speaker-diarization-community-1`** 페이지에서 약관 동의(안내에 함께 뜨는 페이지도 확인) → 읽기 토큰 발급 → 저장소 시크릿 `HF_TOKEN`. 계정이 필요한 일이라 대신할 수 없습니다.
 - **실제 게시**: `docs/PUBLISH_RUNBOOK.md` 순서대로. 2.5단계 점검을 먼저 돌리면 업로드 전에 대부분의 실패가 드러납니다.

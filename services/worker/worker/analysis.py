@@ -239,6 +239,9 @@ def diarize_by_embedding(
 
 
 # 약관 동의가 필요한 페이지. 토큰만 있고 동의가 빠지면 같은 증상이 납니다.
+# 어느 모델을 쓰는지는 버전이 정합니다(측정: 설치된 버전은
+# speaker-diarization-community-1을 받으러 갑니다). 그래서 실제 쓰는 모델을
+# 찾아 맨 앞에 넣고, 아래는 흔히 함께 필요한 것들입니다.
 GATED_PAGES = (
     "https://huggingface.co/pyannote/speaker-diarization-3.1",
     "https://huggingface.co/pyannote/segmentation-3.0",
