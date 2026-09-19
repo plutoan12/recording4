@@ -138,6 +138,17 @@ def speech_span(path: Path, noise: str | None = None) -> tuple[float, float]:
     return begin, finish
 
 
+def concat_listing(pieces: list[Path]) -> str:
+    """ffmpeg concat 목록. 경로는 절대 경로로 적습니다.
+
+    이름만 적으면 목록 파일이 있는 폴더 기준으로 풀립니다. 다른 폴더의
+    조각(사람 목소리)은 그렇게 하면 찾지 못하는데, ffmpeg는 그 조각을
+    빼고도 성공으로 끝냅니다. 그러면 정답은 29초인데 음성은 1초인 묶음이
+    조용히 만들어집니다.
+    """
+    return "".join(f"file '{path.resolve()}'\n" for path in pieces)
+
+
 def silence_file(out: Path) -> Path:
     path = out / "silence.wav"
     run(
@@ -195,7 +206,7 @@ def build_sample(
         ordered.append(silence)
 
     listing = out / "concat.txt"
-    listing.write_text("".join(f"file '{p.name}'\n" for p in ordered), encoding="utf-8")
+    listing.write_text(concat_listing(ordered), encoding="utf-8")
     sample = out / "sample.wav"
     run(
         [
@@ -217,6 +228,16 @@ def build_sample(
             str(sample),
         ]
     )
+    # 묶기가 조각을 빠뜨려도 ffmpeg는 성공으로 끝날 수 있습니다(측정: 사람
+    # 목소리 조각이 다른 폴더에 있어 29초짜리가 1초로 묶였고, 검증은 "발화
+    # 구간이 없다"는 엉뚱한 실패로 나타났습니다). 길이를 직접 확인합니다.
+    made = duration(sample)
+    if abs(made - cursor) > 0.2:
+        raise RuntimeError(
+            f"묶은 음성이 {made:.2f}초입니다. 조각 길이 합은 {cursor:.2f}초입니다. "
+            "조각 경로를 확인하세요. 빠진 조각이 있으면 정답과 음성이 어긋납니다."
+        )
+
     payload = {"gap": GAP, "sentences": expected}
     (out / "expected.json").write_text(
         json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
