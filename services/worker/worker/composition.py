@@ -156,6 +156,9 @@ def render_final(
             cues=cues,
             burn_subtitles=burn_subtitles,
             title=clip.title if clip else "",
+            # 숏폼 구간이면 편집기에서 고른 템플릿·글자 크기를 그대로 씁니다. 전체
+            # 영상은 기본 템플릿에 화면 높이에 맞춘 글자 크기입니다.
+            subtitle_template=clip.subtitle_template if clip else "default",
             font_size=clip.font_size if clip else max(20, height // 24),
         )
         write_subtitles(temp / "captions.ass", captions, rules)

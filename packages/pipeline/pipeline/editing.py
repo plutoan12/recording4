@@ -32,7 +32,11 @@ class EditSpec(BaseModel):
     title: str = Field(default="", max_length=120)
     burn_subtitles: bool = True
     caption_language: str | None = Field(default=None, pattern=r"^[a-z]{2,3}$")
-    font_size: int = Field(default=64, ge=20, le=120)
+    # 자막 모양은 템플릿(pipeline.subtitle_templates)이 정합니다. 이름만 두고 실제
+    # 확인은 렌더와 API가 합니다(순환 참조를 피합니다). 글자 크기는 비우면 템플릿
+    # 값이고, 적으면 그 값이 템플릿보다 우선합니다.
+    subtitle_template: str = Field(default="default", pattern=r"^[a-z0-9][a-z0-9-]{0,39}$")
+    font_size: int | None = Field(default=None, ge=20, le=120)
     cues: list[Cue] = Field(default_factory=list, max_length=3000)
 
     @model_validator(mode="after")

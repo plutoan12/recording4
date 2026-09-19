@@ -3,7 +3,7 @@ import { downloadFile, request, type Job, type SourceAsset } from './api'
 import { PublicationForm } from './PublicationForm'
 
 export type WorkflowDraft = {source_asset_id:string; start:number; end:number; mode:string; focus_x:number;
-  title:string; burn_subtitles?:boolean; caption_language?:string; cues:{start:number;end:number;text:string}[]}
+  title:string; burn_subtitles?:boolean; caption_language?:string; subtitle_template?:string; cues:{start:number;end:number;text:string}[]}
 type Cue = {start:number;end:number;text:string}
 type Detail = {id:string;state:string;stage:string|null;reason:string|null;artifact_id:string|null;approval_id:string|null;
   options:Record<string,unknown>;cues:Cue[];translated:Cue[];
@@ -54,7 +54,7 @@ export function WorkflowPanel({assets,jobs,draft,onCreated}:{assets:SourceAsset[
   async function create(event:React.FormEvent){event.preventDefault();await act(async()=>{
     const job = await request<Job>('/jobs',{method:'POST',body:JSON.stringify({source_asset_id:asset,target_language:target,
       workflow:{audio_mode:audio,burn_subtitles:burn,source_language:sourceLanguage||null,voice_id:voice||null,lipsync:audio==='dub'&&lip,budget_usd:budget,
-        ...(useClip&&draft ? {clip:{start:draft.start,end:draft.end,mode:draft.mode,focus_x:draft.focus_x,title:draft.title},transcript:draft.cues} : {})}})})
+        ...(useClip&&draft ? {clip:{start:draft.start,end:draft.end,mode:draft.mode,focus_x:draft.focus_x,title:draft.title,subtitle_template:draft.subtitle_template??'default'},transcript:draft.cues} : {})}})})
     setSelected(job.id);setUrl('');setPlayed(false);setMessage('작업을 시작했습니다. 단계별 결과가 아래에 표시됩니다.')
   })}
   function choose(id:string){setSelected(id);setDetail(null);setTranslated([]);setUrl('');setPlayed(false)}

@@ -38,6 +38,7 @@ from pipeline.subtitle_files import (
     encoding_choices,
     parse_subtitles,
 )
+from pipeline.subtitle_templates import BUILTIN_TEMPLATES, get_template
 from pipeline.subtitles import check
 from pipeline.time import as_utc
 
@@ -385,6 +386,10 @@ def create_clip(payload: ClipRequest, user: CurrentUser, session: SessionDep):
     if payload.end > float(asset.duration_seconds):
         raise HTTPException(422, "선택 구간이 원본 길이를 넘습니다.")
     spec = EditSpec.model_validate(payload.model_dump(exclude={"source_asset_id"}))
+    try:
+        template = get_template(spec.subtitle_template)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from None
     # Client sends its edited captions explicitly; an empty list means no captions.
     version = (
         session.scalar(
@@ -401,7 +406,10 @@ def create_clip(payload: ClipRequest, user: CurrentUser, session: SessionDep):
         output_height=spec.height,
         screen_title=spec.title,
         publish_title=spec.title,
-        subtitle_style={"font_size": spec.font_size},
+        subtitle_style={
+            "template": template.name,
+            "font_size": spec.font_size or template.font_size,
+        },
     )
     session.add(clip)
     session.flush()
@@ -422,6 +430,12 @@ def create_clip(payload: ClipRequest, user: CurrentUser, session: SessionDep):
             settings=spec.model_dump(),
         ),
     )
+
+
+@router.get("/subtitle-templates")
+def subtitle_templates(user: CurrentUser) -> list[dict]:
+    """편집기가 고를 수 있는 내장 자막 템플릿. 이름을 `subtitle_template`로 보냅니다."""
+    return [t.model_dump() for t in BUILTIN_TEMPLATES.values()]
 
 
 @router.get("/clips/{clip_edit_id}/subtitles")

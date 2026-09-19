@@ -8,10 +8,9 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-import pysubs2
-
 from pipeline.editing import EditSpec, clip_cues
 from pipeline.subtitle_files import plain_ass
+from pipeline.subtitle_templates import SubtitleTemplate, resolve_template, styled_document
 from pipeline.subtitles import DEFAULT_RULES, SubtitleRules, apply_rules
 
 __all__ = ["RenderError", "ffmpeg_binary", "plain_ass", "render_clip", "write_subtitles"]
@@ -28,43 +27,36 @@ def ffmpeg_binary() -> str:
     return binary
 
 
-def write_subtitles(path: Path, spec: EditSpec, rules: SubtitleRules = DEFAULT_RULES) -> None:
-    subs = pysubs2.SSAFile()
-    subs.info.update(PlayResX=str(spec.width), PlayResY=str(spec.height), WrapStyle="0")
-    style = pysubs2.SSAStyle(
-        fontname="Noto Sans CJK KR",
-        fontsize=spec.font_size,
-        outline=3,
-        shadow=1,
-        marginl=50,
-        marginr=50,
-        marginv=int(spec.height * 0.13),
+def write_subtitles(
+    path: Path,
+    spec: EditSpec,
+    rules: SubtitleRules = DEFAULT_RULES,
+    template: SubtitleTemplate | str | None = None,
+) -> None:
+    """굽는 자막 ASS 파일을 씁니다.
+
+    모양은 템플릿이 정합니다. 주지 않으면 `spec.subtitle_template`(없으면 default)을
+    씁니다. 줄바꿈과 분할은 여기서 확정합니다. libass 자동 줄바꿈에 맡기지 않습니다.
+    """
+    if template is None:
+        template = getattr(spec, "subtitle_template", None)
+    try:
+        chosen = resolve_template(template)
+    except ValueError as exc:
+        raise RenderError(str(exc)) from None
+    cues = (
+        clip_cues(spec.cues, spec.start, spec.end) if getattr(spec, "burn_subtitles", True) else []
     )
-    subs.styles["Default"] = style
-    # 줄바꿈과 분할을 여기서 확정합니다. libass 자동 줄바꿈에 맡기지 않습니다.
-    for cue in apply_rules(
-        clip_cues(spec.cues, spec.start, spec.end) if getattr(spec, "burn_subtitles", True) else [],
-        rules,
-    ):
-        subs.append(
-            pysubs2.SSAEvent(
-                start=round(cue.start * 1000), end=round(cue.end * 1000), text=plain_ass(cue.text)
-            )
-        )
-    if spec.title:
-        title_style = style.copy()
-        title_style.alignment = pysubs2.Alignment.TOP_CENTER
-        title_style.marginv = int(spec.height * 0.08)
-        subs.styles["Title"] = title_style
-        subs.append(
-            pysubs2.SSAEvent(
-                start=0,
-                end=round((spec.end - spec.start) * 1000),
-                text=plain_ass(spec.title),
-                style="Title",
-            )
-        )
-    subs.save(str(path), encoding="utf-8")
+    document = styled_document(
+        apply_rules(cues, rules),
+        chosen,
+        width=spec.width,
+        height=spec.height,
+        duration=spec.end - spec.start,
+        title=spec.title,
+        font_size=getattr(spec, "font_size", None),
+    )
+    document.save(str(path), encoding="utf-8")
 
 
 def video_filter(spec: EditSpec) -> str:

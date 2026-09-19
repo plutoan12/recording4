@@ -61,6 +61,8 @@ celery -A worker.celery_app.celery_app worker -l info   # 워커
 python -m worker.run_dispatcher                         # outbox 디스패처
 ```
 
+자막 파일과 자막 템플릿만 다루려면 서버 없이 `r4-subtitles --help`를 씁니다. 사용법은 [자막 파일·템플릿 도구](SUBTITLE_TOOL.md)에 있습니다.
+
 ## 검사
 
 ```bash

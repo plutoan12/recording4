@@ -1,3 +1,12 @@
+## 2026-09-19: 자막 파일·템플릿 도구 (Claude)
+
+- 사용자 요청: 자막 파일과 자막 템플릿 관련 프로그램. 브랜치 `claude/subtitle-file-template-program-i9rzfx`. 담당: `packages/pipeline/pipeline/subtitle_templates.py`(신규), `packages/pipeline/pipeline/subtitle_tool.py`(신규), `pipeline/editing.py`, `worker/rendering.py`, `worker/composition.py`, `adminapi/routers/editing.py`, `apps/web/src/ClipEditor.tsx`, `apps/web/src/WorkflowPanel.tsx`, `pyproject.toml`, 관련 테스트·문서.
+- 자막 템플릿: 내장 6종(`default`, `shorts-bold`, `yellow`, `box`, `top`, `minimal`)과 JSON 파일 템플릿. 렌더(`write_subtitles`)가 `EditSpec.subtitle_template`로 모양을 정하고, 워크플로 숏폼 구간에도 전달됩니다. `default`는 이전 고정값과 같습니다. 편집기에 **자막 템플릿** 선택과 `GET /subtitle-templates` 추가. 모르는 이름은 422.
+- 명령줄 `r4-subtitles`(`python -m pipeline.subtitle_tool`): info·check·convert·shape·shift·cut·templates·style·burn. 서버와 같은 읽기(인코딩 판별)·규칙·템플릿 코드를 씁니다. 사용법은 [자막 파일·템플릿 도구](SUBTITLE_TOOL.md).
+- 검증: 이 환경(SQLite, FFmpeg·numpy 없음)에서 `python -m pytest -q` 전체 425개 통과, 8개 조건부 skip, 실패 1개·오류 4개는 아래의 기존 문제입니다. 새 테스트는 `test_subtitle_templates.py`·`test_subtitle_tool.py` 49개(매개변수 포함)와 `test_editing_api.py` 1개. `ruff check .` 통과, 변경한 파일 `ruff format --check` 통과. TypeScript `tsc -b --noEmit`·`vite build` 통과. `burn`의 실제 FFmpeg 합성, 템플릿별 글꼴 표시·화면 안 배치 실측, 브라우저 화면 확인은 하지 못했습니다.
+- 이 환경에서 `tests/test_connected_workflow.py::test_caption_track_is_uploaded_once_for_track_only_video` 실패와 `tests/test_verify_sync_matrix.py` 오류 4개(numpy 미설치)는 변경 전 main에서도 같아 이번 변경과 무관합니다. `ruff format --check`는 손대지 않은 `style_review.py`·`composition.py`의 f-string 공백을 지적하는데 이 환경의 Ruff 판정이며 기존 코드입니다.
+- 다음 작업: 워커 이미지에서 템플릿별 `scripts/measure_subtitles.py` 실측(특히 `shorts-bold` 72·`box` 상자 여백), 브라우저에서 템플릿 선택→렌더→미리보기 확인, 필요하면 사용자 템플릿 저장 화면.
+
 ## 2026-09-19: 브라우저 확인·다국어 싱크 실패 조건 추가 (Codex)
 
 - PR #27 후속. 문체 안내/자막 번호/원문 불변을 Chrome 실제 화면에서 확인했습니다. 격리된 테스트 작업이며 영상 재생은 범위 밖입니다.

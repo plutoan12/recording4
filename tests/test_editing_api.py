@@ -398,3 +398,34 @@ def test_sync_saves_a_new_version_and_keeps_the_old_one(client, auth_headers, as
     assert client.get(f"/source-assets/{asset.id}/transcript", headers=auth_headers).json() == [
         {"start": 5.0, "end": 7.0, "text": "어긋난 자막"}
     ]
+
+
+def test_subtitle_templates_are_listed_and_a_clip_remembers_its_template(
+    client, auth_headers, asset, session
+):
+    from adminapi.models import ClipEdit, MediaTask
+
+    assert client.get("/subtitle-templates").status_code == 401
+    listed = client.get("/subtitle-templates", headers=auth_headers)
+    assert listed.status_code == 200
+    names = [t["name"] for t in listed.json()]
+    assert names[0] == "default" and "yellow" in names
+    assert all({"label", "font_size", "primary_color"} <= set(t) for t in listed.json())
+
+    data = {"source_asset_id": str(asset.id), "start": 10, "end": 40, "subtitle_template": "yellow"}
+    created = client.post("/clips", headers=auth_headers, json=data)
+    assert created.status_code == 202, created.text
+    clip = session.get(ClipEdit, uuid.UUID(created.json()["clip_edit_id"]))
+    assert clip.subtitle_style == {"template": "yellow", "font_size": 64}
+    task = session.get(MediaTask, uuid.UUID(created.json()["id"]))
+    assert task.settings["subtitle_template"] == "yellow"
+
+    # 템플릿을 안 주면 기본이고, 모르는 이름은 저장 전에 거절합니다.
+    plain = client.post("/clips", headers=auth_headers, json={**data, "subtitle_template": None})
+    assert plain.status_code == 422
+    del data["subtitle_template"]
+    assert client.post("/clips", headers=auth_headers, json=data).status_code == 202
+    unknown = client.post(
+        "/clips", headers=auth_headers, json={**data, "subtitle_template": "nope"}
+    )
+    assert unknown.status_code == 422 and "모르는 자막 템플릿" in unknown.json()["detail"]
