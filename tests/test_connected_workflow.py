@@ -537,3 +537,26 @@ def test_dubbed_job_exports_the_speech_aligned_translation(
     assert "음성에 맞춘 자막" in response.text
     assert "번역 자막" not in response.text
     assert "hello" not in response.text
+
+
+def test_export_uses_the_same_language_rules_as_the_render(
+    setup_flow, client, auth_headers, session
+):
+    """영어 자막은 영어 규칙으로 나옵니다. 렌더가 목표 언어로 줄을 끊기 때문입니다."""
+    from pipeline.editing import Cue
+    from pipeline.subtitle_files import subtitle_file
+    from pipeline.subtitles import DEFAULT_RULES, rules_for
+
+    create, _ = setup_flow
+    jid = create()
+    wf.run_job(jid)
+    long_line = "This sentence is long enough to be wrapped and split by the display rules."
+    cues = [{"start": 0, "end": 9, "text": long_line}]
+    job = session.get(Job, uuid.UUID(jid))
+    job.workflow_data = {**job.workflow_data, "translated": cues}
+    session.commit()
+
+    text = client.get(f"/jobs/{jid}/subtitles", headers=auth_headers).text
+    parsed = [Cue.model_validate(c) for c in cues]
+    assert text == subtitle_file(parsed, 0, 10, "srt", rules_for("en"))
+    assert text != subtitle_file(parsed, 0, 10, "srt", DEFAULT_RULES)

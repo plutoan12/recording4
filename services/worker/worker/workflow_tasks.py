@@ -33,7 +33,7 @@ from pipeline.budget import BudgetShortfall
 from pipeline.editing import Cue, clip_cues
 from pipeline.hashing import StageInputs
 from pipeline.states import JobState, StageRunState
-from pipeline.workflow import WorkflowOptions, rendered_cues
+from pipeline.workflow import WorkflowOptions, rendered_cues, rendered_language
 from worker.analysis import transcribe
 from worker.celery_app import celery_app
 from worker.composition import TimingError, compose_dub, mix_speech, render_final
@@ -339,6 +339,9 @@ def execute_step(name, options, data, asset, directory, stage_id, remote_id, sav
     if name == "render":
         output = directory / "final.mp4"
         dubbed = options.audio_mode == "dub"
+        # 자막이 어느 언어인지에 따라 표시 규칙이 다릅니다. 번역한 자막이면
+        # 목표 언어, 원본 대본 그대로면 원본 언어입니다.
+        language = rendered_language(data, options)
         render_final(
             source,
             output,
@@ -348,7 +351,7 @@ def execute_step(name, options, data, asset, directory, stage_id, remote_id, sav
             clip=options.clip,
             width=asset.width or 1920,
             height=asset.height or 1080,
-            rules=rules_from_settings(settings),
+            rules=rules_from_settings(settings, language),
         )
         with output.open("rb") as stream:
             checksum = hashlib.file_digest(stream, "sha256").hexdigest()

@@ -129,10 +129,12 @@ def subtitles(
         raise HTTPException(
             409, "저장된 자막을 읽을 수 없습니다. 작업 기록을 확인하세요."
         ) from None
-    text = subtitle_file(cues, 0, float(duration), subtitle_format, subtitle_rules())
+    # 렌더와 같은 언어 규칙을 씁니다. 언어마다 줄 길이·읽기 속도 지침이 달라
+    # 다른 규칙으로 계산하면 화면 자막과 줄이 달라집니다.
+    language = rendered_language(data, WorkflowOptions.model_validate(job.workflow_config))
+    text = subtitle_file(cues, 0, float(duration), subtitle_format, subtitle_rules(language))
     if not text.strip():
         raise HTTPException(409, "내보낼 자막이 없습니다.")
-    language = rendered_language(data, WorkflowOptions.model_validate(job.workflow_config))
     name = (
         f"job-{job_id}.{language}.{subtitle_format}"
         if language
