@@ -39,7 +39,10 @@
 
 - 토큰 없는 `embedding` 공급자: 문장 화자 할당 4/4, 라벨 이름 순열을 맞춘 정답 4/4(100%).
 - **화자 수 2명을 미리 지정한 결과입니다. 자동 화자 수 검출률이나 pyannote 검증이 아닙니다.** 겹침·현장 소음·다국어 대화의 성능도 측정하지 않았습니다.
-- `R4_HF_TOKEN`/`HF_TOKEN`과 기존 로컬 토큰 파일이 없습니다. Hugging Face 로그인 화면을 열고 사용자 로그인을 요청했습니다. 모델 접근 동의·토큰 발급·로컬/CI 연결·pyannote 실제 추론은 미완료입니다.
+- 사용자 동의 후 `speaker-diarization-community-1` 모델 접근 승인 완료. 제한 토큰은 사용자 갱신 후 로컬 비공개 설정(0600)과 저장소 Actions 시크릿 `HF_TOKEN`에 저장했습니다. API·워커·디스패처·모니터에 반영했고 API/워커 healthy 및 토큰 로딩을 확인했습니다. 비밀값은 커밋하지 않습니다.
+- 동일 실제 낭독 표본으로 `worker.analysis.diarize(..., device="cpu")` 실행. `min_speakers`·`max_speakers` 모두 생략: **정답 2명 → 자동 검출 2명**, 문장 할당 4/4, 라벨 순열을 맞춘 정답 4/4(100%). 모델 `pyannote/speaker-diarization-community-1`, pyannote.audio 4.0.7, WhisperX 3.8.6.
+- 자동 화자 수 검증은 **표본 1개 중 1개 일치**입니다. 4문장 정확도와 구분하며 일반 검출률로 확대 해석하지 않습니다. 시간 정답은 수동 주석이 아니므로 DER 또는 경계 정확도를 주장하지 않습니다. 겹침·소음·다국어 대화는 후속 표본이 필요합니다.
+- 실행 중 torchcodec의 CUDA 라이브러리 경고가 있었지만 WhisperX 경로의 실제 WAV 분석은 성공했습니다. pyannote의 직접 파일 디코딩 경로까지 검증한 것은 아닙니다. 비공개 원시 결과는 `.runtime/human-pyannote-quality-20260920.log`에 보관합니다.
 
 ## 싱크와 CI
 
