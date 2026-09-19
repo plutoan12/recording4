@@ -990,5 +990,32 @@ CI가 토큰 없이도 이 경로를 점검합니다(`화자 분리 토큰 오�
 
 ### 남은 작업
 
-- 싱크 보정(ffsubsync)은 그대로 남아 있습니다. 들인 자막이 얼마나 어긋나는지 재는 것이 먼저입니다.
+- ~~싱크 보정(ffsubsync)~~ 아래 절에서 처리했습니다. 보정과 함께 그 보정을 재는 검증도 넣었습니다.
 - 자막 두 벌(구운 자막 + YouTube 트랙) 문제도 그대로입니다.
+
+
+## 자막 싱크 보정 (ffsubsync) (2026-09-19)
+
+- 사용자 요청: ffsubsync 넣기. 앞 절에서 제가 "재기 전에 넣으면 맞는 자막을 흔든다"고 적었으므로 **보정과 그것을 재는 검증을 함께** 넣었습니다. 브랜치 `claude/subtitle-file-generation-38xjz4`.
+- 담당 파일: `packages/pipeline/pipeline/subtitle_files.py`, `services/worker/worker/{analysis,media_tasks}.py`, `services/api/adminapi/{models.py,routers/editing.py}`, `migrations/versions/0006_sync_media_task.py`(신규), `apps/web/src/ClipEditor.tsx`, `scripts/verify_sync.py`(신규), `.github/workflows/ci.yml`, `pyproject.toml`, `tests/{test_subtitle_sync(신규),test_editing_api}.py`, `docs/{CONNECTED_WORKFLOW,OPEN_SOURCE_INTEGRATIONS,TECH_DECISIONS,HANDOFF}.md`.
+- 의존 작업: `[subtitles]` extra에 `ffsubsync==0.4.27`을 추가했습니다. MIT이며 새 모델 다운로드는 없습니다.
+
+### 구현한 것
+
+- `worker/analysis.py:sync_subtitles()`: ffsubsync 파이썬 API로 시각만 옮깁니다. 글자는 원래 자막에서 가져오고, 자막 개수가 달라지거나 보정기가 실패를 알리면 결과를 쓰지 않습니다.
+- `POST /source-assets/{id}/transcript/sync` + `sync` 작업 종류(마이그레이션 `0006_sync`). 결과는 **새 대본 버전**이라 기존 버전이 남습니다.
+- 편집기에 **자막 싱크 보정** 버튼. 작업 목록에 "뒤로 2.50초 옮김"처럼 보정값이 나옵니다.
+- `pipeline/subtitle_files.py:dump_subtitles()`: 표시 규칙을 거치지 않은 날것 SRT. 규칙을 적용해 보내면 자막이 나뉘어 돌아온 시각을 맞출 수 없습니다.
+
+### 검증 결과
+
+- `pytest -q`: **343 통과 / 5 skip**(SQLite). 새 테스트 7개.
+- **실제 ffsubsync로 잽니다.** 기준을 SRT로 주면 오디오·ffmpeg 없이 같은 코드 경로가 돌아, +2.5초와 -2.5초로 밀어 둔 자막이 0.1초 안으로 돌아오는 것을 확인했습니다.
+- 보정기가 글자를 다시 써도 우리 글자가 남는 것, 날것 덤프가 자막을 나누지 않는 것을 확인했습니다.
+- 마이그레이션 `0006_sync` SQLite 왕복 통과. `ruff check`·`format`, `npm run typecheck` 통과.
+- **미검증**: **실제 음성을 기준으로 한 보정은 아직 재지 못했습니다.** `scripts/verify_sync.py`가 CI의 `verify-align` 라벨에서 돌며, 아는 만큼 밀어 둔 자막이 돌아오는지와 **이미 맞는 자막이 흔들리지 않는지**를 함께 봅니다. 이 PR에 라벨을 붙여 실측값을 남기는 것이 다음 차례입니다.
+
+### 남은 작업
+
+- 위 실측(라벨을 붙인 CI 실행). 합성 음성이라 사람 목소리보다 불리한 조건이며, 사람 목소리로도 재려면 `fetch_korean_speech.py` 표본에 같은 검사를 붙이면 됩니다.
+- 자막 두 벌(구운 자막 + YouTube 트랙) 문제는 그대로입니다.

@@ -320,3 +320,55 @@ def test_a_wrong_encoding_choice_is_reported_not_saved(client, auth_headers, ass
         path, headers=auth_headers, json={**upload(srt, "cp949"), "encoding": "utf-8"}
     )
     assert response.status_code == 422 and "utf-8" in response.json()["detail"]
+
+
+def test_sync_needs_a_transcript_and_does_not_queue_twice(client, auth_headers, asset, monkeypatch):
+    """보정은 최신 대본을 대상으로 합니다. 대본이 없으면 요청을 만들지 않습니다."""
+    path = f"/source-assets/{asset.id}/transcript/sync"
+    assert client.post(path).status_code == 401
+    assert client.post(path, headers=auth_headers).status_code == 409
+
+    client.put(
+        f"/source-assets/{asset.id}/transcript",
+        headers=auth_headers,
+        json={"cues": [{"start": 3, "end": 5, "text": "어긋난 자막"}]},
+    )
+    first = client.post(path, headers=auth_headers)
+    assert first.status_code == 202 and first.json()["kind"] == "sync"
+    # 같은 요청을 다시 눌러도 작업이 늘지 않습니다.
+    assert client.post(path, headers=auth_headers).json()["id"] == first.json()["id"]
+
+
+def test_sync_saves_a_new_version_and_keeps_the_old_one(client, auth_headers, asset, monkeypatch):
+    """보정은 새 대본 버전을 만듭니다. 마음에 들지 않으면 옛 버전을 다시 쓰면 됩니다."""
+    import worker.media_tasks as module
+    from pipeline.editing import Cue
+
+    class Storage:
+        def download_file(self, key, path):
+            path.write_bytes(b"media")
+
+    monkeypatch.setattr(module, "get_storage", lambda: Storage())
+    # 보정기는 여기서 대역입니다. 실제 보정 품질은 test_subtitle_sync.py가 봅니다.
+    monkeypatch.setattr(
+        module,
+        "sync_subtitles",
+        lambda source, cues: (
+            [Cue(start=c.start + 2, end=c.end + 2, text=c.text) for c in cues],
+            {"offset_seconds": 2.0, "framerate_scale": 1.0, "clamped": 0},
+        ),
+    )
+    client.put(
+        f"/source-assets/{asset.id}/transcript",
+        headers=auth_headers,
+        json={"cues": [{"start": 3, "end": 5, "text": "어긋난 자막"}]},
+    )
+    created = client.post(f"/source-assets/{asset.id}/transcript/sync", headers=auth_headers).json()
+
+    result = module.run_media.run(created["id"])
+    assert result["status"] == "succeeded"
+    assert result["sync"] == {"offset_seconds": 2.0, "framerate_scale": 1.0, "clamped": 0}
+    assert result["transcript_version"] == 2
+    assert client.get(f"/source-assets/{asset.id}/transcript", headers=auth_headers).json() == [
+        {"start": 5.0, "end": 7.0, "text": "어긋난 자막"}
+    ]

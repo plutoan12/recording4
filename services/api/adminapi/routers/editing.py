@@ -291,6 +291,31 @@ def diarize(asset_id: uuid.UUID, payload: DiarizeRequest, user: CurrentUser, ses
     )
 
 
+@router.post("/source-assets/{asset_id}/transcript/sync", status_code=202)
+def sync_transcript(asset_id: uuid.UUID, user: CurrentUser, session: SessionDep):
+    """최신 대본의 시각을 원본 음성에 맞춰 통째로 옮긴 새 버전을 만듭니다.
+
+    밖에서 들인 자막이 원본과 어긋날 때 씁니다. **글자는 건드리지 않고** 시각만
+    옮기며, 얼마나 옮겼는지(`result.sync.offset_seconds`)를 작업 결과에 남깁니다.
+
+    기존 대본 버전은 그대로 남습니다. 보정이 마음에 들지 않으면 그 버전을 다시
+    쓰면 됩니다. 유료 호출이 아니며 `[subtitles]` 설치가 필요합니다.
+    """
+    asset_for_edit(session, asset_id)
+    if not transcript(session, asset_id):
+        raise HTTPException(409, "보정할 대본이 없습니다. 먼저 대본을 만들거나 들이세요.")
+    existing = session.scalar(
+        select(MediaTask).where(
+            MediaTask.source_asset_id == asset_id,
+            MediaTask.kind == "sync",
+            MediaTask.state.in_(["pending", "running"]),
+        )
+    )
+    if existing:
+        return task_response(existing)
+    return schedule(session, MediaTask(source_asset_id=asset_id, kind="sync", settings={}))
+
+
 @router.get("/source-assets/{asset_id}/speakers")
 def speakers(asset_id: uuid.UUID, user: CurrentUser, session: SessionDep):
     """최신 대본에 붙은 화자 목록. 화자별 발화 시간과 구간 수를 함께 봅니다."""

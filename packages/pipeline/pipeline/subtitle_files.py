@@ -86,6 +86,25 @@ def clip_subtitle_file(
     return subtitle_file(spec.cues, spec.start, spec.end, subtitle_format, rules)
 
 
+def dump_subtitles(cues: list[Cue], subtitle_format: SubtitleFormat = "srt") -> str:
+    """자막을 **규칙 없이** 그대로 파일 글자로 씁니다.
+
+    `subtitle_file()`과 달리 줄바꿈·분할을 하지 않습니다. 밖의 도구에 넘겼다가
+    돌려받는 경로(싱크 보정)에 씁니다. 규칙을 적용해 보내면 자막 개수가 달라져
+    돌아온 시각을 원래 자막에 도로 맞출 수 없습니다.
+    """
+    subs = pysubs2.SSAFile()
+    for cue in cues:
+        subs.append(
+            pysubs2.SSAEvent(
+                start=round(cue.start * 1000),
+                end=round(cue.end * 1000),
+                text=plain_ass(cue.text),
+            )
+        )
+    return subs.to_string(subtitle_format)
+
+
 MAX_IMPORT_CHARS = 2000
 """자막 하나의 글자 수 상한. `pipeline.editing.Cue`가 받는 값과 같습니다."""
 
