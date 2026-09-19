@@ -288,8 +288,13 @@ def diarize(asset_id: uuid.UUID, payload: DiarizeRequest, user: CurrentUser, ses
         and payload.min_speakers > payload.max_speakers
     ):
         raise HTTPException(422, "최소 화자 수가 최대 화자 수보다 큽니다.")
-    if not transcript(session, asset_id):
+    rows = transcript(session, asset_id)
+    if not rows:
         raise HTTPException(409, "화자를 붙일 대본이 없습니다. 먼저 전사하거나 대본을 올리세요.")
+    language = payload.language or asset.source_language
+    if not language:
+        raise HTTPException(409, "단어별 화자 검수에는 원문 음성 언어를 선택해야 합니다.")
+    version = rows[0].transcript_version
     existing = session.scalar(
         select(MediaTask).where(
             MediaTask.source_asset_id == asset_id,
@@ -298,6 +303,11 @@ def diarize(asset_id: uuid.UUID, payload: DiarizeRequest, user: CurrentUser, ses
         )
     )
     if existing:
+        if (
+            existing.settings.get("source_language") != language
+            or existing.settings.get("transcript_version") != version
+        ):
+            raise HTTPException(409, "다른 언어 또는 이전 대본의 화자 분석이 진행 중입니다.")
         return task_response(existing)
     return schedule(
         session,
@@ -305,8 +315,8 @@ def diarize(asset_id: uuid.UUID, payload: DiarizeRequest, user: CurrentUser, ses
             source_asset_id=asset_id,
             kind="diarize",
             settings={
-                "transcript_version": transcript(session, asset_id)[0].transcript_version,
-                "source_language": payload.language or asset.source_language,
+                "transcript_version": version,
+                "source_language": language,
                 "min_speakers": payload.min_speakers,
                 "max_speakers": payload.max_speakers,
             },

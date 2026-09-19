@@ -16,6 +16,7 @@ def verified_asset(session: Session, user) -> SourceAsset:  # noqa: ANN001
     asset = SourceAsset(
         storage_key=f"sources/{uuid.uuid4()}.mp4",
         original_filename="interview.mp4",
+        source_language="ko",
         byte_size=4096,
         duration_seconds=60,
         upload_state="verified",
@@ -342,3 +343,47 @@ def test_diarization_does_not_overwrite_transcript_edited_during_analysis(
         .count()
         == 0
     )
+
+
+def test_diarize_requires_source_language_without_enqueuing(client, auth_headers, session, user):
+    asset = verified_asset(session, user)
+    with_transcript(session, asset)
+    asset.source_language = None
+    session.commit()
+    response = client.post(f"/source-assets/{asset.id}/diarize", headers=auth_headers, json={})
+    assert response.status_code == 409
+    assert session.query(MediaTask).filter_by(kind="diarize").count() == 0
+
+
+def test_diarize_does_not_reuse_different_language_or_version(client, auth_headers, session, user):
+    asset = verified_asset(session, user)
+    with_transcript(session, asset)
+    endpoint = f"/source-assets/{asset.id}/diarize"
+    assert client.post(endpoint, headers=auth_headers, json={}).status_code == 202
+    assert client.post(endpoint, headers=auth_headers, json={"language": "en"}).status_code == 409
+    session.add(
+        TranscriptSegment(
+            source_asset_id=asset.id,
+            transcript_version=2,
+            start_seconds=0,
+            end_seconds=2,
+            text="수정된 대본",
+        )
+    )
+    session.commit()
+    assert client.post(endpoint, headers=auth_headers, json={}).status_code == 409
+    assert session.query(MediaTask).filter_by(kind="diarize").count() == 1
+
+
+def test_word_alignment_missing_prerequisites_fail_instead_of_empty_success(tmp_path, monkeypatch):
+    import sys
+
+    import pytest
+
+    from worker.analysis import MissingDependency, align_speaker_words
+
+    with pytest.raises(MissingDependency, match="언어"):
+        align_speaker_words(tmp_path / "sample.wav", [], language=None)
+    monkeypatch.setitem(sys.modules, "stable_whisper", None)
+    with pytest.raises(MissingDependency, match="의존성"):
+        align_speaker_words(tmp_path / "sample.wav", [], language="ko")
