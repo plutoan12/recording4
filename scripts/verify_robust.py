@@ -59,12 +59,19 @@ def loudness(path: Path) -> float:
     raise RuntimeError(f"음량을 재지 못했습니다: {path}")
 
 
+# 잡음 씨앗을 고정합니다. **고정하지 않으면 돌릴 때마다 다른 잡음이 깔려**
+# 같은 코드에서도 값이 움직입니다(CI 실측: 소음 0dB가 23.1% → 20.9%, 소음 5dB가
+# 17.2% → 14.2%). 그러면 회귀인지 잡음이 달라진 것인지 구분할 수 없습니다.
+NOISE_SEED = 20260919
+
+
 def noise_file(path: Path, seconds: float) -> Path:
     """분홍 잡음. 흰 잡음보다 실제 방·거리 소리에 가깝습니다."""
+    source = f"anoisesrc=color=pink:seed={NOISE_SEED}" f":duration={seconds:.2f}:sample_rate=16000"
     run(
         [
             "ffmpeg", "-nostdin", "-y", "-v", "error",
-            "-f", "lavfi", "-i", f"anoisesrc=color=pink:duration={seconds:.2f}:sample_rate=16000",
+            "-f", "lavfi", "-i", source,
             "-ac", "1", "-c:a", "pcm_s16le", str(path),
         ]
     )  # fmt: skip

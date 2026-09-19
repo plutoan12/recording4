@@ -368,7 +368,8 @@ jobs:
       # 사람들이 말을 겹쳐 합니다. 거기서 몇 점인지 모르면 "정확도를 올렸다"고
       # 말할 수 없습니다. --compare는 후보 손잡이로 한 번 더 재서 견줍니다.
       # 한계는 2026-09-19 실측 + 10%p입니다(pipeline.noise.MEASURED_CER).
-      # --denoise는 목소리만 분리한 뒤 전사해 견줍니다. 느립니다.
+      # --denoise(분리 후 전사)는 재 보고 **뺐습니다.** 소음에서 오히려
+      # 나빠졌고(0dB에서 +20.1%p) 오래 걸립니다. 손으로 다시 재려면 붙이세요.
       - name: 소음·겹말 전사 검증
         if: |
           !cancelled() && (
@@ -379,7 +380,7 @@ jobs:
           mkdir -p "$RUNNER_TEMP/verify"
           docker run --rm -v /tmp/human-sample:/audio -v "$PWD/scripts:/work:ro" \
             --entrypoint python recording4-worker:ci /work/verify_robust.py \
-            --directory /audio --model small --compare --denoise \
+            --directory /audio --model small --compare \
             2>&1 | tee -a "$RUNNER_TEMP/verify/robust.log"
 
       - name: 배경음 분리 검증
