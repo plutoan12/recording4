@@ -110,3 +110,52 @@ def test_matrix_measures_alignment_without_the_vad_snap(matrix, monkeypatch):
     assert seen["snap"] is True
     matrix.evaluate(Path("unused"), original, 0, 0.5, "align_nosnap")
     assert seen["snap"] is False
+
+
+def test_matrix_can_make_each_cue_drift_further(matrix, monkeypatch):
+    """자막마다 어긋남이 커지는 모양. 이동값 하나로는 못 고칩니다.
+
+    강제 정렬을 제안한 이유가 이것인데, 지금까지 잰 열 조건에는 한 번도
+    나오지 않았습니다. 전부 전체가 한 덩어리로 어긋난 경우였습니다.
+    """
+    seen: list = []
+    monkeypatch.setattr(
+        matrix,
+        "sync_subtitles",
+        lambda source, cues: (seen.extend(cues), (list(cues), {"offset_seconds": 0}))[1],
+    )
+    truth = [
+        Cue(start=1, end=2, text="하나"),
+        Cue(start=5, end=6, text="둘"),
+        Cue(start=9, end=10, text="셋"),
+    ]
+    matrix.evaluate(Path("unused"), truth, 0.0, 0.5, "shift", drift=0.4)
+    # 첫 자막은 그대로, 다음부터 0.4초씩 더 밀립니다.
+    assert [round(c.start, 3) for c in seen] == [1.0, 5.4, 9.8]
+
+
+def test_matrix_does_not_judge_a_drifting_case_by_one_offset(matrix, monkeypatch):
+    """어긋남이 자막마다 다르면 '맞는 이동값' 자체가 없습니다."""
+    truth = [Cue(start=1, end=2, text="하나"), Cue(start=5, end=6, text="둘")]
+    monkeypatch.setattr(
+        matrix,
+        "sync_subtitles",
+        # 시각은 정답과 같게 돌려주지만 이동값은 엉뚱하게 보고합니다.
+        lambda source, cues: (
+            [Cue(start=c.start, end=c.end, text=c.text) for c in truth],
+            {"offset_seconds": 9.9},
+        ),
+    )
+    assert matrix.evaluate(Path("unused"), truth, 0.0, 0.5, "shift", drift=0.4)["pass"]
+    # 어긋남이 한 덩어리일 때는 이동값도 판정에 넣습니다.
+    assert not matrix.evaluate(Path("unused"), truth, 0.0, 0.5, "shift", drift=0.0)["pass"]
+
+
+def test_matrix_gate_none_judges_nothing(matrix):
+    """재기만 하고 판정하지 않는 자리가 있습니다. 빈 문자열이 아니라 none입니다."""
+    import argparse
+
+    parser = argparse.ArgumentParser()
+    assert matrix.pick("none", parser) == ()
+    # 빈 값은 기본값(shift)으로 떨어집니다. 판정을 끄려면 none을 써야 합니다.
+    assert matrix.pick("", parser) == ("shift",)

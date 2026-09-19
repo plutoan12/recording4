@@ -122,7 +122,12 @@ def make_variant(directory: Path, out: Path, spec: tuple) -> tuple[Path, list[Cu
 
 
 def evaluate(
-    source: Path, truth: list[Cue], offset: float, limit: float, method: str = "shift"
+    source: Path,
+    truth: list[Cue],
+    offset: float,
+    limit: float,
+    method: str = "shift",
+    drift: float = 0.0,
 ) -> dict:
     """한 조건에서 한 방법을 잽니다. 거부와 실패를 통과로 세지 않습니다.
 
@@ -130,7 +135,13 @@ def evaluate(
     align은 자막마다 시각을 따로 받으므로 이동값 하나로 판정할 수 없고, 자막
     시각의 오차만 봅니다.
     """
-    pushed = [Cue(start=c.start + offset, end=c.end + offset, text=c.text) for c in truth]
+    # drift는 자막마다 어긋남을 점점 키웁니다. 이동값 하나로는 고칠 수 없는
+    # 모양이라 강제 정렬을 제안한 이유가 바로 이것입니다. 0이면 지금까지처럼
+    # 전체가 한 덩어리로 어긋난 경우입니다.
+    pushed = [
+        Cue(start=c.start + offset + index * drift, end=c.end + offset + index * drift, text=c.text)
+        for index, c in enumerate(truth)
+    ]
     try:
         if method.startswith("align"):
             # align_nosnap은 자막 시작을 VAD 발화 시작에 맞추는 단계를 끕니다.
@@ -161,7 +172,10 @@ def evaluate(
             found["max_shift_seconds"] = meta["max_shift_seconds"]
         else:
             found["offset_seconds"] = meta["offset_seconds"]
-            found["pass"] = passed and abs(meta["offset_seconds"] + offset) <= limit + 1e-9
+            # 어긋남이 자막마다 다르면 "맞는 이동값" 자체가 없습니다. 그때는
+            # 이동값으로 판정하지 않고 자막 시각의 오차만 봅니다.
+            if not drift:
+                found["pass"] = passed and abs(meta["offset_seconds"] + offset) <= limit + 1e-9
         return found
     except (ValueError, RuntimeError) as exc:
         return {"pass": False, "rejected": str(exc)}
@@ -171,7 +185,13 @@ METHODS = ("shift", "align", "align_nosnap")
 
 
 def pick(value: str, parser: argparse.ArgumentParser) -> tuple[str, ...]:
-    """쉼표로 준 방법 목록. `both`는 예전 이름이라 그대로 받습니다."""
+    """쉼표로 준 방법 목록. `both`는 예전 이름이라 그대로 받습니다.
+
+    `none`은 **하나도 고르지 않음**입니다. 판정에 쓸 때, 아직 보증하지 않는
+    조건에서 재기만 하려는 경우에 씁니다.
+    """
+    if value == "none":
+        return ()
     if value == "both":
         return ("shift", "align")
     chosen = tuple(name.strip() for name in value.split(",") if name.strip())
@@ -213,9 +233,13 @@ def main() -> int:
     parser.add_argument("--method", default="shift", help=f"쉼표 구분: {', '.join(METHODS)}")
     # 판정에 넣을 방법. 재기만 하고 아직 보증하지 않는 방법이 있습니다. 재는 것과
     # 보증하는 것을 섞으면, 채택하지도 않은 방법 때문에 CI가 빨개집니다.
-    parser.add_argument("--gate", default=None, help="비우면 --method와 같습니다")
+    parser.add_argument(
+        "--gate", default=None, help="비우면 --method와 같습니다. none이면 판정 안 함"
+    )
     # 조건이 10가지라 둘 다 재면 오래 걸립니다. 필요한 조건만 고를 수 있게 합니다.
     parser.add_argument("--variants", default="", help="쉼표로 구분한 조건 이름")
+    # 자막마다 어긋남을 점점 키웁니다. 이동값 하나로는 못 고치는 모양입니다.
+    parser.add_argument("--drift", type=float, default=0.0, help="자막 하나당 더할 초")
     args = parser.parse_args()
     methods = pick(args.method, parser)
     gated = methods if args.gate is None else pick(args.gate, parser)
@@ -245,7 +269,9 @@ def main() -> int:
                     contextlib.redirect_stderr(log),
                 ):
                     logging.disable(logging.CRITICAL)
-                    entry["cases"][key] = evaluate(source, truth, offset, args.limit, method)
+                    entry["cases"][key] = evaluate(
+                        source, truth, offset, args.limit, method, args.drift
+                    )
                     logging.disable(logging.NOTSET)
         results.append(entry)
         (args.out / "results.json").write_text(
