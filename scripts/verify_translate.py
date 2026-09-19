@@ -3,7 +3,7 @@
 
 번역은 지금까지 "호출이 성공했다"까지만 확인했습니다. 무엇을 내놓는지는 잰
 적이 없습니다. 이 스크립트는 사람이 만든 번역(참조)과 비교해 수치를 내고,
-그 번역문이 목표 언어 자막 규칙(영어 42자/줄, 20자/초) 안에 들어가는지도
+그 번역문이 **원문이 차지한 시간 안에서** 목표 언어 자막 규칙에 들어가는지도
 함께 봅니다. 번역이 맞아도 자막으로 안 들어가면 화면에서는 깨집니다.
 
 **유료 호출입니다.** Google Cloud Translation은 100만 자당 20 USD입니다.
@@ -12,8 +12,9 @@
 
     python3 scripts/verify_translate.py --pairs docs/samples/ko-en.json --allow-paid
 
-`--pairs` 없이 돌리면 참조 번역만 규칙에 넣어 봅니다(무료). 번역기가 없어도
-"영어 자막이 우리 규칙에 들어가는가"는 확인할 수 있습니다.
+`--allow-paid` 없이 돌리면 사람이 만든 참조 번역을 대신 넣어 봅니다(무료).
+번역기가 없어도 "영어 자막이 원문의 시간 안에 들어가는가"는 확인할 수
+있습니다. CI가 이 형태로 돕니다.
 
 판정 기준:
 
@@ -68,14 +69,36 @@ def chrf(reference: str, candidate: str, *, order: int = 6, beta: float = 2.0) -
     return sum(scores) / len(scores) if scores else 0.0
 
 
-def fits_rules(texts: list[str], language: str) -> tuple[list[str], list[str]]:
-    """번역문을 자막으로 만들어 규칙에 넣어 봅니다. (보고, 문제) 순으로 돌려줍니다.
+def spans(sources: list[str], language: str) -> list[float]:
+    """원문 한 문장이 화면에 머무는 시간. 그 언어의 읽기 속도로 잡습니다.
 
-    한 문장에 3초를 줍니다. 실제 시각은 정렬이 정하지만, 여기서는 줄 길이와
-    줄 수가 규칙 안인지만 보면 됩니다.
+    실제 시각은 원본 음성 정렬이 정합니다. 여기에는 음성이 없으므로 원문을
+    읽는 데 걸리는 시간을 대신 씁니다. 말하는 속도와 읽는 속도는 다르지만,
+    **번역문이 쓸 수 있는 시간은 원문이 차지한 시간뿐**이라는 관계는 같습니다.
     """
     rules = rules_for(language)
-    cues = [Cue(start=i * 4.0, end=i * 4.0 + 3.0, text=t) for i, t in enumerate(texts)]
+    return [
+        max(rules.min_duration, text_width(normalize(text)) / rules.max_cps) for text in sources
+    ]
+
+
+def fits_rules(
+    texts: list[str], language: str, windows: list[float]
+) -> tuple[list[str], list[str]]:
+    """번역문을 원문이 쓰던 시간 안에 자막으로 넣어 봅니다. (보고, 문제) 순입니다.
+
+    시간을 원문에서 가져오는 것이 이 검사의 요점입니다. 번역문 자기 길이로
+    시간을 주면 아무리 길어져도 항상 들어가서 검사가 아무것도 못 잡습니다.
+    영어는 한국어보다 폭이 커지는데(이 표본에서 1.2~1.7배), 시간은 원본
+    음성이 정하므로 늘어난 글자를 같은 시간에 넣어야 합니다. 못 넣으면
+    화면에서 줄이 넘칩니다.
+    """
+    rules = rules_for(language)
+    cues: list[Cue] = []
+    cursor = 0.0
+    for text, window in zip(texts, windows, strict=False):
+        cues.append(Cue(start=cursor, end=cursor + window, text=text))
+        cursor += window + 1.0  # 붙은 자막을 겹침으로 세지 않도록 띄웁니다.
     shaped = apply_rules(cues, rules)
     report = [
         f"  {c.text.replace(chr(10), ' / ')}  (폭 {text_width(c.text.replace(chr(10), ' ')):.1f})"
@@ -117,7 +140,7 @@ def main() -> int:
     problems: list[str] = []
     if not args.allow_paid:
         print("유료 호출을 하지 않습니다(--allow-paid 없음). 참조 번역만 규칙에 넣어 봅니다.\n")
-        report, found = fits_rules(references, args.target)
+        report, found = fits_rules(references, args.target, spans(sources, args.source))
         print(f"참조 번역을 {args.target} 자막 규칙에 넣은 결과:")
         print("\n".join(report))
         problems += found
@@ -145,7 +168,7 @@ def main() -> int:
         if average < args.min_chrf:
             problems.append(f"평균 chrF {average:.2f}가 하한 {args.min_chrf:.2f}보다 낮습니다.")
 
-        report, found = fits_rules(candidates, args.target)
+        report, found = fits_rules(candidates, args.target, spans(sources, args.source))
         print(f"\n번역문을 {args.target} 자막 규칙에 넣은 결과:")
         print("\n".join(report))
         problems += found

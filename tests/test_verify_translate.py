@@ -41,12 +41,24 @@ def test_spacing_differences_barely_matter(verify) -> None:
 
 def test_english_subtitles_are_checked_against_the_english_rules(verify) -> None:
     """번역이 맞아도 자막으로 안 들어가면 화면에서는 깨집니다."""
-    report, problems = verify.fits_rules(["Department stores and cinemas are open."], "en")
+    source = "현재 백화점과 영화관 등은 오픈해 영업하고 있습니다"
+    report, problems = verify.fits_rules(
+        ["Department stores and cinemas are open."], "en", verify.spans([source], "ko")
+    )
     assert report and problems == []
 
 
-def test_a_line_that_cannot_be_shaped_is_reported(verify) -> None:
-    """시간이 모자라 규칙 안으로 못 넣는 자막은 보고합니다."""
-    long_text = "word " * 120
-    _, problems = verify.fits_rules([long_text], "en")
+def test_the_window_comes_from_the_source_not_the_translation(verify) -> None:
+    """번역문 길이로 시간을 주면 아무리 길어져도 들어가서 검사가 헛돕니다."""
+    source = "짧은 문장입니다"
+    short, long = verify.spans([source], "ko"), verify.spans([source * 8], "ko")
+    assert short < long
+
+
+def test_a_translation_that_outgrows_its_window_is_reported(verify) -> None:
+    """원문이 쓰던 시간에 못 들어가는 번역은 화면에서 줄이 넘칩니다."""
+    source = "짧은 문장입니다"
+    window = verify.spans([source], "ko")
+    assert window[0] < 2.0  # 한 자막 몫밖에 안 되는 시간입니다.
+    _, problems = verify.fits_rules(["This is a short sentence " * 6], "en", window)
     assert problems
