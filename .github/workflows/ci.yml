@@ -3,7 +3,11 @@ name: CI
 on:
   push:
     branches: ['**']
+  # labeled를 넣어야 verify-align 라벨이 실제로 검증을 켭니다. 기본값
+  # (opened·synchronize·reopened)만으로는 라벨을 붙여도 CI가 돌지 않아,
+  # 라벨을 켜려면 의미 없는 커밋을 하나 더 밀어야 했습니다.
   pull_request:
+    types: [opened, synchronize, reopened, labeled]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
