@@ -20,12 +20,13 @@
 대상의 원문에 없는 말입니다. 그래서 끼어든 말을 받아쓰면 CER이 올라갑니다.
 파일이 없으면 겹말은 **재지 않습니다.** 조용히 건너뛰고 통과시키지 않습니다.
 
-**같은 소리를 여러 번 받아씁니다.** 전사기는 같은 소리에도 매번 조금 다르게
-답합니다(실측: 씨앗을 고정한 잡음에서도 소음 5dB가 17.2% → 13.4%, 고정 파일인
-겹말 0dB가 116.4% → 98.5%). 한 번 잰 값으로 상한을 적으면 다음 실행이 우연히
-넘습니다. `--repeat N`은 조건마다 N번 받아써서 **가장 나쁜 값과 폭**을 남기고,
-`--seed-decoder`는 디코더 난수를 고정한 설정을 나란히 재서 그 폭이 정말
-난수에서 오는지 봅니다.
+**같은 코드가 실행마다 다른 값을 냅니다.** 씨앗을 고정한 잡음에서도 소음 5dB가
+13.4% ↔ 14.2%, 고정 파일인 겹말 0dB가 98.5% ↔ 116.4%였습니다. 그런데 **한 실행
+안에서는** 세 번 받아써도 글자 하나까지 같고(`--repeat 3`, 폭 0), 디코더 난수를
+고정해도(`--seed-decoder`) 차이 0입니다. 난수가 아닙니다. 남는 설명은 러너 CPU가
+실행마다 달라 CTranslate2의 int8 커널이 다른 경로를 탄다는 것입니다. 그래서
+첫 줄에 CPU 이름을 찍고, `--cpu-isa AVX2`로 명령어 집합을 고정해 봅니다
+(`CT2_FORCE_CPU_ISA`). 다른 CPU에서 같은 값이 나오면 맞는 설명입니다.
 """
 
 from __future__ import annotations
@@ -33,6 +34,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import platform
 import subprocess
 import sys
 import tempfile
@@ -84,6 +86,29 @@ def seed_decoder(seed: int = DECODER_SEED) -> None:
     import ctranslate2
 
     ctranslate2.set_random_seed(seed)
+
+
+def cpu_name() -> str:
+    """이 기계의 CPU. 실행 사이에 값이 다를 때 가장 먼저 견줄 것입니다."""
+    try:
+        for line in Path("/proc/cpuinfo").read_text(encoding="utf-8").splitlines():
+            if line.startswith("model name"):
+                return line.split(":", 1)[1].strip()
+    except OSError:
+        pass
+    return platform.processor() or "알 수 없음"
+
+
+def cpu_has(flag: str) -> bool:
+    """CPU 플래그(avx2, avx512f 등)가 있는지. 없으면 False로 둡니다."""
+    try:
+        text = Path("/proc/cpuinfo").read_text(encoding="utf-8")
+    except OSError:
+        return False
+    for line in text.splitlines():
+        if line.startswith("flags"):
+            return flag in line.split(":", 1)[1].split()
+    return False
 
 
 def worst(values: list[float]) -> float:
@@ -263,10 +288,20 @@ def main() -> int:
         action="store_true",
         help="디코더 난수를 고정한 설정을 나란히 재서 폭이 난수 탓인지 봅니다.",
     )
+    parser.add_argument(
+        "--cpu-isa",
+        choices=["GENERIC", "AVX", "AVX2", "AVX512"],
+        default=None,
+        help="CTranslate2가 쓸 명령어 집합을 고정합니다(CT2_FORCE_CPU_ISA). "
+        "러너 CPU가 달라도 같은 값이 나오는지 볼 때 씁니다.",
+    )
     # 조건마다 상한이 다릅니다(pipeline.noise.MEASURED_CER, 실측 + 10%p).
     # 이 값을 주면 모든 조건에 같은 상한을 씁니다.
     parser.add_argument("--max-cer", type=float, default=None, help="모든 조건에 쓸 CER 상한")
     args = parser.parse_args()
+    if args.cpu_isa:
+        # 첫 모델을 싣기 전에 있어야 합니다. CTranslate2는 처음 쓸 때 한 번 읽습니다.
+        os.environ["CT2_FORCE_CPU_ISA"] = args.cpu_isa
 
     directory = args.directory
     expected = json.loads((directory / "expected.json").read_text(encoding="utf-8"))
@@ -275,6 +310,9 @@ def main() -> int:
     interference = directory / "interference.wav"
     has_speech = interference.is_file()
 
+    isa = ", ".join(flag for flag in ("avx2", "avx512f") if cpu_has(flag)) or "avx 플래그 없음"
+    forced = f", 명령어 집합 고정 {args.cpu_isa}" if args.cpu_isa else ""
+    print(f"CPU {cpu_name()} ({isa}){forced}")
     print(f"모델 {args.model}, 음성 {sample} ({seconds_of(sample):.1f}초)")
     print(f"원문 {len(squeeze(reference))}자, 문장 {len(expected['sentences'])}개")
     if has_speech:

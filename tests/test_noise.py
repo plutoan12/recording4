@@ -126,7 +126,7 @@ def test_the_limits_come_from_a_real_measurement() -> None:
     """
     from pipeline.noise import HEADROOM, MEASURED_CER, limit_for
 
-    not_measured_yet = {"partial0"}
+    not_measured_yet: set[str] = set()
     for row in conditions(with_speech=True):
         if row.name in not_measured_yet:
             assert limit_for(row.name) is None, f"{row.name}은 잰 적 없는데 상한이 있습니다."
