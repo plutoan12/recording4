@@ -8,7 +8,7 @@ from run_sortformer_evaluation import sha256, write_private_json
 from score_local_speech_retry import normalize
 
 
-def select_core(text, left, right, core_start, core_end, start, end):
+def select_core_words(text, left, right, core_start, core_end, start, end):
     expected = normalize(text)
     if not number(start) or not number(end) or not start <= core_start < core_end <= end:
         raise ValueError("Invalid alignment interval")
@@ -24,6 +24,7 @@ def select_core(text, left, right, core_start, core_end, start, end):
             return None, "invalid_alignment_time"
     chars = [w for w in right for _ in normalize(w["text"])]
     result = []
+    disagreement = None
     cursor = 0
     for w in left:
         token = normalize(w["text"])
@@ -37,11 +38,23 @@ def select_core(text, left, right, core_start, core_end, start, end):
         overlap_right = max(core_start, a) < min(core_end, b)
         if overlap_left or overlap_right:
             if not (overlap_left and overlap_right):
-                return None, "core_membership_disagreement"
+                disagreement = disagreement or "core_membership_disagreement"
+                continue
             if abs(a - w["start"]) > 0.5 or abs(b - w["end"]) > 0.5:
-                return None, "alignment_disagreement"
-            result.append(w["text"])
-    return " ".join(result), "timing_consensus_only"
+                disagreement = disagreement or "alignment_disagreement"
+                continue
+            result.append(dict(w))
+    if result:
+        status = "partial_timing_consensus" if disagreement else "timing_consensus_only"
+        return result, status
+    if disagreement:
+        return None, disagreement
+    return [], "timing_consensus_only"
+
+
+def select_core(text, left, right, core_start, core_end, start, end):
+    words, status = select_core_words(text, left, right, core_start, core_end, start, end)
+    return (" ".join(word["text"] for word in words) if words is not None else None), status
 
 
 def main():
@@ -81,6 +94,7 @@ def main():
         text = row["hypothesis"]
         left = []
         right = []
+        selected_words = None
         selected = None
         status = "generation_truncated"
         if not row["generation_possibly_truncated"]:
@@ -121,8 +135,13 @@ def main():
                         for w in aligned["word_segments"]
                         if "start" in w and "end" in w
                     ]
-                    selected, status = select_core(
+                    selected_words, status = select_core_words(
                         text, left, right, item["core_start"], item["core_end"], start, end
+                    )
+                    selected = (
+                        " ".join(word["text"] for word in selected_words)
+                        if selected_words is not None
+                        else None
                     )
                 except (ValueError, RuntimeError):
                     status = "alignment_failed"
@@ -134,7 +153,14 @@ def main():
             result.pop(key, None)
         output.append(result)
         audit.append(
-            dict(id=item["id"], status=status, fallback=selected is None, left=left, right=right)
+            dict(
+                id=item["id"],
+                status=status,
+                fallback=selected is None,
+                selected=selected_words if selected is not None and normalize(text) else [],
+                left=left,
+                right=right,
+            )
         )
         print(item["id"], status, flush=True)
     if any(sha256(getattr(args, k)) != v for k, v in fingerprints.items()):

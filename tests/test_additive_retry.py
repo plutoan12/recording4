@@ -35,6 +35,26 @@ def test_failed_alignment_never_proposes_words():
     )
 
 
+def test_partial_consensus_can_propose_only_the_preserved_words():
+    items = [dict(id="x", target="a", core_start=1, core_end=2)]
+    aligned = dict(
+        rows=[dict(id="x", hypothesis="keep")],
+        audit=[
+            dict(
+                id="x",
+                status="partial_timing_consensus",
+                fallback=False,
+                selected=[dict(start=1.1, end=1.5, text="keep")],
+                left=[
+                    dict(start=1.1, end=1.5, text="keep"),
+                    dict(start=1.5, end=2.5, text="excluded"),
+                ],
+            )
+        ],
+    )
+    assert proposals([], items, aligned)[0]["words"] == [dict(start=1.1, end=1.5, text="keep")]
+
+
 def test_additions_never_edit_or_reorder_baseline_and_collision_fails():
     import pytest
     from verify_additive_voice import append_preserving_baseline

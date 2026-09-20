@@ -22,12 +22,16 @@ def proposals(baseline, items, aligned):
     rows = {x["id"]: x for x in aligned["rows"]}
     candidates = []
     for audit in aligned["audit"]:
-        if audit["status"] != "timing_consensus_only" or audit["fallback"]:
+        if (
+            audit["status"] not in {"timing_consensus_only", "partial_timing_consensus"}
+            or audit["fallback"]
+        ):
             continue
         item = by_id[audit["id"]]
+        selected = audit["selected"] if "selected" in audit else audit["left"]
         words = [
             dict(w)
-            for w in audit["left"]
+            for w in selected
             if normalize(w["text"])
             and max(w["start"], item["core_start"]) < min(w["end"], item["core_end"])
         ]

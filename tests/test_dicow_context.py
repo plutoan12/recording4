@@ -18,13 +18,22 @@ def test_context_not_reinserted_and_split_tokens_match():
     )
 
 
-def test_core_disagreement_or_incomplete_text_rejects_whole_row():
+def test_only_disputed_core_word_rejects_when_nothing_else_agrees():
     assert select_core("hi", [w(0, 1, "hi")], [w(1, 2, "hi")], 0, 1, 0, 3)[0] is None
     assert select_core("hi", [w(0, 1, "hi")], [], 0, 1, 0, 3)[0] is None
 
 
 def test_timing_disagreement_is_not_hidden_by_same_text():
     assert select_core("hi", [w(0, 1, "hi")], [w(0.6, 1.6, "hi")], 0, 2, 0, 3)[0] is None
+
+
+def test_disputed_boundary_word_does_not_discard_independent_consensus():
+    left = [w(0, 1, "context"), w(1, 1.4, "keep"), w(1.4, 2.4, "edge")]
+    right = [w(0, 1, "context"), w(1.05, 1.45, "keep"), w(2.1, 2.4, "edge")]
+    assert select_core("context keep edge", left, right, 1, 2, 0, 3) == (
+        "keep",
+        "partial_timing_consensus",
+    )
 
 
 def test_expansion_preserves_cores_and_source_items():

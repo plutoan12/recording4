@@ -3,6 +3,7 @@
 import argparse
 import copy
 import math
+import os
 from pathlib import Path
 
 from prepare_additive_retry import overlaps
@@ -72,6 +73,8 @@ def anchor_availability(turns, duration, start, end):
 
 
 def main():
+    os.environ["HF_HUB_OFFLINE"] = "1"
+    os.environ["TRANSFORMERS_OFFLINE"] = "1"
     import numpy as np
     import soundfile as sf
     import torch

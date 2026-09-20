@@ -64,6 +64,17 @@
     "ctc_weight": 0.0,
     "dtype": "float32"
   },
+  "partial_alignment_retry": {
+    "partial_consensus_rows": 1,
+    "candidate_groups": 1,
+    "proposed_words": 2,
+    "voice_similarity": 0.19265052676200867,
+    "voice_threshold": 0.6,
+    "competing_anchor_available": false,
+    "independent_asr_agreed": false,
+    "accepted_words": 0,
+    "selection_uses_reference": false
+  },
   "posthoc_human_reference": {
     "gaps": 3,
     "overlap_words": 4,
