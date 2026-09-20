@@ -55,6 +55,27 @@
     "independent_asr_agreed": false,
     "accepted_words": 0
   },
+  "posthoc_reference_diagnostic": {
+    "source": "diarizers-community/ami official speaker timestamps",
+    "candidate_overlaps_reference_speech": false,
+    "candidate_start": 47.46,
+    "candidate_end": 48.34,
+    "previous_reference_speech_end": 30.24,
+    "next_reference_speech_start": 50.13,
+    "used_for_selection_or_thresholds": false
+  },
+  "whisper_confidence_diagnostic": {
+    "reference_speech_intervals": 16,
+    "reference_speech_intervals_with_words": 13,
+    "reference_nonspeech_intervals": 10,
+    "reference_nonspeech_intervals_with_context_words": 9,
+    "false_candidate_no_speech_probability": 0.39192941784858704,
+    "false_candidate_average_log_probability": -0.9869833929198129,
+    "quiet_true_speech_no_speech_probability": 0.44550958275794983,
+    "quiet_true_speech_average_log_probability": -1.0167627533276875,
+    "confidence_gate_adopted": false,
+    "locally_amplified_silero_veto_adopted": false
+  },
   "evaluation_output_changed": false,
   "deployment_allowed": false,
   "four_language_improvement_proven": false
