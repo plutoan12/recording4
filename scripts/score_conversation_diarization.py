@@ -75,7 +75,16 @@ def score(manifest, root, lock, predictions):
         details = score_segments(
             reference, row["turns"], case["evaluation_start"], case["evaluation_end"]
         )
-        rows.append(dict(id=name, language=case["language"], status=status, **details))
+        rows.append(
+            dict(
+                id=name,
+                language=case["language"],
+                status=status,
+                evaluation_start=case["evaluation_start"],
+                evaluation_end=case["evaluation_end"],
+                **details,
+            )
+        )
 
     def aggregate(group):
         totals = {key: sum(row[key] for row in group) for key in COMPONENTS}

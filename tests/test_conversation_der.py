@@ -133,3 +133,43 @@ def test_cli_scores_and_does_not_replace_previous_result(corpus):  # noqa: F811
     assert result.returncode == 1
     assert "Traceback" not in result.stderr
     assert output.read_bytes() == original
+
+
+def test_two_speakers_merged_by_model_produce_confusion():
+    result = module.score_segments([turn(0, 2, "a"), turn(2, 4, "b")], [turn(0, 4, "x")], 0, 4)
+    assert result["confusion"] == 2
+    assert result["missed detection"] == result["false alarm"] == 0
+    assert result["diarization error rate"] == 0.5
+
+
+@pytest.mark.parametrize("change", ["cohort", "audio", "duplicate", "schema", "status", "partial"])
+def test_prediction_gate_rejects_mismatched_evidence(corpus, change):  # noqa: F811
+    import copy
+
+    from prepare_conversation_evaluation import prepare
+
+    root, manifest = corpus
+    lock = prepare(manifest, root)
+    predictions = dict(
+        schema=1,
+        cohort_sha256=module.fingerprint(lock),
+        model_revision="fixture-v1",
+        cases=[
+            dict(id=case["id"], audio_sha256=case["audio_sha256"], status="failed", turns=[])
+            for case in manifest["cases"]
+        ],
+    )
+    if change == "cohort":
+        predictions["cohort_sha256"] = "0" * 64
+    elif change == "audio":
+        predictions["cases"][0]["audio_sha256"] = "0" * 64
+    elif change == "duplicate":
+        predictions["cases"].append(copy.deepcopy(predictions["cases"][0]))
+    elif change == "schema":
+        predictions["schema"] = True
+    elif change == "status":
+        predictions["cases"][0]["status"] = "pending"
+    else:
+        predictions["cases"][0]["turns"] = [turn(0, 1, "x")]
+    with pytest.raises(ValueError):
+        module.score(manifest, root, lock, predictions)

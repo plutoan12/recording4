@@ -88,7 +88,7 @@ python scripts/compare_conversation_evaluation.py \
 
 `scripts/score_conversation_diarization.py`가 저장된 예측 화자 구간과 사람 정답을 [pyannote.metrics](https://pyannote.github.io/pyannote-metrics/reference.html#diarization)로 채점합니다. 새 모델 추론은 하지 않습니다. collar 0·겹말 포함, manifest 전체 구간의 명시적 UEM을 사용합니다. 다른 화자 이름은 최적 대응으로 비교하며 같은 화자의 중복 트랙은 합칩니다. 구간 밖/잘못된 시각을 잘라 숨기지 않고 거부합니다.
 
-평가 전용 별도 Python 3.12 환경에서 `pip install -r scripts/requirements-der-evaluation.txt`로 검증한 라이브러리 버전을 설치합니다. 운영/개발 환경과 NumPy 버전이 다르므로 같은 환경에 덮어 설치하지 않습니다. CI의 **DER 채점 검증** 작업도 별도 환경에서 10개 테스트를 실행합니다. 토큰·모델 다운로드·유료 API 없이 수행합니다.
+평가 전용 별도 Python 3.12 환경에서 `pip install -r scripts/requirements-der-evaluation.txt`로 검증한 라이브러리 버전을 설치합니다. 운영/개발 환경과 NumPy 버전이 다르므로 같은 환경에 덮어 설치하지 않습니다. CI의 **DER 채점 검증** 작업도 별도 환경에서 17개 테스트를 실행합니다. 토큰·모델 다운로드·유료 API 없이 수행합니다.
 
 ```bash
 python scripts/score_conversation_diarization.py \
@@ -103,3 +103,5 @@ python scripts/score_conversation_diarization.py \
 DER 결과는 전체·언어별 missed detection/false alarm/confusion/total 초와 시간 가중 DER, 조건별 수치, 평가 버전, 입력 지문을 기록합니다. 원문 대사와 화자 이름은 출력하지 않습니다. 기존 다른 결과는 덮어쓰지 않습니다. 정상 채점 종료 0, 실패/거부 포함 2, 무효 입력/출력/의존성 부재 1이며 배포 승인은 항상 false입니다.
 
 테스트 fixture에서 정답 화자 이름 변경은 DER 0, 겹말 누락 2초+무음 오검출 1초/정답 발화 4초는 DER 0.75, 예측 없음은 누락률 1.0을 확인했습니다. 이는 채점기 검증으로 실제 영상 품질 개선 실측이 아닙니다. 실제 네 언어 자료/모델 결과 연결은 남아 있습니다. DER을 기존 문자 화자 배정 정답/오배정 수치로 바꾸어 쓰지 않습니다. CER과 문자 화자 독립 채점도 별도 후속 과제입니다.
+
+추가 검토: 모델이 두 화자를 하나로 합친 경우 혼동 2초/정답 4초=DER 0.5를 검증했습니다. 예측은 고정 평가 구간 기준으로 준비해야 하며 구간을 가로지르는 예측도 scorer에서 임의 자르지 않습니다. 사람이 정한 window와 입력을 다시 준비해 새 지문으로 평가합니다. model_revision은 비공개 예측 파일 안에 있고 predictions_sha256이 이를 포함해 고정합니다. 결과에는 조건별 평가 시작/끝을 명시합니다. 원본 모델 식별 정보가 필요하면 일치하는 비공개 예측 파일을 확인합니다.
