@@ -295,6 +295,93 @@ def test_partial_alignment_cannot_match_inside_another_word():
     assert [w["speaker"] for w in result["words"]] == [None, "A"]
 
 
+@pytest.mark.parametrize(
+    ("text", "tokens"),
+    [
+        ("今天 天气 很好", ["今", "天", "天气", "很", "好"]),
+        ("今日は 天気が いい", ["今日", "は", "天気", "が", "いい"]),
+        ("오늘은 날씨가 좋아", ["오늘", "은", "날씨", "가", "좋아"]),
+        ("AI기술 발전", ["AI", "기술", "발전"]),
+    ],
+)
+def test_cjk_subwords_can_cross_caption_whitespace_groups(text, tokens):
+    from pipeline.alignment import WordTiming, squeeze
+    from pipeline.speakers import review_speakers
+
+    cue = Cue(start=0, end=len(tokens), text=text)
+    words = [WordTiming(index, index + 1, token) for index, token in enumerate(tokens)]
+    result = review_speakers([cue], [SpeakerTurn(0, len(tokens), "A")], [words], stage=2)[0]
+    assert squeeze("".join(word["text"] for word in result["words"])) == squeeze(text)
+    assert all(word["speaker"] == "A" for word in result["words"])
+    assert not result["needs_review"]
+
+
+@pytest.mark.parametrize(("text", "token"), [("well-known thing", "well"), ("3.14 meters", "3")])
+def test_latin_punctuation_does_not_create_partial_word_boundary(text, token):
+    from pipeline.alignment import WordTiming
+    from pipeline.speakers import review_speakers
+
+    cue = Cue(start=0, end=1, text=text)
+    result = review_speakers([cue], [SpeakerTurn(0, 1, "A")], [[WordTiming(0, 1, token)]], stage=2)[
+        0
+    ]
+    assert not result["alignment_available"]
+    assert result["words"] == []
+
+
+def test_repeated_cjk_token_without_unique_text_position_stays_unresolved():
+    from pipeline.alignment import WordTiming
+    from pipeline.speakers import review_speakers
+
+    cue = Cue(start=0, end=4, text="사과 와사")
+    turns = [SpeakerTurn(0, 3, "A"), SpeakerTurn(3, 4, "B")]
+    result = review_speakers([cue], turns, [[WordTiming(3, 4, "사")]], stage=2)[0]
+    assert not result["alignment_available"]
+    assert result["words"] == []
+
+
+def test_wrong_latin_fragment_next_to_hangul_is_not_a_boundary():
+    from pipeline.alignment import WordTiming
+    from pipeline.speakers import review_speakers
+
+    cue = Cue(start=0, end=1, text="BETA기술")
+    result = review_speakers([cue], [SpeakerTurn(0, 1, "A")], [[WordTiming(0, 1, "TA")]], stage=2)[
+        0
+    ]
+    assert not result["alignment_available"]
+
+
+def test_spaceless_non_cjk_script_keeps_sequential_alignment():
+    from pipeline.alignment import WordTiming, squeeze
+    from pipeline.speakers import review_speakers
+
+    cue = Cue(start=0, end=2, text="ไปไหน")
+    words = [WordTiming(0, 1, "ไป"), WordTiming(1, 2, "ไหน")]
+    result = review_speakers([cue], [SpeakerTurn(0, 2, "A")], [words], stage=2)[0]
+    assert squeeze("".join(word["text"] for word in result["words"])) == squeeze(cue.text)
+    assert [word["speaker"] for word in result["words"]] == ["A", "A"]
+
+
+def test_single_latin_word_keeps_legacy_partial_alignment_behavior():
+    from pipeline.alignment import WordTiming
+    from pipeline.speakers import review_speakers
+
+    cue = Cue(start=0, end=1, text="someone")
+    result = review_speakers([cue], [SpeakerTurn(0, 1, "A")], [[WordTiming(0, 1, "one")]], stage=2)[
+        0
+    ]
+    assert result["alignment_available"]
+    assert result["words"][-1]["text"] == "one"
+    assert result["words"][-1]["speaker"] == "A"
+
+
+def test_pathological_cjk_paragraph_stays_for_review_without_dynamic_search():
+    from pipeline.speakers import _matching_starts
+
+    text = "".join(chr(0x4E00 + index) for index in range(201))
+    assert _matching_starts(text, list(text), {0, len(text)}, True) == [None] * len(text)
+
+
 def test_word_coverage_experiment_preserves_default_and_denominator():
     from pipeline.alignment import WordTiming
     from pipeline.speakers import review_speakers

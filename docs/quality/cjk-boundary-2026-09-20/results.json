@@ -1,0 +1,52 @@
+{
+  "schema": 1,
+  "input_sha256": "ccc656a834bba67ab715bbe11a07a9059d529f3c1aec691d485ea6e80382e600",
+  "alignment_sha256": "1c8e7c4c4acce8a7a25f49417689127d98d8504108671fe840b288a132e796dd",
+  "matcher_source_sha256": "3b2cdb24595959dbf4d4a1aa4cbddf43672f302b23d6cd9fbd32d521bb197bb0",
+  "comparison_sha256": "d63c826d9157a33a10709648b19e361a0feb00a9cd3ad2643d28b56ccc219843",
+  "remeasured_after_matcher_rewrite": true,
+  "matching_cell_limit": 40000,
+  "aligner": {
+    "stable_ts": "2.19.1",
+    "model": "Systran/faster-whisper-small",
+    "device": "cpu",
+    "compute_type": "int8"
+  },
+  "languages": {
+    "zh": {
+      "rows": 4,
+      "total_characters": 110,
+      "baseline_timed_characters": 2,
+      "candidate_timed_characters": 99,
+      "candidate_correct_characters": 89,
+      "candidate_multiple_speaker_characters": 10,
+      "candidate_unresolved_characters": 11,
+      "candidate_incorrect_characters": 0
+    },
+    "ja": {
+      "rows": 4,
+      "total_characters": 110,
+      "baseline_timed_characters": 2,
+      "candidate_timed_characters": 105,
+      "candidate_correct_characters": 105,
+      "candidate_multiple_speaker_characters": 0,
+      "candidate_unresolved_characters": 5,
+      "candidate_incorrect_characters": 0
+    },
+    "ko": {
+      "rows": 4,
+      "total_characters": 67,
+      "baseline_timed_characters": 63,
+      "candidate_timed_characters": 63
+    },
+    "en": {
+      "rows": 4,
+      "total_characters": 107,
+      "baseline_timed_characters": 100,
+      "candidate_timed_characters": 100
+    }
+  },
+  "speaker_model_changed": false,
+  "full_four_language_accuracy_proven": false,
+  "deployment_allowed": false
+}

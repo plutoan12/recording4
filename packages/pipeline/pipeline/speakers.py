@@ -7,6 +7,8 @@
 from __future__ import annotations
 
 import math
+import unicodedata
+from bisect import bisect_left
 from dataclasses import dataclass
 
 from pipeline.editing import Cue
@@ -161,6 +163,102 @@ def turns_from_labels(
 
 
 MULTIPLE_SPEAKERS = "복수 화자"
+_MAX_MATCHING_CELLS = 40_000
+
+
+def _is_cjk_character(character: str) -> bool:
+    name = unicodedata.name(character, "")
+    return name.startswith(("CJK ", "HANGUL ")) or "HIRAGANA" in name or "KATAKANA" in name
+
+
+def _is_text_boundary(text: str, index: int, whitespace_boundaries: set[int]) -> bool:
+    """Keep Latin words whole while allowing timed CJK subwords.
+
+    Aligners commonly return individual Han, kana, or Hangul pieces even when a
+    caption author inserted spaces at phrase boundaries. Inside one Latin/digit
+    word, including punctuation such as a hyphen or decimal point, only an
+    original whitespace edge is accepted.
+    """
+    if index in whitespace_boundaries or index <= 0 or index >= len(text):
+        return True
+    left, right = text[index - 1], text[index]
+    return _is_cjk_character(left) or _is_cjk_character(right)
+
+
+def _matching_starts(
+    text: str, tokens: list[str], whitespace_boundaries: set[int], enforce_boundaries: bool
+) -> list[int | None]:
+    """Find positions fixed across every maximum-character monotonic alignment."""
+
+    # Imported captions can contain an unsegmented paragraph. The dynamic
+    # matcher is deliberately conservative, so a pathological cue remains for
+    # review instead of spending unbounded time or falling back to a guess.
+    if len(text) * len(tokens) > _MAX_MATCHING_CELLS:
+        return [None] * len(tokens)
+
+    positions_by_token: dict[str, list[int]] = {}
+    for token in set(tokens):
+        positions = []
+        if not token:
+            positions_by_token[token] = positions
+            continue
+        begin = text.find(token)
+        while begin >= 0:
+            end = begin + len(token)
+            if not enforce_boundaries or (
+                _is_text_boundary(text, begin, whitespace_boundaries)
+                and _is_text_boundary(text, end, whitespace_boundaries)
+            ):
+                positions.append(begin)
+            begin = text.find(token, begin + 1)
+        positions_by_token[token] = positions
+
+    def occurrences(token: str, cursor: int):
+        positions = positions_by_token[token]
+        return positions[bisect_left(positions, cursor) :]
+
+    # Keep the best prefix score for every reachable text cursor. Skipping a
+    # token preserves the denominator while a match earns its character count.
+    forward: list[dict[int, int]] = [{0: 0}]
+    for token in tokens:
+        next_scores: dict[int, int] = {}
+        for cursor, score in forward[-1].items():
+            next_scores[cursor] = max(next_scores.get(cursor, -1), score)
+            for begin in occurrences(token, cursor):
+                end = begin + len(token)
+                next_scores[end] = max(next_scores.get(end, -1), score + len(token))
+        forward.append(next_scores)
+
+    suffix: list[dict[int, int]] = [{} for _ in range(len(tokens) + 1)]
+    suffix[-1] = {cursor: 0 for cursor in forward[-1]}
+    for index in range(len(tokens) - 1, -1, -1):
+        token = tokens[index]
+        for cursor in forward[index]:
+            choices = [suffix[index + 1][cursor]]
+            for begin in occurrences(token, cursor):
+                end = begin + len(token)
+                if end in suffix[index + 1]:
+                    choices.append(len(token) + suffix[index + 1][end])
+            suffix[index][cursor] = max(choices)
+
+    optimum = suffix[0][0]
+    starts: list[int | None] = []
+    for index, token in enumerate(tokens):
+        possible: set[int | None] = set()
+        for cursor, prefix_score in forward[index].items():
+            if prefix_score + suffix[index][cursor] != optimum:
+                continue
+            if prefix_score + suffix[index + 1][cursor] == optimum:
+                possible.add(None)
+            for begin in occurrences(token, cursor):
+                end = begin + len(token)
+                if (
+                    end in suffix[index + 1]
+                    and prefix_score + len(token) + suffix[index + 1][end] == optimum
+                ):
+                    possible.add(begin)
+        starts.append(next(iter(possible)) if len(possible) == 1 and None not in possible else None)
+    return starts
 
 
 def review_speakers(cues, turns, words_by_cue, *, stage=2, minimum_word_coverage=0.0):
@@ -193,24 +291,22 @@ def review_speakers(cues, turns, words_by_cue, *, stage=2, minimum_word_coverage
         # output so callers cannot accidentally count a smaller denominator.
         text = squeeze(cue.text)
         cursor = 0
-        # In whitespace-delimited text do not match "one" inside "someone".
+        # Keep Latin words whole while allowing CJK aligners to return smaller
+        # pieces than the spaces chosen by the caption author.
         boundaries = {0}
         edge = 0
         for token_text in cue.text.split():
             edge += len(squeeze(token_text))
             boundaries.add(edge)
+        enforce_boundaries = len(cue.text.split()) > 1 or any(
+            _is_cjk_character(character) for character in text
+        )
+        tokens = [squeeze(word.text) for word in words]
+        starts = _matching_starts(text, tokens, boundaries, enforce_boundaries)
         assignments = []
         previous_end = cue.start
-        for word in words:
-            token = squeeze(word.text)
-            if not token:
-                continue
-            begin = text.find(token, cursor)
-            if begin < 0 or (begin != cursor and text.find(token, begin + 1) >= 0):
-                continue
-            if len(cue.text.split()) > 1 and (
-                begin not in boundaries or begin + len(token) not in boundaries
-            ):
+        for word, token, begin in zip(words, tokens, starts, strict=True):
+            if not token or begin is None:
                 continue
             if begin > cursor:
                 assignments.append(
