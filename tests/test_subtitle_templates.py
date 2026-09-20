@@ -135,7 +135,9 @@ def test_font_manifest_is_consistent():
     assert len(set(families)) == len(families)
     for source in FONT_SOURCES:
         assert source.url.startswith("https://raw.githubusercontent.com/")
-        assert len(source.sha256) == 64 and source.license == "OFL-1.1"
+        assert len(source.sha256) == 64 and source.license
+        # Google Fonts에서 받는 것은 모두 OFL입니다. 회사 글꼴은 자체 라이선스입니다.
+        assert source.license == "OFL-1.1" or not source.google
         assert source.family in FONT_FAMILIES
     assert "Noto Sans CJK KR" in FONT_FAMILIES
     # 화면 미리보기는 Google Fonts 이름을 씁니다. 파일 이름과 다른 것만 바꿉니다.

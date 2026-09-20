@@ -48,17 +48,17 @@ python -m pipeline.subtitle_tool --help   # 같은 도구
 
 템플릿은 **영상에 굽는 자막의 모양**입니다. 어떤 자막을 언제 보일지(줄바꿈·분할·구간)는 표시 규칙이 정하고, SRT·VTT 파일에는 모양이 들어가지 않습니다.
 
-내장 템플릿은 카테고리별로 54종입니다. 인스타그램 브이로그 편집자들이 파는 "자막 템플릿 팩"의 흔한 모양(파스텔 상자, 네온 글로우, 픽셀, 통통한 외곽선, 손글씨, 영화 자막, 레트로)을 libass가 그릴 수 있는 값으로 옮긴 것입니다. 전체 목록은 `r4-subtitles templates list`, 실제 렌더 모양은 `r4-subtitles sheet`로 봅니다.
+내장 템플릿은 카테고리별로 64종입니다. 인스타그램 브이로그 편집자들이 파는 "자막 템플릿 팩"의 흔한 모양(파스텔 상자, 네온 글로우, 픽셀, 통통한 외곽선, 손글씨, 영화 자막, 레트로)을 libass가 그릴 수 있는 값으로 옮긴 것입니다. 전체 목록은 `r4-subtitles templates list`, 실제 렌더 모양은 `r4-subtitles sheet`로 봅니다.
 
 | 카테고리 | 이름 | 모양 |
 |---|---|---|
 | 기본 | `default` | 흰 글자에 검은 외곽선. 템플릿 도입 전 렌더와 같은 값이라 기존 편집본의 모양이 바뀌지 않습니다 |
-| 기본 | `shorts-bold`, `yellow`, `top`, `minimal`, `clean-white` | 굵은 강조, 예능 노랑, 상단 배치, 얇은 외곽선, 선플라워 깔끔 |
-| 브이로그 제목 | `vlog-lime`, `vlog-pink`, `fire-red`, `spring-glow`, `title-sticker`, `pink-sticker`, `solid-shadow` | Black Han Sans·Gasoek One 굵은 제목, 스티커 이중 외곽선, 입체 그림자, 봄 느낌 글로우 |
-| 귀여운 외곽선 | `bubble-white`, `bubble-sky`, `bubble-pink`, `round-white`, `mint-pastel`, `playful-tilt`, `lilac-sticker`, `cute-lemon`, `tilt-sticker` | Bagel Fat One·Dongle·Yeon Sung·Kirang Haerang 통통 글자에 스티커 외곽선, 살짝 기울임, ★☆♡ 장식 |
+| 기본 | `shorts-bold`, `yellow`, `top`, `minimal`, `clean-white`, `gmarket-yellow`, `pretendard-clean` | 굵은 강조, 예능 노랑, 상단 배치, 얇은 외곽선, 선플라워·지마켓·프리텐다드 |
+| 브이로그 제목 | `vlog-lime`, `vlog-pink`, `fire-red`, `spring-glow`, `title-sticker`, `pink-sticker`, `solid-shadow`, `jalnan-sticker`, `jalnan-yellow`, `ssurround-lime` | Black Han Sans·Gasoek One·잘난체·써라운드 굵은 제목, 스티커 이중 외곽선, 입체 그림자, 봄 느낌 글로우 |
+| 귀여운 외곽선 | `bubble-white`, `bubble-sky`, `bubble-pink`, `round-white`, `mint-pastel`, `playful-tilt`, `lilac-sticker`, `cute-lemon`, `tilt-sticker`, `jalnan-pink-sticker`, `ssurround-sky-sticker`, `ssurround-peach`, `simplehae-lilac` | Bagel Fat One·Dongle·Yeon Sung·잘난체·카페24 써라운드·심플해 통통 글자에 스티커 외곽선, 살짝 기울임, ★☆♡ 장식 |
 | 네온·글로우 | `neon-pink`, `neon-blue`, `neon-purple`, `lavender-glow`, `cyber-cyan` | 밝은 글자 주변에 색이 번지는 네온사인, 오르빗 사이버 |
 | 픽셀 | `pixel-heart`, `pixel-mint`, `pixel-box` | Galmuri 도트 글꼴, 하트 장식, 연노랑 상자 |
-| 상자·카드 | `box`, `pink-cabinet`, `note-yellow`, `note-pink`, `note-blue`, `tmi-blue`, `white-card`, `black-tag`, `cyan-strip`, `news-bar` | 파스텔 상자·테두리 카드·검은 태그·빨간 뉴스 바. 소제목, 짧은 한마디, 제품 정보에 |
+| 상자·카드 | `box`, `pink-cabinet`, `note-yellow`, `note-pink`, `note-blue`, `tmi-blue`, `white-card`, `black-tag`, `cyan-strip`, `news-bar`, `wanted-mint-card` | 파스텔 상자·테두리 카드·검은 태그·빨간 뉴스 바·민트 카드. 소제목, 짧은 한마디, 제품 정보에 |
 | 손글씨 | `pen-white`, `melody-pink`, `gamja-yellow`, `brush-white`, `brush-shadow`, `diary`, `brush-red` | 나눔손글씨 펜·붓, 하이멜로디, 감자꽃, 서툰이야기, 독도 붓글씨 |
 | 레트로·세리프 | `movie-serif`, `luxury-serif`, `retro-orange`, `retro-blue-pixel`, `songmyung-cream`, `elegant-serif`, `grandiflora-pink` | 고운바탕 영화 자막, 모이라이 레트로, 송명·디필레이아·그랜디플로라 세리프, 파란 도트 |
 
@@ -102,24 +102,29 @@ r4-subtitles burn source.mp4 captions.srt result.mp4 --template mine.json
 
 ## 글꼴
 
-템플릿이 쓰는 글꼴은 모두 SIL Open Font License 1.1이라 영상에 구워 배포해도 됩니다. 목록·출처(커밋 해시 고정)·SHA-256·라이선스 링크는 `packages/pipeline/pipeline/subtitle_fonts.py`에 있고, 파일은 저장소에 넣지 않습니다.
+템플릿이 쓰는 글꼴 35종은 모두 무료로 상업 사용과 영상 삽입이 허용됩니다. 대부분 SIL Open Font License 1.1이고, 잘난체·카페24·지마켓 산스는 각 회사의 자체 라이선스(무료, 수정·판매 금지)입니다. 목록·출처(커밋 해시 고정)·SHA-256·라이선스 링크는 `packages/pipeline/pipeline/subtitle_fonts.py`에 있고, 파일은 저장소에 넣지 않습니다.
 
-| 글꼴(ASS 이름) | 출처 | 쓰는 템플릿 |
-|---|---|---|
-| Noto Sans CJK KR | 워커 이미지 `fonts-noto-cjk` 패키지 | 기본 5종 |
-| Jua, Black Han Sans, Bagel Fat One, Gaegu, Do Hyeon, Gowun Batang, Nanum Pen, Gugi, Moirai One, Dongle, Single Day, Hi Melody, Gamja Flower, East Sea Dokdo, Gasoek One, Kirang Haerang, Yeon Sung, Sunflower, Cute Font, Nanum Brush Script, Song Myung, Orbit, Diphylleia, Dokdo, Gothic A1, Poor Story, Grandiflora One | Google Fonts 저장소(`google/fonts` 커밋 고정) | 브이로그·귀여운·네온·상자·손글씨·레트로 |
-| Galmuri11 Regular, Galmuri9 Regular | `quiple/galmuri` 커밋 고정 | 픽셀 |
+| 글꼴(ASS 이름) | 라이선스 | 출처 | 쓰는 템플릿 |
+|---|---|---|---|
+| Noto Sans CJK KR | OFL | 워커 이미지 `fonts-noto-cjk` 패키지 | 기본 |
+| Jua, Black Han Sans, Bagel Fat One, Gaegu, Do Hyeon, Gowun Batang, Nanum Pen, Gugi, Moirai One, Dongle, Single Day, Hi Melody, Gamja Flower, East Sea Dokdo, Gasoek One, Kirang Haerang, Yeon Sung, Sunflower, Cute Font, Nanum Brush Script, Song Myung, Orbit, Diphylleia, Dokdo, Gothic A1, Poor Story, Grandiflora One | OFL | Google Fonts 저장소(`google/fonts` 커밋 고정) | 브이로그·귀여운·네온·상자·손글씨·레트로 |
+| Galmuri11 Regular, Galmuri9 Regular | OFL | `quiple/galmuri` 커밋 고정 | 픽셀 |
+| JalnanOTF00(여기어때 잘난체) | 잘난체 라이선스 | 눈누 `projectnoonnu/noonfonts_four` 커밋 고정 WOFF → OTF 변환 | 잘난체 스티커·노랑·핑크, 네온 퍼플 |
+| Cafe24 Ssurround, Cafe24 Simplehae | 카페24 서체 라이선스 | 눈누 `noonfonts_2105_2`·`noonfonts_twelve` WOFF → TTF 변환 | 써라운드 라임·하늘·피치, 심플해, 민트 파스텔, 핑크 캐비닛, 하늘 띠 |
+| GmarketSansBold | 지마켓 산스 라이선스 | 눈누 `noonfonts_2001` WOFF → OTF 변환 | 지마켓 노랑, 흰 카드 |
+| Pretendard(Black), Wanted Sans(Black) | OFL | `orioncactus/pretendard`, `wanteddev/wanted-sans` 커밋 고정 | 프리텐다드 깔끔, 원티드 민트 카드 |
 
-Nanum Pen Script와 Galmuri는 파일 안의 family 이름이 Google Fonts 이름과 달라(`Nanum Pen`, `Galmuri11 Regular`) 템플릿은 파일 이름을 씁니다. libass는 이름이 다르면 오류 없이 다른 글꼴로 바꿔 그리므로, 내려받기 스크립트가 `fc-scan`으로 이름을 확인하고 `r4-subtitles templates check`가 설치된 컴퓨터에서 다시 확인합니다.
+Nanum Pen Script와 Galmuri는 파일 안의 family 이름이 Google Fonts 이름과 달라(`Nanum Pen`, `Galmuri11 Regular`) 템플릿은 파일 이름을 씁니다. 잘난체·지마켓 산스도 파일 이름이 `JalnanOTF00`, `GmarketSansBold`입니다. libass는 이름이 다르면 오류 없이 다른 글꼴로 바꿔 그리므로, 내려받기 스크립트가 `fc-scan`으로 이름을 확인하고 `r4-subtitles templates check`가 설치된 컴퓨터에서 다시 확인합니다.
 
-- 워커 이미지: `infra/Dockerfile.worker`가 `scripts/fetch_fonts.py`로 `/usr/share/fonts/truetype/r4`에 설치합니다. 이미지를 다시 빌드해야 합니다.
-- 로컬: `python scripts/fetch_fonts.py --out .fonts` 후 `--fonts-dir .fonts` 또는 `R4_FONTS_DIR=.fonts`. 워커를 로컬에서 직접 돌릴 때도 `R4_FONTS_DIR`을 읽어 FFmpeg에 넘깁니다.
+- 워커 이미지: `infra/Dockerfile.worker`가 `scripts/fetch_fonts.py`로 `/usr/share/fonts/truetype/r4`에 설치합니다. WOFF 출처는 fontTools(`[fonts]` 추가 의존성)로 TTF/OTF로 바꿉니다. 이미지를 다시 빌드해야 합니다.
+- 로컬: `pip install -e ".[fonts]"` 후 `python scripts/fetch_fonts.py --out .fonts`, 그리고 `--fonts-dir .fonts` 또는 `R4_FONTS_DIR=.fonts`. 워커를 로컬에서 직접 돌릴 때도 `R4_FONTS_DIR`을 읽어 FFmpeg에 넘깁니다.
+- 관리화면 미리보기는 Google Fonts에 있는 글꼴만 같은 이름으로 불러오고, 잘난체·카페24·지마켓·Pretendard·Wanted Sans는 비슷한 굵기의 Google 글꼴로 대신 보여 줍니다.
 
 ## 미리보기
 
 ```bash
 r4-subtitles templates check --fonts-dir .fonts                      # 글꼴이 실제로 찾아지는지
-r4-subtitles sheet templates.png --fonts-dir .fonts                  # 54종 전부 한 장 (1080x약 5900)
+r4-subtitles sheet templates.png --fonts-dir .fonts                  # 64종 전부 한 장 (1080x약 6900)
 r4-subtitles sheet neon.png --category neon pixel --columns 1 --width 720 --text "같은 예문"
 r4-subtitles preview one.png --template neon-pink --text "제발... 제발!!!!!" --height 400
 ```

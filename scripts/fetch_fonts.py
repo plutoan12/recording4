@@ -10,6 +10,10 @@
 
 `fc-scan`이 있으면 파일 안의 family 이름이 템플릿이 쓰는 이름과 같은지도 확인합니다.
 이름이 다르면 libass가 다른 글꼴로 대체해 모양이 조용히 달라지므로 실패로 봅니다.
+
+WOFF 출처(눈누 저장소)는 fontTools로 TTF/OTF로 바꿔 설치합니다(`pip install -e ".[fonts]"`).
+체크섬은 내려받은 WOFF 원본으로 확인하고, 변환한 파일 옆에 `.source-sha256`을 남겨
+다음 실행에서 다시 받지 않게 합니다.
 """
 
 from __future__ import annotations
@@ -19,6 +23,7 @@ import hashlib
 import shutil
 import subprocess
 import sys
+import tempfile
 import urllib.request
 from pathlib import Path
 
@@ -55,10 +60,35 @@ def families_in(path: Path) -> list[str] | None:
     return names
 
 
+def convert_woff(data: bytes) -> bytes:
+    """WOFF를 같은 글꼴의 TTF/OTF 바이트로 바꿉니다. fontTools가 필요합니다."""
+    try:
+        from fontTools.ttLib import TTFont
+    except ImportError:
+        raise RuntimeError(
+            "WOFF 글꼴을 바꾸려면 fontTools가 필요합니다: pip install -e '.[fonts]'"
+        ) from None
+    import io
+
+    font = TTFont(io.BytesIO(data))
+    font.flavor = None
+    buffer = io.BytesIO()
+    font.save(buffer)
+    return buffer.getvalue()
+
+
+def _installed_source_hash(target: Path) -> str | None:
+    """설치된 파일이 어떤 원본에서 왔는지. 변환한 글꼴은 옆 파일에, 아니면 파일 자체로 압니다."""
+    marker = target.with_name(target.name + ".source-sha256")
+    if marker.is_file():
+        return marker.read_text(encoding="utf-8").strip()
+    return sha256_of(target) if target.is_file() else None
+
+
 def fetch(source: FontSource, out: Path, *, timeout: float) -> str:
     """글꼴 하나를 받아 설치합니다. 결과 설명 한 줄을 돌려줍니다."""
     target = out / source.filename
-    if target.is_file() and sha256_of(target) == source.sha256:
+    if target.is_file() and _installed_source_hash(target) == source.sha256:
         _check_family(source, target)
         return f"{source.family:<20} {source.filename:<28} 이미 있음"
     data = download(source.url, timeout)
@@ -67,17 +97,20 @@ def fetch(source: FontSource, out: Path, *, timeout: float) -> str:
         raise RuntimeError(
             f"{source.filename}: 체크섬이 다릅니다. 기대 {source.sha256[:12]}…, 실제 {actual[:12]}…"
         )
+    installed = convert_woff(data) if source.needs_conversion else data
     # 이름 확인이 끝나기 전에는 제자리에 두지 않습니다. 실패한 파일이 남아 다음
-    # 실행에서 "이미 있음"으로 통과하면 안 됩니다.
-    partial = target.with_suffix(target.suffix + ".part")
-    partial.write_bytes(data)
-    try:
+    # 실행에서 "이미 있음"으로 통과하면 안 됩니다. 임시 파일도 **같은 파일 이름**을
+    # 씁니다. name 테이블이 빈 글꼴(잘난체·지마켓 산스 OTF)은 fontconfig가 파일
+    # 이름으로 family를 정하므로 `.part`를 붙이면 이름이 달라져 검사가 틀립니다.
+    with tempfile.TemporaryDirectory(dir=out, prefix=".fetch-") as staging:
+        partial = Path(staging) / target.name
+        partial.write_bytes(installed)
         _check_family(source, partial)
-    except RuntimeError:
-        partial.unlink(missing_ok=True)
-        raise
-    partial.replace(target)
-    return f"{source.family:<20} {source.filename:<28} {len(data) / 1024 / 1024:.1f}MB 받음"
+        partial.replace(target)
+    if source.needs_conversion:
+        target.with_name(target.name + ".source-sha256").write_text(actual, encoding="utf-8")
+    note = " (WOFF→변환)" if source.needs_conversion else ""
+    return f"{source.family:<20} {source.filename:<28} {len(data) / 1024 / 1024:.1f}MB 받음{note}"
 
 
 def _check_family(source: FontSource, path: Path) -> None:

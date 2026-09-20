@@ -13,7 +13,9 @@ type Template = { name: string; label: string; description: string; category: st
 
 // 워커가 libass로 굽는 모양을 CSS로 흉내 냅니다. 글꼴 이름은 Google Fonts 이름으로 바꾸고
 // 픽셀 글꼴은 고정폭으로 대신합니다. 정확한 모양은 미리보기 시트(r4-subtitles sheet)를 봅니다.
-const FONT_ALIASES: Record<string, string> = { 'Nanum Pen': 'Nanum Pen Script', 'Galmuri11 Regular': 'monospace', 'Galmuri9 Regular': 'monospace' }
+const FONT_ALIASES: Record<string, string> = { 'Nanum Pen': 'Nanum Pen Script', 'Galmuri11 Regular': 'monospace', 'Galmuri9 Regular': 'monospace',
+  // Google Fonts에 없는 글꼴은 비슷한 굵기의 Google 글꼴로 대신 보여 줍니다. 실제 렌더는 워커의 원래 글꼴입니다.
+  'JalnanOTF00': 'Black Han Sans', 'Cafe24 Ssurround': 'Jua', 'Cafe24 Simplehae': 'Jua', 'GmarketSansBold': 'Gothic A1', 'Pretendard': 'Gothic A1', 'Wanted Sans': 'Gothic A1' }
 function cssColor(hex: string): string {
   // #RRGGBBAA(AA=불투명도)는 CSS도 같은 뜻이라 그대로 씁니다.
   return hex

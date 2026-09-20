@@ -4,8 +4,11 @@
 `scripts/fetch_fonts.py`가 이 목록대로 받아 체크섬을 확인하고 설치합니다.
 출처는 커밋 해시로 고정해 같은 바이트가 다시 오도록 합니다.
 
-모두 SIL Open Font License 1.1이라 영상에 구워 배포해도 됩니다. Noto Sans CJK KR은
-워커 이미지의 fonts-noto-cjk 패키지가 이미 설치하므로 여기 없습니다.
+대부분 SIL Open Font License 1.1입니다. 잘난체·카페24·지마켓 산스는 각 회사가 무료로
+배포하는 글꼴로, 개인·상업 사용과 영상 삽입이 허용됩니다(조건은 `license_url`의 원문).
+파일은 눈누(projectnoonnu)가 GitHub에 올린 WOFF를 커밋 고정으로 받고 설치할 때
+TTF/OTF로 바꿉니다. Noto Sans CJK KR은 워커 이미지의 fonts-noto-cjk 패키지가 이미
+설치하므로 여기 없습니다.
 """
 
 from __future__ import annotations
@@ -22,17 +25,34 @@ SYSTEM_FONTS = ("Noto Sans CJK KR",)
 """워커 이미지에 패키지로 이미 있는 글꼴. 받지 않습니다."""
 
 
+_NOONNU = "https://raw.githubusercontent.com/projectnoonnu"
+NOONNU_COMMITS = {
+    "noonfonts_four": "83c75bb4fddbe9723ee55bdf327e4bd3423d670e",
+    "noonfonts_2105_2": "ebd02966e492dc9942e50484312494eb3e431a67",
+    "noonfonts_twelve": "e06818913ae15902aebda52bc4793193055d6f8f",
+    "noonfonts_2001": "5421a2f08a5a458848ea67ea7a2b0cdb0b978e68",
+}
+PRETENDARD_COMMIT = "7aeb0698819be2b4097dae8ec8fe6a795e5cf3ae"
+WANTED_SANS_COMMIT = "02c9b822349c188ada95f9e2d90c2ed18f853235"
+
+
 @dataclass(frozen=True, slots=True)
 class FontSource:
     # ASS Fontname에 쓰는 이름. 파일 name 테이블의 family(nameID 1)와 같아야 libass가
     # 찾습니다. Google Fonts 이름과 다른 것이 있습니다(Nanum Pen Script → "Nanum Pen",
     # Galmuri11 → "Galmuri11 Regular"). scripts/fetch_fonts.py가 fc-scan으로 확인합니다.
     family: str
-    filename: str
+    filename: str  # 설치되는 파일 이름. WOFF 출처면 변환된 TTF/OTF 이름입니다.
     url: str
-    sha256: str
+    sha256: str  # 내려받은 원본 파일의 해시(변환 전).
     license: str = "OFL-1.1"
     license_url: str = ""
+    # Google Fonts에도 있는 글꼴이면 관리화면이 같은 이름의 CSS를 불러 미리보기에 씁니다.
+    google: bool = True
+
+    @property
+    def needs_conversion(self) -> bool:
+        return self.url.lower().endswith(".woff")
 
 
 def _google(family: str, folder: str, filename: str, sha256: str) -> FontSource:
@@ -208,12 +228,75 @@ FONT_SOURCES: tuple[FontSource, ...] = (
         "GrandifloraOne-Regular.ttf",
         "592da2454a6626ee68558e220df28808b95f7dd140cd1ceb8a0d72b777f157ad",
     ),
+    # ---- Google Fonts 밖의 무료 상업용 글꼴. 굵고 둥근 "썸네일 글씨"들입니다.
+    FontSource(
+        family="JalnanOTF00",
+        filename="JalnanOTF00.otf",
+        url=f"{_NOONNU}/noonfonts_four/{NOONNU_COMMITS['noonfonts_four']}/JalnanOTF00.woff",
+        sha256="46fc3434dbd3b616859b3c459aac52b60aa944f51c4860447437d1243a57da26",
+        license="여기어때 잘난체 라이선스(무료, 상업 사용·영상 삽입 허용, 수정·판매 금지)",
+        license_url="https://www.goodchoice.kr/fonts",
+        google=False,
+    ),
+    FontSource(
+        family="Cafe24 Ssurround",
+        filename="Cafe24Ssurround.ttf",
+        url=(
+            f"{_NOONNU}/noonfonts_2105_2/{NOONNU_COMMITS['noonfonts_2105_2']}"
+            "/Cafe24Ssurround.woff"
+        ),
+        sha256="a23ffb04c098fba24e3e96186a9d5e4c3b9ba9b34ab0b3b91bddd9d313c6d39b",
+        license="카페24 서체 라이선스(무료, 상업 사용·영상 삽입 허용, 판매 금지)",
+        license_url="https://fonts.cafe24.com/",
+        google=False,
+    ),
+    FontSource(
+        family="Cafe24 Simplehae",
+        filename="Cafe24Simplehae.ttf",
+        url=f"{_NOONNU}/noonfonts_twelve/{NOONNU_COMMITS['noonfonts_twelve']}/Cafe24Simplehae.woff",
+        sha256="d8fb1b61d289c22931a796d3afaccff215c28d18f66dfde1e809faeff3274088",
+        license="카페24 서체 라이선스(무료, 상업 사용·영상 삽입 허용, 판매 금지)",
+        license_url="https://fonts.cafe24.com/",
+        google=False,
+    ),
+    FontSource(
+        family="GmarketSansBold",
+        filename="GmarketSansBold.otf",
+        url=f"{_NOONNU}/noonfonts_2001/{NOONNU_COMMITS['noonfonts_2001']}/GmarketSansBold.woff",
+        sha256="c9f30fc9cb858a716c07da51c5817e90c27bd7387016a2047a8b02b02fb4040d",
+        license="지마켓 산스 라이선스(무료, 상업 사용·영상 삽입 허용, 판매 금지)",
+        license_url="https://corp.gmarket.com/fonts/",
+        google=False,
+    ),
+    FontSource(
+        family="Pretendard",
+        filename="Pretendard-Black.otf",
+        url=(
+            f"https://raw.githubusercontent.com/orioncactus/pretendard/{PRETENDARD_COMMIT}"
+            "/packages/pretendard/dist/public/static/Pretendard-Black.otf"
+        ),
+        sha256="94628b0bcea8936b6e5c30d98d685eb9bbaffb0fe2ed255542ecc656c248e021",
+        license_url=f"https://github.com/orioncactus/pretendard/blob/{PRETENDARD_COMMIT}/LICENSE",
+        google=False,
+    ),
+    FontSource(
+        family="Wanted Sans",
+        filename="WantedSans-Black.ttf",
+        url=(
+            f"https://raw.githubusercontent.com/wanteddev/wanted-sans/{WANTED_SANS_COMMIT}"
+            "/packages/wanted-sans/fonts/ttf/WantedSans-Black.ttf"
+        ),
+        sha256="02092d69b9518a541eb2dd96037e50f2a2d660bbf3168f987f38fa9718cf362b",
+        license_url=f"https://github.com/wanteddev/wanted-sans/blob/{WANTED_SANS_COMMIT}/LICENSE",
+        google=False,
+    ),
     FontSource(
         family="Galmuri11 Regular",
         filename="Galmuri11.ttf",
         url=f"{_GALMURI}/Galmuri11.ttf",
         sha256="e24256f42e43713d2ea086a1e1669d78b968f5b3cc547e5c157f0606ffa5def1",
         license_url=f"https://github.com/quiple/galmuri/blob/{GALMURI_COMMIT}/OFL.md",
+        google=False,
     ),
     FontSource(
         family="Galmuri9 Regular",
@@ -221,6 +304,7 @@ FONT_SOURCES: tuple[FontSource, ...] = (
         url=f"{_GALMURI}/Galmuri9.ttf",
         sha256="e84e821b18be15b9e3a907ceb83cfba25fabf51c80b7edf0d2921cf8f8e1a11d",
         license_url=f"https://github.com/quiple/galmuri/blob/{GALMURI_COMMIT}/OFL.md",
+        google=False,
     ),
 )
 
@@ -234,7 +318,7 @@ FONT_FAMILIES: frozenset[str] = frozenset(SYSTEM_FONTS) | frozenset(
 GOOGLE_FONTS_CSS_FAMILIES: tuple[str, ...] = tuple(
     {"Nanum Pen": "Nanum Pen Script"}.get(source.family, source.family)
     for source in FONT_SOURCES
-    if not source.family.startswith("Galmuri")
+    if source.google
 )
 
 # 굵기 하나만 받는 글꼴. Google Fonts CSS에서 같은 굵기를 요청해야 화면 미리보기가 같습니다.
