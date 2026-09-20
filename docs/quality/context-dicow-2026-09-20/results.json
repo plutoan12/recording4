@@ -1,0 +1,75 @@
+{
+  "models": {
+    "community": {
+      "reference_characters": 115,
+      "errors": 77,
+      "empty_reference_insertions": 0,
+      "missing_target_characters": 9,
+      "boundary_words": 11,
+      "truncated_rows": 0,
+      "cer": 0.6695652173913044
+    },
+    "sortformer": {
+      "reference_characters": 115,
+      "errors": 97,
+      "empty_reference_insertions": 0,
+      "missing_target_characters": 9,
+      "boundary_words": 11,
+      "truncated_rows": 0,
+      "cer": 0.8434782608695652
+    }
+  },
+  "scoring_slots": 48,
+  "decode_rows": 30,
+  "scope": "conservative_local_CER_with_clipped_words_not_full_video_accuracy",
+  "automatic_reassignment": false,
+  "deploy_allowed": false,
+  "alignment_counts": {
+    "alignment_disagreement": 6,
+    "timing_consensus_only": 12,
+    "core_membership_disagreement": 4,
+    "invalid_alignment_time": 3,
+    "empty_decoding": 5
+  },
+  "fallback_rows": 13,
+  "sha256": {
+    "aligned": "7dd0b56ffdb2c94380943551fbf027571068aa5fdcd6814494df14fda53d69b4",
+    "slots": "7d0f34cd9b8b4c1366d41b9505d46104f1136244f4de61aef53a28170ea04552",
+    "context_protocol": "5ade8db0f901fcce021ce5c0c2acd6233e8c8455dc467fbaa6746275068510fc"
+  },
+  "error_breakdown": {
+    "short_community": {
+      "hits": 56,
+      "substitutions": 24,
+      "deletions": 35,
+      "insertions": 16
+    },
+    "short_sortformer": {
+      "hits": 25,
+      "substitutions": 7,
+      "deletions": 83,
+      "insertions": 16
+    },
+    "long_gated_community": {
+      "hits": 44,
+      "substitutions": 15,
+      "deletions": 56,
+      "insertions": 6
+    },
+    "long_gated_sortformer": {
+      "hits": 18,
+      "substitutions": 7,
+      "deletions": 90,
+      "insertions": 0
+    }
+  },
+  "run_status": {
+    "exit_code": 0,
+    "timed_out": false,
+    "device": "cpu",
+    "dtype": "float32",
+    "manifest_sha256": "5c12b7a2fdf1fb019663d10a5b4a64392648c6c6400268e9cce7e94126832bbd",
+    "deploy_allowed": false
+  },
+  "nltk_punkt_tab_sha256": "e57f64187974277726a3417ca6f181ec5403676c717672eef6a748a7b20e0106"
+}

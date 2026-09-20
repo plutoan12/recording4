@@ -1,0 +1,32 @@
+{
+  "schema": 1,
+  "opencc_version": "1.4.2",
+  "config": "t2s.json",
+  "reference_changed": false,
+  "exploratory": true,
+  "rows": [
+    {
+      "id": "fleurs-zh-new-0",
+      "reference_characters": 30,
+      "raw_errors": 3,
+      "simplified_output_errors": 3
+    },
+    {
+      "id": "fleurs-zh-new-1",
+      "reference_characters": 35,
+      "raw_errors": 2,
+      "simplified_output_errors": 1
+    },
+    {
+      "id": "fleurs-zh-new-2",
+      "reference_characters": 56,
+      "raw_errors": 15,
+      "simplified_output_errors": 1
+    }
+  ],
+  "totals": {
+    "reference_characters": 121,
+    "raw_errors": 20,
+    "simplified_output_errors": 5
+  }
+}

@@ -365,7 +365,14 @@ def test_sync_needs_a_transcript_and_does_not_queue_twice(client, auth_headers, 
     assert client.post(path, headers=auth_headers).json()["id"] == first.json()["id"]
 
 
-def test_sync_saves_a_new_version_and_keeps_the_old_one(client, auth_headers, asset, monkeypatch):
+@pytest.mark.parametrize("profile", ["standard", "quiet", "long_cues"])
+def test_sync_saves_a_new_version_and_keeps_the_old_one(
+    client,
+    auth_headers,
+    asset,
+    monkeypatch,
+    profile,
+):
     """보정은 새 대본 버전을 만듭니다. 마음에 들지 않으면 옛 버전을 다시 쓰면 됩니다."""
     import worker.media_tasks as module
     from pipeline.editing import Cue
@@ -375,21 +382,24 @@ def test_sync_saves_a_new_version_and_keeps_the_old_one(client, auth_headers, as
             path.write_bytes(b"media")
 
     monkeypatch.setattr(module, "get_storage", lambda: Storage())
+
     # 보정기는 여기서 대역입니다. 실제 보정 품질은 test_subtitle_sync.py가 봅니다.
-    monkeypatch.setattr(
-        module,
-        "sync_subtitles",
-        lambda source, cues, options=None, **kwargs: (
+    def correct(source, cues, options=None):
+        assert options.profile == profile
+        return (
             [Cue(start=c.start + 2, end=c.end + 2, text=c.text) for c in cues],
             {"offset_seconds": 2.0, "framerate_scale": 1.0, "clamped": 0},
-        ),
-    )
+        )
+
+    monkeypatch.setattr(module, "sync_subtitles", correct)
     client.put(
         f"/source-assets/{asset.id}/transcript",
         headers=auth_headers,
         json={"cues": [{"start": 3, "end": 5, "text": "어긋난 자막"}]},
     )
-    created = client.post(f"/source-assets/{asset.id}/transcript/sync", headers=auth_headers).json()
+    created = client.post(
+        f"/source-assets/{asset.id}/transcript/sync?profile={profile}", headers=auth_headers
+    ).json()
 
     result = module.run_media.run(created["id"])
     assert result["status"] == "succeeded"
@@ -398,3 +408,121 @@ def test_sync_saves_a_new_version_and_keeps_the_old_one(client, auth_headers, as
     assert client.get(f"/source-assets/{asset.id}/transcript", headers=auth_headers).json() == [
         {"start": 5.0, "end": 7.0, "text": "어긋난 자막"}
     ]
+
+
+@pytest.mark.parametrize("profile", ["standard", "quiet", "long_cues"])
+def test_sync_profile_is_saved_and_conflicting_active_request_is_rejected(
+    client,
+    auth_headers,
+    asset,
+    profile,
+):
+    import uuid
+
+    from adminapi.db import get_session_factory
+    from adminapi.models import MediaTask
+
+    client.put(
+        f"/source-assets/{asset.id}/transcript",
+        headers=auth_headers,
+        json={"cues": [{"start": 3, "end": 20, "text": "original"}]},
+    )
+    path = f"/source-assets/{asset.id}/transcript/sync"
+    assert client.post(path + "?profile=bad", headers=auth_headers).status_code == 422
+    first = client.post(path + f"?profile={profile}", headers=auth_headers)
+    assert first.status_code == 202
+    assert (
+        client.post(path + f"?profile={profile}", headers=auth_headers).json()["id"]
+        == first.json()["id"]
+    )
+    other = "quiet" if profile == "standard" else "standard"
+    assert client.post(path + f"?profile={other}", headers=auth_headers).status_code == 409
+    with get_session_factory()() as session:
+        task = session.get(MediaTask, uuid.UUID(first.json()["id"]))
+        assert task.settings["sync_profile"] == profile
+
+
+def test_rejected_sync_keeps_saved_transcript(client, auth_headers, asset, monkeypatch):
+    import worker.media_tasks as module
+    from worker.analysis import InsufficientSpeech
+
+    class Storage:
+        def download_file(self, key, path):
+            path.write_bytes(b"silence")
+
+    def reject(*args):
+        raise InsufficientSpeech("발화·무음 구간이 부족합니다.")
+
+    monkeypatch.setattr(module, "get_storage", lambda: Storage())
+    monkeypatch.setattr(module, "sync_subtitles", reject)
+    path = f"/source-assets/{asset.id}/transcript"
+    original = [{"start": 3.0, "end": 5.0, "text": "keep original"}]
+    client.put(path, headers=auth_headers, json={"cues": original})
+    created = client.post(path + "/sync?profile=quiet", headers=auth_headers).json()
+    result = module.run_media.run(created["id"])
+    assert result["status"] == "failed"
+    assert client.get(path, headers=auth_headers).json() == original
+
+
+def test_sync_pins_source_language_and_rejects_stale_completion(
+    client, auth_headers, asset, monkeypatch, session
+):
+    import uuid
+    from types import SimpleNamespace
+
+    import worker.media_tasks as module
+    from adminapi.models import MediaTask
+    from pipeline.editing import Cue
+
+    path = f"/source-assets/{asset.id}/transcript"
+    client.put(
+        path,
+        headers=auth_headers,
+        json={"cues": [{"start": 3, "end": 6, "text": "original English"}]},
+    )
+    job = client.post(path + "/sync?language=en", headers=auth_headers).json()
+    assert client.post(path + "/sync?language=ja", headers=auth_headers).status_code == 409
+    assert client.post(path + "/sync?language=xx", headers=auth_headers).status_code == 422
+    client.put(
+        path,
+        headers=auth_headers,
+        json={"cues": [{"start": 4, "end": 7, "text": "newer source edit"}]},
+    )
+    monkeypatch.setattr(
+        module,
+        "get_storage",
+        lambda: SimpleNamespace(download_file=lambda key, path: path.write_bytes(b"source")),
+    )
+
+    def correct(source, cues, options):
+        assert options.source_language == "en"
+        assert [c.text for c in cues] == ["original English"]
+        return [Cue(start=5, end=8, text=cues[0].text)], {"offset_seconds": 2}
+
+    monkeypatch.setattr(module, "sync_subtitles", correct)
+    assert module.run_media.run(job["id"])["status"] == "failed"
+    assert client.get(path, headers=auth_headers).json()[0]["text"] == "newer source edit"
+    session.expire_all()
+    task = session.get(MediaTask, uuid.UUID(job["id"]))
+    assert "대본이 바뀌었습니다" in task.error
+
+
+@pytest.mark.parametrize("state", ["pending", "running"])
+def test_sync_dedup_rejects_new_transcript_version(client, auth_headers, asset, session, state):
+    from adminapi.models import MediaTask
+
+    path = f"/source-assets/{asset.id}/transcript"
+    data = {"cues": [{"start": 3, "end": 20, "text": "original"}]}
+    client.put(path, headers=auth_headers, json=data)
+    first = client.post(path + "/sync", headers=auth_headers)
+    assert first.status_code == 202
+    task = session.get(MediaTask, uuid.UUID(first.json()["id"]))
+    task.state = state
+    session.commit()
+    assert client.post(path + "/sync", headers=auth_headers).json()["id"] == first.json()["id"]
+    # Even identical words in a new version must not reuse a job pinned to version 1.
+    assert client.put(path, headers=auth_headers, json=data).json()["version"] == 2
+    assert client.post(path + "/sync", headers=auth_headers).status_code == 409
+    session.refresh(task)
+    assert task.settings["transcript_version"] == 1
+    assert len(session.scalars(select(MediaTask).where(MediaTask.kind == "sync")).all()) == 1

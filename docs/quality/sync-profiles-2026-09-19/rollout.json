@@ -1,0 +1,38 @@
+[
+  {
+    "language": "en",
+    "profile": "quiet",
+    "input_offset": 0,
+    "pass": true,
+    "max_error_seconds": 0.38,
+    "text_preserved": true,
+    "offset_seconds": 0.38
+  },
+  {
+    "language": "en",
+    "profile": "quiet",
+    "input_offset": 2.5,
+    "pass": true,
+    "max_error_seconds": 0.43,
+    "text_preserved": true,
+    "offset_seconds": -2.07
+  },
+  {
+    "language": "ja",
+    "profile": "long_cues",
+    "input_offset": 0,
+    "pass": true,
+    "max_error_seconds": 0.05,
+    "text_preserved": true,
+    "offset_seconds": 0.05
+  },
+  {
+    "language": "ja",
+    "profile": "long_cues",
+    "input_offset": 2.5,
+    "pass": true,
+    "max_error_seconds": 0.05,
+    "text_preserved": true,
+    "offset_seconds": -2.45
+  }
+]

@@ -1,0 +1,209 @@
+{
+  "profile": "quiet",
+  "limit": 0.5,
+  "offsets": [
+    -0.73,
+    1.37,
+    4.12
+  ],
+  "results": [
+    {
+      "variant": "short",
+      "cases": {
+        "-0.73": {
+          "pass": false,
+          "rejected": "\uc790\ub9c9\uc744 \uc74c\uc131\uc5d0 \ub9de\ucd94\uc9c0 \ubabb\ud588\uc2b5\ub2c8\ub2e4. \uc6d0\ubcf8\uacfc \uc790\ub9c9\uc774 \ub9de\ub294\uc9c0 \ud655\uc778\ud558\uc138\uc694."
+        },
+        "1.37": {
+          "pass": false,
+          "rejected": "\uc790\ub9c9\uc744 \uc74c\uc131\uc5d0 \ub9de\ucd94\uc9c0 \ubabb\ud588\uc2b5\ub2c8\ub2e4. \uc6d0\ubcf8\uacfc \uc790\ub9c9\uc774 \ub9de\ub294\uc9c0 \ud655\uc778\ud558\uc138\uc694."
+        },
+        "4.12": {
+          "pass": false,
+          "max_error_seconds": 14.12,
+          "text_preserved": true,
+          "offset_seconds": 10.0,
+          "boundary_support": 0,
+          "recovery_used": false
+        }
+      }
+    },
+    {
+      "variant": "long_repeated",
+      "cases": {
+        "-0.73": {
+          "pass": false,
+          "rejected": "\uc790\ub9c9\uc744 \uc74c\uc131\uc5d0 \ub9de\ucd94\uc9c0 \ubabb\ud588\uc2b5\ub2c8\ub2e4. \uc6d0\ubcf8\uacfc \uc790\ub9c9\uc774 \ub9de\ub294\uc9c0 \ud655\uc778\ud558\uc138\uc694."
+        },
+        "1.37": {
+          "pass": false,
+          "rejected": "\uc790\ub9c9\uc744 \uc74c\uc131\uc5d0 \ub9de\ucd94\uc9c0 \ubabb\ud588\uc2b5\ub2c8\ub2e4. \uc6d0\ubcf8\uacfc \uc790\ub9c9\uc774 \ub9de\ub294\uc9c0 \ud655\uc778\ud558\uc138\uc694."
+        },
+        "4.12": {
+          "pass": false,
+          "rejected": "\uc790\ub9c9\uc744 \uc74c\uc131\uc5d0 \ub9de\ucd94\uc9c0 \ubabb\ud588\uc2b5\ub2c8\ub2e4. \uc6d0\ubcf8\uacfc \uc790\ub9c9\uc774 \ub9de\ub294\uc9c0 \ud655\uc778\ud558\uc138\uc694."
+        }
+      }
+    },
+    {
+      "variant": "dense",
+      "cases": {
+        "-0.73": {
+          "pass": false,
+          "rejected": "\uc790\ub9c9\uc744 \uc74c\uc131\uc5d0 \ub9de\ucd94\uc9c0 \ubabb\ud588\uc2b5\ub2c8\ub2e4. \uc6d0\ubcf8\uacfc \uc790\ub9c9\uc774 \ub9de\ub294\uc9c0 \ud655\uc778\ud558\uc138\uc694."
+        },
+        "1.37": {
+          "pass": false,
+          "rejected": "\uc790\ub9c9\uc744 \uc74c\uc131\uc5d0 \ub9de\ucd94\uc9c0 \ubabb\ud588\uc2b5\ub2c8\ub2e4. \uc6d0\ubcf8\uacfc \uc790\ub9c9\uc774 \ub9de\ub294\uc9c0 \ud655\uc778\ud558\uc138\uc694."
+        },
+        "4.12": {
+          "pass": false,
+          "rejected": "\uc790\ub9c9\uc744 \uc74c\uc131\uc5d0 \ub9de\ucd94\uc9c0 \ubabb\ud588\uc2b5\ub2c8\ub2e4. \uc6d0\ubcf8\uacfc \uc790\ub9c9\uc774 \ub9de\ub294\uc9c0 \ud655\uc778\ud558\uc138\uc694."
+        }
+      }
+    },
+    {
+      "variant": "long_pauses",
+      "cases": {
+        "-0.73": {
+          "pass": true,
+          "max_error_seconds": 0.02,
+          "text_preserved": true,
+          "offset_seconds": 0.71,
+          "boundary_support": 0,
+          "recovery_used": false
+        },
+        "1.37": {
+          "pass": true,
+          "max_error_seconds": 0.02,
+          "text_preserved": true,
+          "offset_seconds": -1.39,
+          "boundary_support": 0,
+          "recovery_used": false
+        },
+        "4.12": {
+          "pass": true,
+          "max_error_seconds": 0.02,
+          "text_preserved": true,
+          "offset_seconds": -4.14,
+          "boundary_support": 0,
+          "recovery_used": false
+        }
+      }
+    },
+    {
+      "variant": "fast",
+      "cases": {
+        "-0.73": {
+          "pass": false,
+          "rejected": "\uc790\ub9c9\uc744 \uc74c\uc131\uc5d0 \ub9de\ucd94\uc9c0 \ubabb\ud588\uc2b5\ub2c8\ub2e4. \uc6d0\ubcf8\uacfc \uc790\ub9c9\uc774 \ub9de\ub294\uc9c0 \ud655\uc778\ud558\uc138\uc694."
+        },
+        "1.37": {
+          "pass": false,
+          "rejected": "\uc790\ub9c9\uc744 \uc74c\uc131\uc5d0 \ub9de\ucd94\uc9c0 \ubabb\ud588\uc2b5\ub2c8\ub2e4. \uc6d0\ubcf8\uacfc \uc790\ub9c9\uc774 \ub9de\ub294\uc9c0 \ud655\uc778\ud558\uc138\uc694."
+        },
+        "4.12": {
+          "pass": false,
+          "rejected": "\uc790\ub9c9\uc744 \uc74c\uc131\uc5d0 \ub9de\ucd94\uc9c0 \ubabb\ud588\uc2b5\ub2c8\ub2e4. \uc6d0\ubcf8\uacfc \uc790\ub9c9\uc774 \ub9de\ub294\uc9c0 \ud655\uc778\ud558\uc138\uc694."
+        }
+      }
+    },
+    {
+      "variant": "slow",
+      "cases": {
+        "-0.73": {
+          "pass": false,
+          "rejected": "\uc790\ub9c9\uc744 \uc74c\uc131\uc5d0 \ub9de\ucd94\uc9c0 \ubabb\ud588\uc2b5\ub2c8\ub2e4. \uc6d0\ubcf8\uacfc \uc790\ub9c9\uc774 \ub9de\ub294\uc9c0 \ud655\uc778\ud558\uc138\uc694."
+        },
+        "1.37": {
+          "pass": false,
+          "rejected": "\uc790\ub9c9\uc744 \uc74c\uc131\uc5d0 \ub9de\ucd94\uc9c0 \ubabb\ud588\uc2b5\ub2c8\ub2e4. \uc6d0\ubcf8\uacfc \uc790\ub9c9\uc774 \ub9de\ub294\uc9c0 \ud655\uc778\ud558\uc138\uc694."
+        },
+        "4.12": {
+          "pass": false,
+          "rejected": "\uc790\ub9c9\uc744 \uc74c\uc131\uc5d0 \ub9de\ucd94\uc9c0 \ubabb\ud588\uc2b5\ub2c8\ub2e4. \uc6d0\ubcf8\uacfc \uc790\ub9c9\uc774 \ub9de\ub294\uc9c0 \ud655\uc778\ud558\uc138\uc694."
+        }
+      }
+    },
+    {
+      "variant": "quiet_voice",
+      "cases": {
+        "-0.73": {
+          "pass": false,
+          "rejected": "\uc790\ub9c9\uc744 \uc74c\uc131\uc5d0 \ub9de\ucd94\uc9c0 \ubabb\ud588\uc2b5\ub2c8\ub2e4. \uc6d0\ubcf8\uacfc \uc790\ub9c9\uc774 \ub9de\ub294\uc9c0 \ud655\uc778\ud558\uc138\uc694."
+        },
+        "1.37": {
+          "pass": false,
+          "rejected": "\uc790\ub9c9\uc744 \uc74c\uc131\uc5d0 \ub9de\ucd94\uc9c0 \ubabb\ud588\uc2b5\ub2c8\ub2e4. \uc6d0\ubcf8\uacfc \uc790\ub9c9\uc774 \ub9de\ub294\uc9c0 \ud655\uc778\ud558\uc138\uc694."
+        },
+        "4.12": {
+          "pass": false,
+          "rejected": "\uc790\ub9c9\uc744 \uc74c\uc131\uc5d0 \ub9de\ucd94\uc9c0 \ubabb\ud588\uc2b5\ub2c8\ub2e4. \uc6d0\ubcf8\uacfc \uc790\ub9c9\uc774 \ub9de\ub294\uc9c0 \ud655\uc778\ud558\uc138\uc694."
+        }
+      }
+    },
+    {
+      "variant": "noise_15db",
+      "cases": {
+        "-0.73": {
+          "pass": false,
+          "rejected": "\uc790\ub9c9\uc744 \uc74c\uc131\uc5d0 \ub9de\ucd94\uc9c0 \ubabb\ud588\uc2b5\ub2c8\ub2e4. \uc6d0\ubcf8\uacfc \uc790\ub9c9\uc774 \ub9de\ub294\uc9c0 \ud655\uc778\ud558\uc138\uc694."
+        },
+        "1.37": {
+          "pass": false,
+          "rejected": "\uc790\ub9c9\uc744 \uc74c\uc131\uc5d0 \ub9de\ucd94\uc9c0 \ubabb\ud588\uc2b5\ub2c8\ub2e4. \uc6d0\ubcf8\uacfc \uc790\ub9c9\uc774 \ub9de\ub294\uc9c0 \ud655\uc778\ud558\uc138\uc694."
+        },
+        "4.12": {
+          "pass": false,
+          "rejected": "\uc790\ub9c9\uc744 \uc74c\uc131\uc5d0 \ub9de\ucd94\uc9c0 \ubabb\ud588\uc2b5\ub2c8\ub2e4. \uc6d0\ubcf8\uacfc \uc790\ub9c9\uc774 \ub9de\ub294\uc9c0 \ud655\uc778\ud558\uc138\uc694."
+        }
+      }
+    },
+    {
+      "variant": "noise_5db",
+      "cases": {
+        "-0.73": {
+          "pass": false,
+          "rejected": "\uc790\ub9c9\uc744 \uc74c\uc131\uc5d0 \ub9de\ucd94\uc9c0 \ubabb\ud588\uc2b5\ub2c8\ub2e4. \uc6d0\ubcf8\uacfc \uc790\ub9c9\uc774 \ub9de\ub294\uc9c0 \ud655\uc778\ud558\uc138\uc694."
+        },
+        "1.37": {
+          "pass": false,
+          "rejected": "\uc790\ub9c9\uc744 \uc74c\uc131\uc5d0 \ub9de\ucd94\uc9c0 \ubabb\ud588\uc2b5\ub2c8\ub2e4. \uc6d0\ubcf8\uacfc \uc790\ub9c9\uc774 \ub9de\ub294\uc9c0 \ud655\uc778\ud558\uc138\uc694."
+        },
+        "4.12": {
+          "pass": false,
+          "rejected": "\uc790\ub9c9\uc744 \uc74c\uc131\uc5d0 \ub9de\ucd94\uc9c0 \ubabb\ud588\uc2b5\ub2c8\ub2e4. \uc6d0\ubcf8\uacfc \uc790\ub9c9\uc774 \ub9de\ub294\uc9c0 \ud655\uc778\ud558\uc138\uc694."
+        }
+      }
+    },
+    {
+      "variant": "music_intro",
+      "cases": {
+        "-0.73": {
+          "pass": false,
+          "max_error_seconds": 3.94,
+          "text_preserved": true,
+          "offset_seconds": -3.21,
+          "boundary_support": 0,
+          "recovery_used": false
+        },
+        "1.37": {
+          "pass": false,
+          "max_error_seconds": 3.94,
+          "text_preserved": true,
+          "offset_seconds": -5.31,
+          "boundary_support": 0,
+          "recovery_used": false
+        },
+        "4.12": {
+          "pass": false,
+          "max_error_seconds": 3.94,
+          "text_preserved": true,
+          "offset_seconds": -8.06,
+          "boundary_support": 0,
+          "recovery_used": false
+        }
+      }
+    }
+  ]
+}

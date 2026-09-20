@@ -1,0 +1,89 @@
+{
+  "english": {
+    "word_count": 191,
+    "matched_full_turns": 242,
+    "boundary_clipped_words": 1,
+    "source_sha256": {
+      "archive": "b56e5babb2496b8795deeeda7e71178d7fbc9963f94276cf2a3f4b56ebbc9f9d",
+      "row": "c0ee6ef6ea1b75488ac57b0b6e4d8bd522bf36c2e827f412e7bb64c34572fe16",
+      "rttm": "57137f098ee3be9b8d77c9faa4b16e9155e821bdbf21b974dd8771d7e646d185"
+    },
+    "community": {
+      "correct": 695,
+      "wrong": 32,
+      "unresolved": 74,
+      "total_characters": 801,
+      "boundary_unresolved_characters": 2,
+      "assigned_characters_below_80_percent_coverage": {
+        "correct": 49,
+        "wrong": 11
+      },
+      "oracle_words_and_timing": true,
+      "asr_accuracy_measured": false,
+      "mapping": "DER_optimal_anonymous_speaker_mapping",
+      "der": {
+        "total": 86.65399999999998,
+        "missed detection": 12.964906249999958,
+        "false alarm": 0.4765312500000025,
+        "confusion": 0.08715624999999072,
+        "diarization error rate": 0.15612197648117748
+      },
+      "deploy_allowed": false,
+      "sha256": {
+        "reference": "30c9abf262b881972b771c5adb4864ef318a0d7547c1ead6bd8d04a1445eb095",
+        "prediction": "8e9b1fa6679c6af73b7893cad9f12074962846958244ede191fc433fbd3bdd42"
+      }
+    },
+    "sortformer": {
+      "correct": 715,
+      "wrong": 32,
+      "unresolved": 54,
+      "total_characters": 801,
+      "boundary_unresolved_characters": 2,
+      "assigned_characters_below_80_percent_coverage": {
+        "correct": 187,
+        "wrong": 0
+      },
+      "oracle_words_and_timing": true,
+      "asr_accuracy_measured": false,
+      "mapping": "DER_optimal_anonymous_speaker_mapping",
+      "der": {
+        "total": 86.65399999999998,
+        "missed detection": 36.53399999999998,
+        "false alarm": 0.3500000000000014,
+        "confusion": 0.6999999999999993,
+        "diarization error rate": 0.4337249290280885
+      },
+      "deploy_allowed": false,
+      "sha256": {
+        "reference": "30c9abf262b881972b771c5adb4864ef318a0d7547c1ead6bd8d04a1445eb095",
+        "prediction": "a3e5d905b5eb993e25a7eb3264a4b33637e94780d81056a3b5f937b7d2bb9c49"
+      }
+    }
+  },
+  "korean": {
+    "status": "needs_human_annotation",
+    "language": "ko",
+    "source": "OpenSLR113 first normal label/audio s01m16f1",
+    "window": [
+      0,
+      120
+    ],
+    "source_sample_rate": 22050,
+    "overlap_annotation_complete": false,
+    "asr_full_reference_ready": false,
+    "deploy_allowed": false,
+    "counts": {
+      "special_label_needs_review": 27,
+      "participant_transcript_provided": 37,
+      "interviewer_transcript_missing": 22
+    },
+    "sha256": {
+      "seoul-first.flac": "2cc9ac6632611cf7a4db9885ddc80b282bca66a6bf8db1bd4a25b41d7211c289",
+      "seoul-first.TextGrid": "62d76d74c1ffc6a8b429a4344a021dca28fc9ed4048ce38a0af6cf065beb84a6",
+      "ko-review120.wav": "a93e6bfa3c148a1dd3de5edbf825179c4bb6e25300e8eedda960b8d2deea5739"
+    }
+  },
+  "new_model_inference": "Korean draft only; existing English diarization reused",
+  "deployment_allowed": false
+}

@@ -11,6 +11,7 @@ import argparse
 import contextlib
 import json
 import logging
+import math
 import subprocess
 import wave
 from pathlib import Path
@@ -18,7 +19,7 @@ from pathlib import Path
 import numpy as np
 
 from pipeline.editing import Cue
-from worker.analysis import sync_subtitles
+from worker.analysis import SyncOptions, sync_subtitles
 
 RATE = 16000
 VARIANTS = [
@@ -121,10 +122,18 @@ def make_variant(directory: Path, out: Path, spec: tuple) -> tuple[Path, list[Cu
     return video, truth, cursor / speed
 
 
-def evaluate(source: Path, truth: list[Cue], offset: float, limit: float) -> dict:
+def evaluate(
+    source: Path,
+    truth: list[Cue],
+    offset: float,
+    limit: float,
+    options: SyncOptions | None = None,
+) -> dict:
     pushed = [Cue(start=c.start + offset, end=c.end + offset, text=c.text) for c in truth]
     try:
-        moved, meta = sync_subtitles(source, pushed)
+        moved, meta = (
+            sync_subtitles(source, pushed, options) if options else sync_subtitles(source, pushed)
+        )
         errors = [
             max(abs(a.start - b.start), abs(a.end - b.end))
             for a, b in zip(moved, truth, strict=True)
@@ -137,6 +146,10 @@ def evaluate(source: Path, truth: list[Cue], offset: float, limit: float) -> dic
             "max_error_seconds": round(max(errors), 3),
             "text_preserved": same,
             "offset_seconds": meta["offset_seconds"],
+            "boundary_support": meta.get("boundary_support", 0),
+            "recovery_used": meta.get("recovery_used", False),
+            "verified_by": meta.get("verified_by"),
+            "denoised": meta.get("denoised", False),
         }
     except (ValueError, RuntimeError) as exc:
         return {"pass": False, "rejected": str(exc)}
@@ -147,7 +160,12 @@ def main() -> int:
     parser.add_argument("--directory", type=Path, required=True)
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--limit", type=float, default=0.5)
+    parser.add_argument("--profile", choices=["standard", "quiet", "long_cues"], default="standard")
+    parser.add_argument("--offsets", type=float, nargs="+", default=[0.0, 2.5])
+    parser.add_argument("--language", choices=["en", "ja", "ko", "zh"])
     args = parser.parse_args()
+    if any(not math.isfinite(value) for value in args.offsets):
+        parser.error("offsets는 유한한 초 단위 값이어야 합니다.")
     args.out.mkdir(parents=True, exist_ok=True)
     results = []
     for spec in VARIANTS:
@@ -158,18 +176,35 @@ def main() -> int:
             "cue_count": len(truth),
             "cases": {},
         }
-        for offset in (0.0, 2.5):
+        for offset in args.offsets:
+            if min(c.start for c in truth) + offset < 0:
+                parser.error("offsets가 기준 자막을 영상 시작 앞으로 옮깁니다.")
             with (
                 (args.out / spec[0] / f"{offset}.log").open("w") as log,
                 contextlib.redirect_stdout(log),
                 contextlib.redirect_stderr(log),
             ):
                 logging.disable(logging.CRITICAL)
-                entry["cases"][str(offset)] = evaluate(source, truth, offset, args.limit)
+                entry["cases"][str(offset)] = evaluate(
+                    source,
+                    truth,
+                    offset,
+                    args.limit,
+                    SyncOptions(profile=args.profile, source_language=args.language),
+                )
                 logging.disable(logging.NOTSET)
         results.append(entry)
         (args.out / "results.json").write_text(
-            json.dumps({"limit": args.limit, "results": results}, ensure_ascii=False, indent=2)
+            json.dumps(
+                {
+                    "limit": args.limit,
+                    "profile": args.profile,
+                    "offsets": args.offsets,
+                    "results": results,
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
         )
         print(json.dumps(entry, ensure_ascii=False), flush=True)
     return 0 if all(c["pass"] for r in results for c in r["cases"].values()) else 1

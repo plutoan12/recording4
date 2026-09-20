@@ -1,0 +1,196 @@
+{
+  "limit": 0.5,
+  "profile": "standard",
+  "results": [
+    {
+      "variant": "short",
+      "duration_seconds": 36.237,
+      "cue_count": 3,
+      "cases": {
+        "0.0": {
+          "pass": true,
+          "max_error_seconds": 0.4,
+          "text_preserved": true,
+          "offset_seconds": -0.4
+        },
+        "2.5": {
+          "pass": true,
+          "max_error_seconds": 0.4,
+          "text_preserved": true,
+          "offset_seconds": -2.9
+        }
+      }
+    },
+    {
+      "variant": "long_repeated",
+      "duration_seconds": 276.314,
+      "cue_count": 27,
+      "cases": {
+        "0.0": {
+          "pass": true,
+          "max_error_seconds": 0.03,
+          "text_preserved": true,
+          "offset_seconds": -0.03
+        },
+        "2.5": {
+          "pass": true,
+          "max_error_seconds": 0.03,
+          "text_preserved": true,
+          "offset_seconds": -2.53
+        }
+      }
+    },
+    {
+      "variant": "dense",
+      "duration_seconds": 85.121,
+      "cue_count": 9,
+      "cases": {
+        "0.0": {
+          "pass": true,
+          "max_error_seconds": 0.03,
+          "text_preserved": true,
+          "offset_seconds": -0.03
+        },
+        "2.5": {
+          "pass": true,
+          "max_error_seconds": 0.03,
+          "text_preserved": true,
+          "offset_seconds": -2.53
+        }
+      }
+    },
+    {
+      "variant": "long_pauses",
+      "duration_seconds": 128.771,
+      "cue_count": 9,
+      "cases": {
+        "0.0": {
+          "pass": true,
+          "max_error_seconds": 0.03,
+          "text_preserved": true,
+          "offset_seconds": -0.03
+        },
+        "2.5": {
+          "pass": true,
+          "max_error_seconds": 0.03,
+          "text_preserved": true,
+          "offset_seconds": -2.53
+        }
+      }
+    },
+    {
+      "variant": "fast",
+      "duration_seconds": 74.217,
+      "cue_count": 9,
+      "cases": {
+        "0.0": {
+          "pass": true,
+          "max_error_seconds": 0.5,
+          "text_preserved": true,
+          "offset_seconds": -0.5
+        },
+        "2.5": {
+          "pass": true,
+          "max_error_seconds": 0.5,
+          "text_preserved": true,
+          "offset_seconds": -3.0
+        }
+      }
+    },
+    {
+      "variant": "slow",
+      "duration_seconds": 115.964,
+      "cue_count": 9,
+      "cases": {
+        "0.0": {
+          "pass": true,
+          "max_error_seconds": 0.03,
+          "text_preserved": true,
+          "offset_seconds": -0.03
+        },
+        "2.5": {
+          "pass": true,
+          "max_error_seconds": 0.03,
+          "text_preserved": true,
+          "offset_seconds": -2.53
+        }
+      }
+    },
+    {
+      "variant": "quiet_voice",
+      "duration_seconds": 92.771,
+      "cue_count": 9,
+      "cases": {
+        "0.0": {
+          "pass": true,
+          "max_error_seconds": 0.06,
+          "text_preserved": true,
+          "offset_seconds": 0.06
+        },
+        "2.5": {
+          "pass": true,
+          "max_error_seconds": 0.07,
+          "text_preserved": true,
+          "offset_seconds": -2.43
+        }
+      }
+    },
+    {
+      "variant": "noise_15db",
+      "duration_seconds": 92.771,
+      "cue_count": 9,
+      "cases": {
+        "0.0": {
+          "pass": true,
+          "max_error_seconds": 0.0,
+          "text_preserved": true,
+          "offset_seconds": 0.0
+        },
+        "2.5": {
+          "pass": true,
+          "max_error_seconds": 0.0,
+          "text_preserved": true,
+          "offset_seconds": -2.5
+        }
+      }
+    },
+    {
+      "variant": "noise_5db",
+      "duration_seconds": 92.771,
+      "cue_count": 9,
+      "cases": {
+        "0.0": {
+          "pass": true,
+          "max_error_seconds": 0.04,
+          "text_preserved": true,
+          "offset_seconds": 0.04
+        },
+        "2.5": {
+          "pass": true,
+          "max_error_seconds": 0.04,
+          "text_preserved": true,
+          "offset_seconds": -2.46
+        }
+      }
+    },
+    {
+      "variant": "music_intro",
+      "duration_seconds": 100.771,
+      "cue_count": 9,
+      "cases": {
+        "0.0": {
+          "pass": true,
+          "max_error_seconds": 0.04,
+          "text_preserved": true,
+          "offset_seconds": 0.04
+        },
+        "2.5": {
+          "pass": true,
+          "max_error_seconds": 0.04,
+          "text_preserved": true,
+          "offset_seconds": -2.46
+        }
+      }
+    }
+  ]
+}

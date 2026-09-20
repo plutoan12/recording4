@@ -60,6 +60,7 @@ def align_text(
     model: str = "small",
     language: str | None = None,
     device: str = "cpu",
+    strict: bool = False,
 ) -> list[Cue]:
     """이미 있는 대본을 오디오에 맞춰 시각을 붙입니다.
 
@@ -82,8 +83,18 @@ def align_text(
     engine = stable_whisper.load_faster_whisper(
         model, device=device, compute_type="int8" if device == "cpu" else "float16"
     )
-    result = engine.align(str(source), text, language=language)
-    cues = cues_for_lines(text.splitlines(), word_timings(result)) or [
+    result = engine.align(
+        str(source),
+        text,
+        language=language,
+        **({"failure_threshold": 0.1, "verbose": None} if strict else {}),
+    )
+    if result is None:
+        raise ValueError("원문 대사를 음성과 대응시키지 못했습니다.")
+    matched = cues_for_lines(text.splitlines(), word_timings(result))
+    if strict and not matched:
+        raise ValueError("원문과 정렬된 단어가 일치하지 않습니다. 기존 대본을 유지합니다.")
+    cues = matched or [
         Cue(start=s.start, end=s.end, text=s.text.strip())
         for s in result.segments
         if s.text.strip() and s.end > s.start
@@ -424,8 +435,14 @@ class SyncOptions:
     fix_framerate: bool = False
     max_offset_seconds: float = 10.0
     vad: str | None = None
+    profile: str = "standard"
+    source_language: str | None = None
+    model: str = "small"
+    device: str = "cpu"
 
     def arguments(self) -> list[str]:
+        if self.profile not in {"standard", "quiet", "long_cues"}:
+            raise ValueError("알 수 없는 싱크 보정 방식입니다.")
         if not math.isfinite(self.max_offset_seconds) or self.max_offset_seconds <= 0:
             raise ValueError("이동 상한은 0보다 커야 합니다.")
         if self.vad and self.vad not in SYNC_VADS:
@@ -441,14 +458,82 @@ class SyncOptions:
         return extra
 
 
+class InsufficientSpeech(ValueError):
+    """보정 이동을 판단할 발화/무음 증거가 부족합니다."""
+
+
 def _run_sync(args):  # noqa: ANN001 - ffsubsync의 argparse.Namespace입니다.
     """보정기를 실제로 돌립니다. 시험에서 이 자리를 갈아끼워 응답을 꾸밉니다."""
-    from ffsubsync.ffsubsync import run
+    import copy
 
-    return run(args)
+    import numpy as np
+    from ffsubsync.ffsubsync import (
+        SAMPLE_RATE,
+        make_reference_pipe,
+        run,
+        validate_and_transform_args,
+    )
+
+    checked = validate_and_transform_args(copy.copy(args))
+    if checked is None:
+        return {"retval": 1, "sync_was_successful": False}
+    mask = make_reference_pipe(checked).fit_transform(checked.reference)
+    if not np.isfinite(mask).all():
+        raise ValueError("발화 감지 결과를 확인할 수 없습니다.")
+    speech = np.asarray(mask) > 0.5
+    # Empty/constant masks can get a positive correlation score. They provide no
+    # temporal evidence for a shift, even when ffsubsync reports success.
+    if speech.sum() < SAMPLE_RATE * 0.5 or (~speech).sum() < SAMPLE_RATE * 0.5:
+        raise InsufficientSpeech(
+            "싱크를 비교할 발화·무음 구간이 부족합니다. 기존 대본을 유지합니다."
+        )
+    with tempfile.TemporaryDirectory(prefix="r4-sync-mask-") as directory:
+        reference = Path(directory) / "speech.npz"
+        np.savez_compressed(reference, speech=mask)
+        checked.reference = str(reference)
+        checked.vad = None
+        return run(checked)
 
 
-def sync_subtitles(
+def _normalize_sync_audio(source: Path, output: Path, *, recovery: bool = False) -> None:
+    """싱크 분석용 사본만 보정합니다. 원음 파일에는 쓰지 않습니다."""
+    try:
+        subprocess.run(
+            [
+                ffmpeg_binary(),
+                "-v",
+                "error",
+                "-nostdin",
+                "-i",
+                str(source),
+                "-map",
+                "0:a:0",
+                "-vn",
+                "-ac",
+                "1",
+                "-ar",
+                "16000",
+                "-af",
+                (
+                    "dynaudnorm=f=150:g=15:p=0.9:m=100"
+                    if recovery
+                    else "dynaudnorm=f=500:g=31:p=0.5:m=10:r=0.05"
+                ),
+                "-c:a",
+                "pcm_s16le",
+                str(output),
+            ],
+            check=True,
+            capture_output=True,
+            timeout=600,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise RuntimeError(
+            "싱크 분석용 오디오를 준비하지 못했습니다. 원본 음성을 확인하세요."
+        ) from exc
+
+
+def _sync_acoustic(
     source: Path, cues: list[Cue], options: SyncOptions | None = None
 ) -> tuple[list[Cue], dict]:
     """이미 있는 자막의 시각을 원본 음성에 맞춰 통째로 옮깁니다(ffsubsync).
@@ -484,17 +569,94 @@ def sync_subtitles(
         before, after = temp / "in.srt", temp / "out.srt"
         before.write_text(dump_subtitles(cues), encoding="utf-8")
         parser = make_parser()
-        report = _run_sync(
-            parser.parse_args(
-                [str(source), "-i", str(before), "-o", str(after), *options.arguments()]
+        extra = options.arguments()
+        if options.profile == "long_cues":
+            # This is explicitly selected: a larger speech mask is not better for every cue.
+            extra += [
+                "--max-subtitle-seconds",
+                str(max(10, math.ceil(max(c.end - c.start for c in cues)))),
+            ]
+        normalized = False
+        reference = source
+        if options.profile == "quiet":
+            reference = temp / "normalized.wav"
+            _normalize_sync_audio(source, reference)
+            normalized = True
+        try:
+            report = _run_sync(
+                parser.parse_args([str(reference), "-i", str(before), "-o", str(after), *extra])
             )
+        except InsufficientSpeech:
+            if options.profile == "standard":
+                raise
+            report = {"sync_was_successful": False}
+        # Long captions may also contain quiet speech. Retry a rejected alignment,
+        # never replace a successful result just because another offset looks smaller.
+        if options.profile == "long_cues" and (
+            report.get("retval") or not report.get("sync_was_successful", True)
+        ):
+            reference = temp / "normalized.wav"
+            _normalize_sync_audio(source, reference)
+            normalized = True
+            try:
+                report = _run_sync(
+                    parser.parse_args([str(reference), "-i", str(before), "-o", str(after), *extra])
+                )
+            except InsufficientSpeech:
+                report = {"sync_was_successful": False}
+
+        earliest = min(cue.start for cue in cues)
+        shift = float(report.get("offset_seconds", 0.0))
+        enhanced = options.profile != "standard" and not options.fix_framerate
+        # A maximum at the search boundary can be a clipped, much larger wrong
+        # alignment. It is not evidence that the optimum is inside our range.
+        search_limit = options.max_offset_seconds - (0.01 if enhanced else 0)
+        usable = (
+            not report.get("retval")
+            and report.get("sync_was_successful", True)
+            and math.isfinite(shift)
+            and earliest + shift >= 0
+            and (abs(shift) < search_limit if enhanced else abs(shift) <= search_limit)
         )
+        boundary_support = 0
+        recovery_used = False
+        if enhanced:
+            from worker.sync_evidence import refine_offset
+
+            if not usable:
+                # Strong gain is never a global default: it can amplify noise.
+                # A recovery needs both a valid VAD estimate and independent,
+                # distributed boundary evidence in the unmodified source.
+                reference = temp / "recovery.wav"
+                _normalize_sync_audio(source, reference, recovery=True)
+                normalized = True
+                report = _run_sync(
+                    parser.parse_args([str(reference), "-i", str(before), "-o", str(after), *extra])
+                )
+                shift = float(report.get("offset_seconds", 0.0))
+                recovery_used = True
+            if (
+                not report.get("retval")
+                and report.get("sync_was_successful", True)
+                and math.isfinite(shift)
+                and earliest + shift >= 0
+                and abs(shift) < search_limit
+            ):
+                evidence = refine_offset(source, cues, shift)
+                if evidence is not None:
+                    shift, boundary_support = evidence
+                elif recovery_used:
+                    raise ValueError(
+                        "저음량 재시도의 보정 근거가 부족합니다. 기존 대본을 유지합니다."
+                    )
         if report.get("retval") or not report.get("sync_was_successful", True):
             raise ValueError("자막을 음성에 맞추지 못했습니다. 원본과 자막이 맞는지 확인하세요.")
-        shift = float(report.get("offset_seconds", 0.0))
         if not math.isfinite(shift):
             raise ValueError("보정값이 유한한 시간이 아닙니다.")
-        earliest = min(cue.start for cue in cues)
+        if enhanced and abs(shift) >= search_limit:
+            raise ValueError(
+                "보정값이 탐색 경계에 걸려 신뢰할 수 없습니다. 기존 대본을 유지합니다."
+            )
         # 원본 앞으로 밀려난 자막은 파일에서 아예 사라집니다. 그러면 개수가 달라
         # "개수가 다르다"는 말만 남고 무엇이 잘못됐는지는 안 보입니다.
         if earliest + shift < 0:
@@ -522,4 +684,73 @@ def sync_subtitles(
         "framerate_scale": round(float(report.get("framerate_scale_factor", 1.0)), 6),
         "vad": options.vad or "",
         "max_offset_seconds": options.max_offset_seconds,
+        "profile": options.profile,
+        "audio_normalized": normalized,
+        "boundary_support": boundary_support,
+        "recovery_used": recovery_used,
     }
+
+
+def sync_subtitles(
+    source: Path,
+    cues: list[Cue],
+    options: SyncOptions | None = None,
+) -> tuple[list[Cue], dict]:
+    from worker.sync_verification import verify_sync
+
+    return verify_sync(source, cues, options or SyncOptions(), _sync_acoustic, align_text)
+
+
+def align_speaker_words(source, cues, *, model="small", language=None, device="cpu"):
+    """기존 문구를 자막별로 정렬합니다. 실패한 자막은 빈 목록으로 검수에 남깁니다."""
+    if not language:
+        raise MissingDependency("단어별 화자 검수에는 원문 음성 언어가 필요합니다.")
+    try:
+        import stable_whisper
+    except ImportError as exc:
+        raise MissingDependency("단어 정렬 의존성이 없습니다. [subtitles]를 설치하세요.") from exc
+    engine = stable_whisper.load_faster_whisper(
+        model, device=device, compute_type="int8" if device == "cpu" else "float16"
+    )
+    aligned = []
+    with tempfile.TemporaryDirectory(prefix="r4-speaker-words-") as temp:
+        for cue in cues:
+            clip = Path(temp) / "cue.wav"
+            subprocess.run(
+                [
+                    ffmpeg_binary(),
+                    "-v",
+                    "error",
+                    "-y",
+                    "-nostdin",
+                    "-ss",
+                    str(cue.start),
+                    "-i",
+                    str(source),
+                    "-t",
+                    str(cue.end - cue.start),
+                    "-vn",
+                    "-ac",
+                    "1",
+                    "-ar",
+                    "16000",
+                    str(clip),
+                ],
+                check=True,
+                capture_output=True,
+                timeout=600,
+            )
+            try:
+                result = engine.align(
+                    str(clip), cue.text, language=language, failure_threshold=0.1, verbose=None
+                )
+                words = word_timings(result) if result is not None else []
+                aligned.append(
+                    [
+                        WordTiming(start=w.start + cue.start, end=w.end + cue.start, text=w.text)
+                        for w in words
+                    ]
+                )
+            except (ValueError, RuntimeError):
+                aligned.append([])
+    return aligned

@@ -6,6 +6,9 @@
 
 from __future__ import annotations
 
+import math
+import unicodedata
+from bisect import bisect_left
 from dataclasses import dataclass
 
 from pipeline.editing import Cue
@@ -157,3 +160,257 @@ def turns_from_labels(
         if finish > begin:
             turns.append(SpeakerTurn(start=begin, end=finish, speaker=name))
     return turns
+
+
+MULTIPLE_SPEAKERS = "복수 화자"
+_MAX_MATCHING_CELLS = 40_000
+
+
+def _is_cjk_character(character: str) -> bool:
+    name = unicodedata.name(character, "")
+    return name.startswith(("CJK ", "HANGUL ")) or "HIRAGANA" in name or "KATAKANA" in name
+
+
+def _is_text_boundary(text: str, index: int, whitespace_boundaries: set[int]) -> bool:
+    """Keep Latin words whole while allowing timed CJK subwords.
+
+    Aligners commonly return individual Han, kana, or Hangul pieces even when a
+    caption author inserted spaces at phrase boundaries. Inside one Latin/digit
+    word, including punctuation such as a hyphen or decimal point, only an
+    original whitespace edge is accepted.
+    """
+    if index in whitespace_boundaries or index <= 0 or index >= len(text):
+        return True
+    left, right = text[index - 1], text[index]
+    return _is_cjk_character(left) or _is_cjk_character(right)
+
+
+def _matching_starts(
+    text: str, tokens: list[str], whitespace_boundaries: set[int], enforce_boundaries: bool
+) -> list[int | None]:
+    """Find positions fixed across every maximum-character monotonic alignment."""
+
+    # Imported captions can contain an unsegmented paragraph. The dynamic
+    # matcher is deliberately conservative, so a pathological cue remains for
+    # review instead of spending unbounded time or falling back to a guess.
+    if len(text) * len(tokens) > _MAX_MATCHING_CELLS:
+        return [None] * len(tokens)
+
+    positions_by_token: dict[str, list[int]] = {}
+    for token in set(tokens):
+        positions = []
+        if not token:
+            positions_by_token[token] = positions
+            continue
+        begin = text.find(token)
+        while begin >= 0:
+            end = begin + len(token)
+            if not enforce_boundaries or (
+                _is_text_boundary(text, begin, whitespace_boundaries)
+                and _is_text_boundary(text, end, whitespace_boundaries)
+            ):
+                positions.append(begin)
+            begin = text.find(token, begin + 1)
+        positions_by_token[token] = positions
+
+    def occurrences(token: str, cursor: int):
+        positions = positions_by_token[token]
+        return positions[bisect_left(positions, cursor) :]
+
+    # Keep the best prefix score for every reachable text cursor. Skipping a
+    # token preserves the denominator while a match earns its character count.
+    forward: list[dict[int, int]] = [{0: 0}]
+    for token in tokens:
+        next_scores: dict[int, int] = {}
+        for cursor, score in forward[-1].items():
+            next_scores[cursor] = max(next_scores.get(cursor, -1), score)
+            for begin in occurrences(token, cursor):
+                end = begin + len(token)
+                next_scores[end] = max(next_scores.get(end, -1), score + len(token))
+        forward.append(next_scores)
+
+    suffix: list[dict[int, int]] = [{} for _ in range(len(tokens) + 1)]
+    suffix[-1] = {cursor: 0 for cursor in forward[-1]}
+    for index in range(len(tokens) - 1, -1, -1):
+        token = tokens[index]
+        for cursor in forward[index]:
+            choices = [suffix[index + 1][cursor]]
+            for begin in occurrences(token, cursor):
+                end = begin + len(token)
+                if end in suffix[index + 1]:
+                    choices.append(len(token) + suffix[index + 1][end])
+            suffix[index][cursor] = max(choices)
+
+    optimum = suffix[0][0]
+    starts: list[int | None] = []
+    for index, token in enumerate(tokens):
+        possible: set[int | None] = set()
+        for cursor, prefix_score in forward[index].items():
+            if prefix_score + suffix[index][cursor] != optimum:
+                continue
+            if prefix_score + suffix[index + 1][cursor] == optimum:
+                possible.add(None)
+            for begin in occurrences(token, cursor):
+                end = begin + len(token)
+                if (
+                    end in suffix[index + 1]
+                    and prefix_score + len(token) + suffix[index + 1][end] == optimum
+                ):
+                    possible.add(begin)
+        starts.append(next(iter(possible)) if len(possible) == 1 and None not in possible else None)
+    return starts
+
+
+def review_speakers(cues, turns, words_by_cue, *, stage=2, minimum_word_coverage=0.0):
+    """단어마다 근거가 있는 단일 화자만 배정합니다. 불확실하면 검수합니다."""
+    from pipeline.alignment import squeeze
+
+    if (
+        isinstance(minimum_word_coverage, bool)
+        or not isinstance(minimum_word_coverage, int | float)
+        or not math.isfinite(minimum_word_coverage)
+        or not 0 <= minimum_word_coverage <= 1
+    ):
+        raise ValueError("Invalid minimum word coverage")
+    if len(cues) != len(words_by_cue):
+        raise ValueError("대본과 단어 정렬 개수가 다릅니다.")
+    reviewed = []
+    for cue, words in zip(cues, words_by_cue, strict=True):
+        candidates = sorted({t.speaker for t in turns if _overlap(cue.start, cue.end, t) > 0})
+        overlaps = []
+        relevant = [t for t in turns if _overlap(cue.start, cue.end, t) > 0]
+        for index, left in enumerate(relevant):
+            for right in relevant[index + 1 :]:
+                begin, finish = (
+                    max(cue.start, left.start, right.start),
+                    min(cue.end, left.end, right.end),
+                )
+                if left.speaker != right.speaker and finish > begin:
+                    overlaps.append({"start": begin, "end": finish})
+        # Map only unambiguous exact text spans. Missing/invalid words stay in the
+        # output so callers cannot accidentally count a smaller denominator.
+        text = squeeze(cue.text)
+        cursor = 0
+        # Keep Latin words whole while allowing CJK aligners to return smaller
+        # pieces than the spaces chosen by the caption author.
+        boundaries = {0}
+        edge = 0
+        for token_text in cue.text.split():
+            edge += len(squeeze(token_text))
+            boundaries.add(edge)
+        enforce_boundaries = len(cue.text.split()) > 1 or any(
+            _is_cjk_character(character) for character in text
+        )
+        tokens = [squeeze(word.text) for word in words]
+        starts = _matching_starts(text, tokens, boundaries, enforce_boundaries)
+        assignments = []
+        previous_end = cue.start
+        for word, token, begin in zip(words, tokens, starts, strict=True):
+            if not token or begin is None:
+                continue
+            if begin > cursor:
+                assignments.append(
+                    dict(
+                        start=cue.start,
+                        end=cue.end,
+                        text=text[cursor:begin],
+                        speaker=None,
+                        candidates=[],
+                        needs_review=True,
+                        timing_valid=False,
+                    )
+                )
+            valid_word = (
+                cue.start <= word.start < word.end <= cue.end and word.start >= previous_end - 0.001
+            )
+            if valid_word:
+                previous_end = word.end
+            labels = sorted(
+                {t.speaker for t in turns if valid_word and _overlap(word.start, word.end, t) > 0}
+            )
+            label = labels[0] if len(labels) == 1 else MULTIPLE_SPEAKERS if labels else None
+            if stage >= 2 and len(labels) > 1:
+                simultaneous = any(
+                    min(word.end, o["end"]) > max(word.start, o["start"]) for o in overlaps
+                )
+                # A sequential boundary is not simultaneous speech. Require a
+                # strong duration majority; ties and true overlaps remain unresolved.
+                if not simultaneous:
+                    spans = {lab: [] for lab in labels}
+                    for turn in relevant:
+                        if turn.speaker in spans and _overlap(word.start, word.end, turn) > 0:
+                            spans[turn.speaker].append(
+                                (max(word.start, turn.start), min(word.end, turn.end))
+                            )
+                    durations = {}
+                    for lab, intervals in spans.items():
+                        edge, duration = word.start, 0.0
+                        for left, right in sorted(intervals):
+                            duration += max(0.0, right - max(edge, left))
+                            edge = max(edge, right)
+                        durations[lab] = duration
+                    best = max(durations, key=durations.get)
+                    if durations[best] / (word.end - word.start) >= 0.8:
+                        label = best
+            # Opt-in experiment: a tiny intersection is insufficient for a whole word.
+            # Do not relabel from neighbouring text or count duplicate tracks twice.
+            if minimum_word_coverage and label not in (None, MULTIPLE_SPEAKERS):
+                edge, covered = word.start, 0.0
+                for left, right in sorted(
+                    (max(word.start, t.start), min(word.end, t.end))
+                    for t in relevant
+                    if t.speaker == label and _overlap(word.start, word.end, t) > 0
+                ):
+                    covered += max(0.0, right - max(edge, left))
+                    edge = max(edge, right)
+                if covered / (word.end - word.start) < minimum_word_coverage:
+                    label = None
+            assignments.append(
+                dict(
+                    start=word.start if valid_word else cue.start,
+                    end=word.end if valid_word else cue.end,
+                    text=word.text,
+                    speaker=label,
+                    candidates=labels,
+                    needs_review=label in (None, MULTIPLE_SPEAKERS),
+                    timing_valid=valid_word,
+                )
+            )
+            cursor = begin + len(token)
+        if cursor < len(text):
+            assignments.append(
+                dict(
+                    start=cue.start,
+                    end=cue.end,
+                    text=text[cursor:],
+                    speaker=None,
+                    candidates=[],
+                    needs_review=True,
+                    timing_valid=False,
+                )
+            )
+        valid = any(w["timing_valid"] for w in assignments)
+        resolved = {
+            w["speaker"] for w in assignments if w["speaker"] not in (None, MULTIPLE_SPEAKERS)
+        }
+        needs_review = bool(overlaps) or not valid or any(w["needs_review"] for w in assignments)
+        if valid and len(resolved) == 1 and not needs_review:
+            label = next(iter(resolved))
+        elif len(candidates) > 1 or len(resolved) > 1:
+            label = MULTIPLE_SPEAKERS
+        else:
+            label = None
+        reviewed.append(
+            {
+                "start": cue.start,
+                "end": cue.end,
+                "text": cue.text,
+                "speaker": label,
+                "candidates": candidates,
+                "needs_review": needs_review or label == MULTIPLE_SPEAKERS,
+                "alignment_available": bool(valid),
+                "overlaps": overlaps,
+                "words": assignments if valid else [],
+            }
+        )
+    return reviewed

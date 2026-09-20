@@ -1,0 +1,41 @@
+{
+  "source": {
+    "repository": "https://github.com/FireRedTeam/FireRedVAD",
+    "source_commit": "c30ec49e8cc69642b0ee65362eba11b9d11c6e54",
+    "model_revision": "7990aaccc6b7aec1e527743bd30201f2c4a03b8c",
+    "model_sha256": "63f4fb1b00a6b8607c118dd48efc18d5e40d67d99b7bf9aa7a8d61540cf23d71",
+    "license": "Apache-2.0",
+    "settings": "published defaults"
+  },
+  "independent_false_candidate": {
+    "start": 47.46,
+    "end": 48.34,
+    "maximum_speech_probability": 0.02531580999493599,
+    "default_threshold": 0.4,
+    "next_quiet_true_speech_maximum_probability": 0.4628128111362457
+  },
+  "languages": {
+    "zh": {
+      "firered": {"miss_seconds": 6.82, "false_alarm_seconds": 2.11, "recall": 0.9366935858163931, "precision": 0.9795185400893031},
+      "silero": {"miss_seconds": 0.0, "false_alarm_seconds": 5.406, "recall": 1.0, "precision": 0.9522168010182436},
+      "community_speech_error_seconds": 2.61175,
+      "community_union_firered_speech_error_seconds": 3.392375
+    },
+    "ja": {
+      "firered": {"miss_seconds": 6.329, "false_alarm_seconds": 2.876, "recall": 0.8924791464927038, "precision": 0.9480960115502618},
+      "silero": {"miss_seconds": 3.857, "false_alarm_seconds": 14.258, "recall": 0.9344749672969435, "precision": 0.7941499191499194},
+      "community_speech_error_seconds": 8.8839375,
+      "community_union_firered_speech_error_seconds": 8.839
+    },
+    "en": {
+      "firered": {"miss_seconds": 30.61, "false_alarm_seconds": 0.27, "recall": 0.6243249877270493, "precision": 0.9947203754399685},
+      "silero": {"miss_seconds": 7.054, "false_alarm_seconds": 2.006, "recall": 0.9134266077565047, "precision": 0.9737544483985765},
+      "community_speech_error_seconds": 9.3899375,
+      "community_union_firered_speech_error_seconds": 9.3374375
+    }
+  },
+  "korean_reference_available": false,
+  "global_or_language_specific_policy_adopted": false,
+  "deployment_allowed": false,
+  "four_language_improvement_proven": false
+}

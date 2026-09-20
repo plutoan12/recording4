@@ -34,10 +34,11 @@ analysis = ["faster-whisper==1.2.1", "scenedetect[opencv-headless]==0.6.7.1"]
 # speechbrain은 토큰 없이 도는 화자 분리(목소리 특징)용입니다. pyannote 모델은
 # 게이트라 토큰이 필요한데, 이쪽은 공개 모델로 같은 일을 합니다. 품질은 다릅니다.
 subtitles = ["stable-ts==2.19.1", "whisperx==3.8.6", "kss==6.0.6", "speechbrain==1.1.1",
-             "ffsubsync==0.4.27"]
+             "ffsubsync==0.4.27", "scipy==1.17.1"]
 providers = ["google-cloud-translate==3.20.2", "google-api-python-client==2.160.0", "google-auth-oauthlib==1.2.1"]
 dev = [
     "pytest==8.3.4",
+    "numpy==2.2.6",
     "httpx==0.28.1",
     "ruff==0.8.4",
 ]

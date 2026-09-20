@@ -4,10 +4,11 @@ import { PublicationForm } from './PublicationForm'
 import type { WorkflowDraft } from './WorkflowPanel'
 
 type Cue = { start: number; end: number; text: string }
+type SpeakerReview = { version: number | null; needs_review: boolean; review: {start:number;end:number;text:string;speaker:string|null;needs_review:boolean;alignment_available:boolean;words:{start:number;end:number;timing_valid?:boolean;text:string;speaker:string|null;needs_review:boolean}[]}[] }
 type Suggestion = { start: number; end: number; title: string; reason: string }
 type Violation = { index: number; kind: string; detail: string }
 type Task = { id: string; source_asset_id: string; clip_edit_id: string | null; kind: string; state: string; error: string | null;
-  result: { artifact_id?: string; scenes?: {start: number; end: number}[]; sync?: {offset_seconds:number; framerate_scale:number; clamped:number} } }
+  result: { artifact_id?: string; scenes?: {start: number; end: number}[]; sync?: {offset_seconds:number; framerate_scale:number; clamped?:number; profile?:string; audio_normalized?:boolean} } }
 
 export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWorkflow: (draft:WorkflowDraft)=>void }) {
   const [assetId, setAssetId] = useState('')
@@ -23,6 +24,9 @@ export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWo
   const [suggestions, setSuggestions] = useState<Suggestion[]>([])
   const [violations, setViolations] = useState<Violation[]>([])
   const [plainScript, setPlainScript] = useState('')
+  const [syncProfile, setSyncProfile] = useState('standard')
+  const [syncLanguage, setSyncLanguage] = useState('')
+  const [speakerReview, setSpeakerReview] = useState<SpeakerReview|null>(null)
   const [tasks, setTasks] = useState<Task[]>([])
   const [outputUrl, setOutputUrl] = useState('')
   const [previewed, setPreviewed] = useState('')
@@ -46,6 +50,15 @@ export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWo
     return () => clearInterval(timer)
   }, [refresh])
 
+  useEffect(() => {
+    let active = true
+    if (!assetId) { setSpeakerReview(null); return }
+    void request<SpeakerReview>(`/source-assets/${assetId}/speakers`)
+      .then(value => { if (active) setSpeakerReview(value) })
+      .catch(() => { if (active) setSpeakerReview(null) })
+    return () => { active = false }
+  }, [assetId, tasks])
+
   async function act(operation: () => Promise<void>) {
     setBusy(true); setMessage('')
     try { await operation() }
@@ -54,7 +67,7 @@ export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWo
   }
   async function loadSource(id: string) {
     selection.current = id
-    setAssetId(id); setSourceUrl(''); setSuggestions([]); setCaptions([])
+    setAssetId(id); setSpeakerReview(null); setSourceUrl(''); setSuggestions([]); setCaptions([]); setSyncLanguage('')
     const asset = assets.find(a => a.id === id)
     setStart(0); setEnd(Math.min(30, Number(asset?.duration_seconds ?? 30)))
     if (!id) return
@@ -144,14 +157,28 @@ export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWo
         </div>}
       </details>
       <details>
+        <summary>자막 싱크 보정</summary>
+        <label>보정 방식 <select value={syncProfile} disabled={busy} onChange={e => setSyncProfile(e.target.value)}>
+          <option value="standard">기본 보정</option>
+          <option value="quiet">작은 음량·음량 차이 보정</option>
+          <option value="long_cues">긴 문장 자막 보정</option>
+        </select></label>
+        <label>원문 음성 언어 <select value={syncLanguage} disabled={busy} onChange={e => setSyncLanguage(e.target.value)}>
+          <option value="">원본에 등록한 언어</option>
+          <option value="ko">한국어</option><option value="en">영어</option>
+          <option value="ja">일본어</option><option value="zh">중국어</option>
+        </select></label>
+        <p>원문 대본으로 음성과 시각을 비교합니다. 번역된 자막은 원문 대본으로 넣지 마세요. 필요하면 분석용 사본의 잡음을 줄여 재시도하며, 원음과 글자는 유지합니다. 근거가 부족하거나 결과가 충돌하면 기존 대본을 유지합니다.</p>
+        <button disabled={busy || !captions.length} onClick={() => void act(async () => {
+          await request(`/source-assets/${assetId}/transcript/sync?profile=${syncProfile}${syncLanguage ? `&language=${syncLanguage}` : ''}`, {method:'POST'})
+          setMessage('싱크 보정을 요청했습니다. 완료 후 대본 다시 읽기로 새 버전을 확인하세요. 실패하면 기존 대본을 유지합니다.'); await refresh()
+        })}>자막 싱크 보정 (원본 음성에 맞추기)</button>
+      </details>
+      <details>
         <summary>시간 없는 대본 붙여넣기</summary>
         <p>이미 있는 대본을 원본 음성에 맞춰 시각을 찾습니다. 글자는 그대로 두고 시간만 붙입니다. 유료 호출이 아닙니다.</p>
         <textarea rows={6} maxLength={50000} value={plainScript} placeholder="대본을 붙여넣으세요"
           onChange={e => setPlainScript(e.target.value)} />
-        <button disabled={busy} onClick={() => void act(async () => {
-          await request(`/source-assets/${assetId}/transcript/sync`, {method:'POST'})
-          setMessage('자막 싱크 보정을 요청했습니다. 끝나면 아래 결과에 옮긴 초가 나옵니다. 대본 다시 읽기를 누르세요.'); await refresh()
-        })}>자막 싱크 보정 (원본 음성에 맞추기)</button>
         <button disabled={busy || !plainScript.trim()} onClick={() => void act(async () => {
           await request(`/source-assets/${assetId}/align`, {method:'POST', body: JSON.stringify({text: plainScript})})
           setMessage('대본 정렬을 요청했습니다. 완료 후 대본 다시 읽기를 누르세요.'); await refresh()
@@ -161,6 +188,24 @@ export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWo
         <p>자막 가독성 문제 {violations.length}건. 렌더에서 줄바꿈과 분할은 자동으로 적용되지만 아래는 사람이 고쳐야 합니다.</p>
         <ul>{violations.map((v,i) => <li key={i}>{v.index + 1}번 자막 · {v.kind} · {v.detail}</li>)}</ul>
       </div>}
+      <h3>화자·겹말 검수</h3>
+      <label>화자 분석 원문 언어<select value={syncLanguage} onChange={e=>setSyncLanguage(e.target.value)}>
+        <option value="">원본에 저장된 언어</option><option value="ko">한국어</option><option value="en">영어</option><option value="ja">일본어</option><option value="zh">중국어</option>
+      </select></label>
+      <button disabled={busy || !captions.length} onClick={() => void act(async () => {
+        await request(`/source-assets/${assetId}/diarize`, {method:'POST',body:JSON.stringify({language:syncLanguage || null})})
+        setMessage('저장된 대본의 단어별 화자 분석을 요청했습니다.'); await refresh()
+      })}>저장된 대본 화자 분석</button>
+      <p>원본 언어와 저장된 대본으로 분석합니다. 단어 시각이 없거나 여러 화자가 겹치면 검수가 필요합니다.</p>
+      {speakerReview && speakerReview.review.length > 0 && <aside aria-label="화자 검수 결과">
+        <p>저장된 대본 {speakerReview.version}번 · {speakerReview.needs_review ? '검수 필요' : '화자 분석 완료'}</p>
+        {speakerReview.review.map((segment, i) => <details key={i}>
+          <summary>{segment.start.toFixed(2)}–{segment.end.toFixed(2)}초 · {segment.speaker ?? '미확인'}{segment.needs_review ? ' · 검수 필요' : ''}</summary>
+          <p>{segment.text}</p>
+          {!segment.alignment_available && <p>단어 시각을 확인하지 못했습니다. 화자를 추측하지 않았습니다.</p>}
+          <ul>{segment.words.map((word,j) => <li key={j}>{word.timing_valid === false ? '시각 미확인' : `${word.start.toFixed(2)}–${word.end.toFixed(2)}초`} · {word.text} · {word.speaker ?? '미확인'}{word.needs_review ? ' · 검수 필요' : ''}</li>)}</ul>
+        </details>)}
+      </aside>}
       <h3>자막 편집</h3>
       <p>시간은 원본 영상 기준입니다. 선택 구간 밖의 자막은 최종 영상에서 자동으로 제외됩니다.</p>
       <label>자막 표시<select value={burn?'burn':'track'} onChange={e=>setBurn(e.target.value==='burn')}><option value="burn">영상에 굽기 · 트랙 업로드 안 함</option><option value="track">YouTube 트랙만 · 영상에 굽지 않음</option></select></label>
@@ -200,8 +245,10 @@ export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWo
     <ul>{tasks.filter(t => !assetId || t.source_asset_id === assetId).map(t => <li key={t.id}>
       {t.kind} · {t.state} {t.error}
       {t.result.sync && <span> · {t.result.sync.offset_seconds >= 0 ? '뒤로' : '앞으로'} {Math.abs(t.result.sync.offset_seconds).toFixed(2)}초 옮김
+        {t.result.sync.profile === 'quiet' && ' · 작은 음량 보정'}
+        {t.result.sync.profile === 'long_cues' && ' · 긴 문장 보정'}
         {t.result.sync.framerate_scale !== 1 && ` · 속도 ${t.result.sync.framerate_scale}배`}
-        {t.result.sync.clamped > 0 && ` · 0초로 잘린 자막 ${t.result.sync.clamped}개`}</span>}
+        {(t.result.sync.clamped ?? 0) > 0 && ` · 0초로 잘린 자막 ${t.result.sync.clamped}개`}</span>}
       {t.result.scenes?.map((s,i) => <button key={i} onClick={() => {setStart(s.start);setEnd(Math.min(s.end,s.start+180))}}>{s.start.toFixed(1)}–{s.end.toFixed(1)}초</button>)}
       {t.state === 'failed' && <button disabled={busy} onClick={() => void act(async () => {
         await request(`/media-tasks/${t.id}/retry`, {method:'POST'}); await refresh()

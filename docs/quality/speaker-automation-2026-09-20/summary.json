@@ -1,0 +1,123 @@
+{
+  "schema": 1,
+  "quality": {
+    "schema": 1,
+    "verdict": "reject",
+    "deploy_allowed": false,
+    "reasons": [
+      "no_additional_correct_assignments"
+    ],
+    "delta": {
+      "word_correct": 0,
+      "word_wrong": 0,
+      "word_unresolved": 0
+    },
+    "cases": [
+      {
+        "case": "clean",
+        "delta": {
+          "word_correct": 0,
+          "word_wrong": 0,
+          "word_unresolved": 0
+        }
+      },
+      {
+        "case": "noise_20db_seed17",
+        "delta": {
+          "word_correct": 0,
+          "word_wrong": 0,
+          "word_unresolved": 0
+        }
+      },
+      {
+        "case": "noise_20db_seed29",
+        "delta": {
+          "word_correct": 0,
+          "word_wrong": 0,
+          "word_unresolved": 0
+        }
+      },
+      {
+        "case": "noise_10db_seed17",
+        "delta": {
+          "word_correct": 0,
+          "word_wrong": 0,
+          "word_unresolved": 0
+        }
+      },
+      {
+        "case": "noise_10db_seed29",
+        "delta": {
+          "word_correct": 0,
+          "word_wrong": 0,
+          "word_unresolved": 0
+        }
+      },
+      {
+        "case": "noise_0db_seed17",
+        "delta": {
+          "word_correct": 0,
+          "word_wrong": 0,
+          "word_unresolved": 0
+        }
+      },
+      {
+        "case": "noise_0db_seed29",
+        "delta": {
+          "word_correct": 0,
+          "word_wrong": 0,
+          "word_unresolved": 0
+        }
+      },
+      {
+        "case": "overlap_25pct",
+        "delta": {
+          "word_correct": 0,
+          "word_wrong": 0,
+          "word_unresolved": 0
+        }
+      },
+      {
+        "case": "overlap_25pct_noise10db",
+        "delta": {
+          "word_correct": 0,
+          "word_wrong": 0,
+          "word_unresolved": 0
+        }
+      },
+      {
+        "case": "overlap_50pct",
+        "delta": {
+          "word_correct": 0,
+          "word_wrong": 0,
+          "word_unresolved": 0
+        }
+      },
+      {
+        "case": "overlap_50pct_noise10db",
+        "delta": {
+          "word_correct": 0,
+          "word_wrong": 0,
+          "word_unresolved": 0
+        }
+      }
+    ]
+  },
+  "cases": [
+    {
+      "case": "overlap_25pct",
+      "review_sha256": "6ef1219a423b7c70c074598bb74159fdbfa3b43bf0e47fca8eb9faba7db4f9d5",
+      "proposed_words": 12,
+      "ambiguous_words": 0
+    },
+    {
+      "case": "overlap_50pct",
+      "review_sha256": "a6fb999337e327a2d40ab3c87e34d0de8040e8bfd06cd68b09e774b364094734",
+      "proposed_words": 36,
+      "ambiguous_words": 0
+    }
+  ],
+  "changed_assignments": 0,
+  "status": "review_required",
+  "deploy_allowed": false
+}

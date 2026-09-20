@@ -1,0 +1,59 @@
+{
+  "index_equivalence_checks": 3240,
+  "cases": [
+    {
+      "source": "silence",
+      "profile": "standard",
+      "rejected": true,
+      "reason": "싱크를 비교할 발화·무음 구간이 부족합니다. 기존 대본을 유지합니다."
+    },
+    {
+      "source": "silence",
+      "profile": "quiet",
+      "rejected": true,
+      "reason": "싱크를 비교할 발화·무음 구간이 부족합니다. 기존 대본을 유지합니다."
+    },
+    {
+      "source": "silence",
+      "profile": "long_cues",
+      "rejected": true,
+      "reason": "싱크를 비교할 발화·무음 구간이 부족합니다. 기존 대본을 유지합니다."
+    },
+    {
+      "source": "steady_tone",
+      "profile": "standard",
+      "rejected": true,
+      "reason": "싱크를 비교할 발화·무음 구간이 부족합니다. 기존 대본을 유지합니다."
+    },
+    {
+      "source": "steady_tone",
+      "profile": "quiet",
+      "rejected": true,
+      "reason": "오디오가 일정한 잡음·음량에 가까워 싱크 근거가 부족합니다. 기존 대본을 유지합니다."
+    },
+    {
+      "source": "steady_tone",
+      "profile": "long_cues",
+      "rejected": true,
+      "reason": "오디오가 일정한 잡음·음량에 가까워 싱크 근거가 부족합니다. 기존 대본을 유지합니다."
+    },
+    {
+      "source": "noise",
+      "profile": "standard",
+      "rejected": true,
+      "reason": "싱크를 비교할 발화·무음 구간이 부족합니다. 기존 대본을 유지합니다."
+    },
+    {
+      "source": "noise",
+      "profile": "quiet",
+      "rejected": true,
+      "reason": "오디오가 일정한 잡음·음량에 가까워 싱크 근거가 부족합니다. 기존 대본을 유지합니다."
+    },
+    {
+      "source": "noise",
+      "profile": "long_cues",
+      "rejected": true,
+      "reason": "오디오가 일정한 잡음·음량에 가까워 싱크 근거가 부족합니다. 기존 대본을 유지합니다."
+    }
+  ]
+}

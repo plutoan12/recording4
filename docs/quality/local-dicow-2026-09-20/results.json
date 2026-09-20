@@ -1,0 +1,89 @@
+{
+  "models": {
+    "community": {
+      "reference_characters": 115,
+      "errors": 75,
+      "empty_reference_insertions": 4,
+      "missing_target_characters": 9,
+      "boundary_words": 11,
+      "truncated_rows": 0,
+      "cer": 0.6521739130434783
+    },
+    "sortformer": {
+      "reference_characters": 115,
+      "errors": 106,
+      "empty_reference_insertions": 12,
+      "missing_target_characters": 9,
+      "boundary_words": 11,
+      "truncated_rows": 0,
+      "cer": 0.9217391304347826
+    }
+  },
+  "scoring_slots": 48,
+  "decode_rows": 30,
+  "scope": "conservative_local_CER_with_clipped_words_not_full_video_accuracy",
+  "automatic_reassignment": false,
+  "deploy_allowed": false,
+  "sha256": {
+    "slots": "7d0f34cd9b8b4c1366d41b9505d46104f1136244f4de61aef53a28170ea04552",
+    "rows": "f04c30ba112db941ba8dff2b92c7fa76d4e7f1d340ac5b3ef83661447365aaea",
+    "protocol": "e52ce4814d1dd25c7fd30b5ca7430f4ea910b3add8d2c86aa28908ed2aeef0a2"
+  },
+  "run_status": {
+    "exit_code": 0,
+    "timed_out": false,
+    "device": "cpu",
+    "dtype": "float32",
+    "manifest_sha256": "02f15b73f9a46d5c18eb7913d1546cdeabc89432c81de14d87a6b7cf0a5f86dd",
+    "deploy_allowed": false
+  },
+  "protocol": {
+    "windows": [
+      {
+        "start": 14.853468750000001,
+        "end": 16.39346875,
+        "needs_review": true,
+        "automatic_reassignment": false
+      },
+      {
+        "start": 19.156593750000003,
+        "end": 20.40971875,
+        "needs_review": true,
+        "automatic_reassignment": false
+      },
+      {
+        "start": 40.31784375,
+        "end": 41.92534375,
+        "needs_review": true,
+        "automatic_reassignment": false
+      },
+      {
+        "start": 42.93346875,
+        "end": 43.98409375,
+        "needs_review": true,
+        "automatic_reassignment": false
+      },
+      {
+        "start": 44.85721875,
+        "end": 46.18,
+        "needs_review": true,
+        "automatic_reassignment": false
+      },
+      {
+        "start": 110.82159375,
+        "end": 111.95659375000001,
+        "needs_review": true,
+        "automatic_reassignment": false
+      }
+    ],
+    "reference_sha256": "30c9abf262b881972b771c5adb4864ef318a0d7547c1ead6bd8d04a1445eb095",
+    "audio_sha256": "12b29461406fe6725138fff370086ce15bb9bcab47c21801043e3ac88e3ea9f5",
+    "manifest_sha256": "02f15b73f9a46d5c18eb7913d1546cdeabc89432c81de14d87a6b7cf0a5f86dd",
+    "slots_sha256": "7d0f34cd9b8b4c1366d41b9505d46104f1136244f4de61aef53a28170ea04552",
+    "boundary_policy": "include full text of every intersecting manual word; conservative clipped-word diagnostic",
+    "missing_speaker_policy": "empty hypothesis, reference remains",
+    "empty_reference_policy": "insertions counted, individual CER undefined",
+    "decode_rows": 30,
+    "deployment_allowed": false
+  }
+}

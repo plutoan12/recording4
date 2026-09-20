@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import uuid
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from adminapi.models import Job, MediaTask, SourceAsset, TranscriptSegment, VoiceAssignment
+from pipeline.alignment import WordTiming
 from pipeline.speakers import SpeakerTurn
 
 
@@ -15,6 +17,7 @@ def verified_asset(session: Session, user) -> SourceAsset:  # noqa: ANN001
     asset = SourceAsset(
         storage_key=f"sources/{uuid.uuid4()}.mp4",
         original_filename="interview.mp4",
+        source_language="ko",
         byte_size=4096,
         duration_seconds=60,
         upload_state="verified",
@@ -112,6 +115,13 @@ def test_worker_labels_the_transcript_with_speakers(
 
     monkeypatch.setattr(media_tasks, "get_storage", lambda: storage)
     monkeypatch.setattr(media_tasks, "diarize", fake_diarize)
+    monkeypatch.setattr(
+        media_tasks,
+        "align_speaker_words",
+        lambda source, cues, **kwargs: [
+            [WordTiming(start=c.start, end=c.end, text=c.text)] for c in cues
+        ],
+    )
 
     result = media_tasks.run_media.run(str(task.id))
     assert result["status"] == "succeeded"
@@ -253,3 +263,163 @@ def test_voice_assignments_reject_empty_values(
         json={"assignments": {"SPEAKER_00": "  "}},
     )
     assert response.status_code == 422
+
+
+def test_overlap_review_is_persisted_and_hidden_for_a_newer_transcript(
+    session, user, storage, monkeypatch, client, auth_headers
+):
+    from worker import media_tasks
+
+    asset = verified_asset(session, user)
+    with_transcript(session, asset)
+    task = MediaTask(source_asset_id=asset.id, kind="diarize", settings={})
+    session.add(task)
+    session.commit()
+    monkeypatch.setattr(media_tasks, "get_storage", lambda: storage)
+    monkeypatch.setattr(
+        media_tasks, "diarize", lambda *a, **kw: [SpeakerTurn(0, 4, "A"), SpeakerTurn(1, 3, "B")]
+    )
+    monkeypatch.setattr(
+        media_tasks,
+        "align_speaker_words",
+        lambda source, cues, **kw: [[WordTiming(c.start, c.end, c.text)] for c in cues],
+    )
+    result = media_tasks.run_media.run(str(task.id))
+    assert result["needs_review"]
+    assert result["labeled"] == 0
+    response = client.get(f"/source-assets/{asset.id}/speakers", headers=auth_headers).json()
+    assert response["needs_review"]
+    assert response["speakers"] == []
+    assert response["multiple_speaker_segments"] == 2
+    assert all(s["speaker"] == "복수 화자" for s in response["review"])
+    session.add(
+        TranscriptSegment(
+            source_asset_id=asset.id,
+            transcript_version=3,
+            start_seconds=0,
+            end_seconds=2,
+            text="새 대본",
+        )
+    )
+    session.commit()
+    assert (
+        client.get(f"/source-assets/{asset.id}/speakers", headers=auth_headers).json()["review"]
+        == []
+    )
+
+
+def test_diarization_does_not_overwrite_transcript_edited_during_analysis(
+    session, user, storage, monkeypatch
+):
+    from worker import media_tasks
+
+    asset = verified_asset(session, user)
+    with_transcript(session, asset)
+    task = MediaTask(source_asset_id=asset.id, kind="diarize", settings={})
+    session.add(task)
+    session.commit()
+
+    def changed(source, **kwargs):
+        session.add(
+            TranscriptSegment(
+                source_asset_id=asset.id,
+                transcript_version=2,
+                start_seconds=0,
+                end_seconds=2,
+                text="다른 대본",
+            )
+        )
+        session.commit()
+        return [SpeakerTurn(0, 4, "A")]
+
+    monkeypatch.setattr(media_tasks, "get_storage", lambda: storage)
+    monkeypatch.setattr(media_tasks, "diarize", changed)
+    monkeypatch.setattr(
+        media_tasks, "align_speaker_words", lambda source, cues, **kw: [[] for c in cues]
+    )
+    assert media_tasks.run_media.run(str(task.id))["status"] == "failed"
+    assert (
+        session.query(TranscriptSegment)
+        .filter_by(source_asset_id=asset.id, transcript_version=3)
+        .count()
+        == 0
+    )
+
+
+def test_diarize_requires_source_language_without_enqueuing(client, auth_headers, session, user):
+    asset = verified_asset(session, user)
+    with_transcript(session, asset)
+    asset.source_language = None
+    session.commit()
+    response = client.post(f"/source-assets/{asset.id}/diarize", headers=auth_headers, json={})
+    assert response.status_code == 409
+    assert session.query(MediaTask).filter_by(kind="diarize").count() == 0
+
+
+def test_diarize_does_not_reuse_different_language_or_version(client, auth_headers, session, user):
+    asset = verified_asset(session, user)
+    with_transcript(session, asset)
+    endpoint = f"/source-assets/{asset.id}/diarize"
+    assert client.post(endpoint, headers=auth_headers, json={}).status_code == 202
+    assert client.post(endpoint, headers=auth_headers, json={"language": "en"}).status_code == 409
+    session.add(
+        TranscriptSegment(
+            source_asset_id=asset.id,
+            transcript_version=2,
+            start_seconds=0,
+            end_seconds=2,
+            text="수정된 대본",
+        )
+    )
+    session.commit()
+    assert client.post(endpoint, headers=auth_headers, json={}).status_code == 409
+    assert session.query(MediaTask).filter_by(kind="diarize").count() == 1
+
+
+def test_word_alignment_missing_prerequisites_fail_instead_of_empty_success(tmp_path, monkeypatch):
+    import sys
+
+    import pytest
+
+    from worker.analysis import MissingDependency, align_speaker_words
+
+    with pytest.raises(MissingDependency, match="언어"):
+        align_speaker_words(tmp_path / "sample.wav", [], language=None)
+    monkeypatch.setitem(sys.modules, "stable_whisper", None)
+    with pytest.raises(MissingDependency, match="의존성"):
+        align_speaker_words(tmp_path / "sample.wav", [], language="ko")
+
+
+@pytest.mark.parametrize("failure", ["timeout", "decode", "missing"])
+def test_speaker_word_crop_failure_is_bounded_and_not_empty_success(monkeypatch, tmp_path, failure):
+    import subprocess
+    import sys
+    from types import SimpleNamespace
+
+    import worker.analysis as analysis
+    from pipeline.editing import Cue
+
+    engine = SimpleNamespace(align=lambda *a, **kw: pytest.fail("failed crop must not align"))
+    monkeypatch.setitem(
+        sys.modules,
+        "stable_whisper",
+        SimpleNamespace(load_faster_whisper=lambda *a, **kw: engine),
+    )
+    monkeypatch.setattr(analysis, "ffmpeg_binary", lambda: "ffmpeg")
+    error = {
+        "timeout": subprocess.TimeoutExpired("ffmpeg", 600),
+        "decode": subprocess.CalledProcessError(1, "ffmpeg"),
+        "missing": FileNotFoundError("ffmpeg"),
+    }[failure]
+
+    def run(command, **kwargs):
+        assert "-nostdin" in command
+        assert kwargs["timeout"] == 600
+        assert kwargs["check"] and kwargs["capture_output"]
+        raise error
+
+    monkeypatch.setattr(analysis.subprocess, "run", run)
+    with pytest.raises(type(error)):
+        analysis.align_speaker_words(
+            tmp_path / "source.wav", [Cue(start=0, end=3, text="hello")], language="en"
+        )

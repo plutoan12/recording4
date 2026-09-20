@@ -1,0 +1,160 @@
+{
+  "source_hashes": {
+    "analysis.py": "9a55f3779cc8771257f2883fba3dfdc085fc70d6016545d989183a128f6d01ab",
+    "sync_evidence.py": "5ab3f2f4c4140912ed7beab95f6c98c2a281681ce87f4a96c958927e50e1a02d"
+  },
+  "cases": [
+    {
+      "language": "en",
+      "profile": "quiet",
+      "input_offset": -0.73,
+      "error_seconds": 0.038,
+      "source_sha256": "e0de895f528b8b6aba31a94933cc6a717561dfc77a4cce76f41557c47a8901aa",
+      "source_unchanged": true,
+      "text_preserved": true,
+      "metadata": {
+        "offset_seconds": 0.768,
+        "framerate_scale": 1.0,
+        "vad": "",
+        "max_offset_seconds": 10.0,
+        "profile": "quiet",
+        "audio_normalized": true,
+        "boundary_support": 6,
+        "recovery_used": true
+      }
+    },
+    {
+      "language": "en",
+      "profile": "quiet",
+      "input_offset": 0.0,
+      "error_seconds": 0.038,
+      "source_sha256": "e0de895f528b8b6aba31a94933cc6a717561dfc77a4cce76f41557c47a8901aa",
+      "source_unchanged": true,
+      "text_preserved": true,
+      "metadata": {
+        "offset_seconds": 0.038,
+        "framerate_scale": 1.0,
+        "vad": "",
+        "max_offset_seconds": 10.0,
+        "profile": "quiet",
+        "audio_normalized": true,
+        "boundary_support": 6,
+        "recovery_used": true
+      }
+    },
+    {
+      "language": "en",
+      "profile": "quiet",
+      "input_offset": 2.5,
+      "error_seconds": 0.038,
+      "source_sha256": "e0de895f528b8b6aba31a94933cc6a717561dfc77a4cce76f41557c47a8901aa",
+      "source_unchanged": true,
+      "text_preserved": true,
+      "metadata": {
+        "offset_seconds": -2.462,
+        "framerate_scale": 1.0,
+        "vad": "",
+        "max_offset_seconds": 10.0,
+        "profile": "quiet",
+        "audio_normalized": true,
+        "boundary_support": 6,
+        "recovery_used": true
+      }
+    },
+    {
+      "language": "en",
+      "profile": "quiet",
+      "input_offset": 4.12,
+      "error_seconds": 0.038,
+      "source_sha256": "e0de895f528b8b6aba31a94933cc6a717561dfc77a4cce76f41557c47a8901aa",
+      "source_unchanged": true,
+      "text_preserved": true,
+      "metadata": {
+        "offset_seconds": -4.082,
+        "framerate_scale": 1.0,
+        "vad": "",
+        "max_offset_seconds": 10.0,
+        "profile": "quiet",
+        "audio_normalized": true,
+        "boundary_support": 6,
+        "recovery_used": true
+      }
+    },
+    {
+      "language": "ja",
+      "profile": "long_cues",
+      "input_offset": -0.73,
+      "error_seconds": 0.0145,
+      "source_sha256": "6bcfdbfe2ebb43caf890796e034ca270697afed65837e750bb66a72449dfc260",
+      "source_unchanged": true,
+      "text_preserved": true,
+      "metadata": {
+        "offset_seconds": 0.744,
+        "framerate_scale": 1.0,
+        "vad": "",
+        "max_offset_seconds": 10.0,
+        "profile": "long_cues",
+        "audio_normalized": true,
+        "boundary_support": 3,
+        "recovery_used": true
+      }
+    },
+    {
+      "language": "ja",
+      "profile": "long_cues",
+      "input_offset": 0.0,
+      "error_seconds": 0.0145,
+      "source_sha256": "6bcfdbfe2ebb43caf890796e034ca270697afed65837e750bb66a72449dfc260",
+      "source_unchanged": true,
+      "text_preserved": true,
+      "metadata": {
+        "offset_seconds": 0.014,
+        "framerate_scale": 1.0,
+        "vad": "",
+        "max_offset_seconds": 10.0,
+        "profile": "long_cues",
+        "audio_normalized": true,
+        "boundary_support": 3,
+        "recovery_used": true
+      }
+    },
+    {
+      "language": "ja",
+      "profile": "long_cues",
+      "input_offset": 2.5,
+      "error_seconds": 0.0145,
+      "source_sha256": "6bcfdbfe2ebb43caf890796e034ca270697afed65837e750bb66a72449dfc260",
+      "source_unchanged": true,
+      "text_preserved": true,
+      "metadata": {
+        "offset_seconds": -2.486,
+        "framerate_scale": 1.0,
+        "vad": "",
+        "max_offset_seconds": 10.0,
+        "profile": "long_cues",
+        "audio_normalized": true,
+        "boundary_support": 3,
+        "recovery_used": true
+      }
+    },
+    {
+      "language": "ja",
+      "profile": "long_cues",
+      "input_offset": 4.12,
+      "error_seconds": 0.0145,
+      "source_sha256": "6bcfdbfe2ebb43caf890796e034ca270697afed65837e750bb66a72449dfc260",
+      "source_unchanged": true,
+      "text_preserved": true,
+      "metadata": {
+        "offset_seconds": -4.106,
+        "framerate_scale": 1.0,
+        "vad": "",
+        "max_offset_seconds": 10.0,
+        "profile": "long_cues",
+        "audio_normalized": true,
+        "boundary_support": 3,
+        "recovery_used": true
+      }
+    }
+  ]
+}

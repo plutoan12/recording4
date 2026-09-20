@@ -1,0 +1,373 @@
+{
+  "scope": "11_controlled_English_cases_and_one_AMI_diagnostic",
+  "deploy_allowed": false,
+  "collar": 0,
+  "include_overlap": true,
+  "models": {
+    "community1": {
+      "cases": [
+        {
+          "case": "clean",
+          "sha256": "5cc5b547c37847557f8233e2882a468a563662cfa38d7a8d93a8ee457887ddd1",
+          "total_characters": 399,
+          "word_correct": 399,
+          "word_wrong": 0,
+          "word_unresolved": 0
+        },
+        {
+          "case": "noise_20db_seed17",
+          "sha256": "0aa32ce7da05cc6e45d36bf37817be3a0f68f5fe6a2b55bea8b16ff844c6bad4",
+          "total_characters": 399,
+          "word_correct": 399,
+          "word_wrong": 0,
+          "word_unresolved": 0
+        },
+        {
+          "case": "noise_20db_seed29",
+          "sha256": "4250648059bef91b2cd42bb241b586d2024519a839af58492f9ddd96b353330a",
+          "total_characters": 399,
+          "word_correct": 399,
+          "word_wrong": 0,
+          "word_unresolved": 0
+        },
+        {
+          "case": "noise_10db_seed17",
+          "sha256": "af48294d77221c42c0d9c62714570f2f10f2d722ad7ec57f34f016b5b405dcb2",
+          "total_characters": 399,
+          "word_correct": 399,
+          "word_wrong": 0,
+          "word_unresolved": 0
+        },
+        {
+          "case": "noise_10db_seed29",
+          "sha256": "28dab1e35b58de735f9c596865e710c836db69cb887d8116190fff293deec8ec",
+          "total_characters": 399,
+          "word_correct": 399,
+          "word_wrong": 0,
+          "word_unresolved": 0
+        },
+        {
+          "case": "noise_0db_seed17",
+          "sha256": "f2040fbd0c15c394de8701308da6487b37570fa8734a9712c1d2af76041cc8ce",
+          "total_characters": 399,
+          "word_correct": 397,
+          "word_wrong": 0,
+          "word_unresolved": 2
+        },
+        {
+          "case": "noise_0db_seed29",
+          "sha256": "e2f53c0d5a65237b9c1384089bfdc963f682cc880edf6f3095a99e5eb1a3736c",
+          "total_characters": 399,
+          "word_correct": 397,
+          "word_wrong": 0,
+          "word_unresolved": 2
+        },
+        {
+          "case": "overlap_25pct",
+          "sha256": "e28fb61739f5c602d918abd48b0f54df5cb5c1b835df845317c0e54d5ae82904",
+          "total_characters": 399,
+          "word_correct": 336,
+          "word_wrong": 0,
+          "word_unresolved": 63
+        },
+        {
+          "case": "overlap_25pct_noise10db",
+          "sha256": "0680bd7e36bb1ee257645ff928b2a889be6b482e7d97108dbb997a2a163c56a5",
+          "total_characters": 399,
+          "word_correct": 336,
+          "word_wrong": 0,
+          "word_unresolved": 63
+        },
+        {
+          "case": "overlap_50pct",
+          "sha256": "1bca3b6a07d4218748bf73caadcc4201a020ed3c06e1de38f3ffb75dd44c473e",
+          "total_characters": 399,
+          "word_correct": 153,
+          "word_wrong": 56,
+          "word_unresolved": 190
+        },
+        {
+          "case": "overlap_50pct_noise10db",
+          "sha256": "7814eb7f63d0db4b80e53ac135c5b98c10724eec6481ae771023349c66e7fedf",
+          "total_characters": 399,
+          "word_correct": 153,
+          "word_wrong": 53,
+          "word_unresolved": 193
+        }
+      ],
+      "totals": {
+        "total_characters": 4389,
+        "word_correct": 3767,
+        "word_wrong": 109,
+        "word_unresolved": 513
+      },
+      "ami": {
+        "total": 38.92,
+        "missed detection": 7.436531249999996,
+        "false alarm": 1.1190312499999848,
+        "confusion": 4.867093749999988,
+        "diarization error rate": 0.3448781153648502
+      }
+    },
+    "sortformer_v1": {
+      "cases": [
+        {
+          "case": "clean",
+          "sha256": "5cc5b547c37847557f8233e2882a468a563662cfa38d7a8d93a8ee457887ddd1",
+          "total_characters": 399,
+          "word_correct": 399,
+          "word_wrong": 0,
+          "word_unresolved": 0
+        },
+        {
+          "case": "noise_20db_seed17",
+          "sha256": "0aa32ce7da05cc6e45d36bf37817be3a0f68f5fe6a2b55bea8b16ff844c6bad4",
+          "total_characters": 399,
+          "word_correct": 399,
+          "word_wrong": 0,
+          "word_unresolved": 0
+        },
+        {
+          "case": "noise_20db_seed29",
+          "sha256": "4250648059bef91b2cd42bb241b586d2024519a839af58492f9ddd96b353330a",
+          "total_characters": 399,
+          "word_correct": 399,
+          "word_wrong": 0,
+          "word_unresolved": 0
+        },
+        {
+          "case": "noise_10db_seed17",
+          "sha256": "af48294d77221c42c0d9c62714570f2f10f2d722ad7ec57f34f016b5b405dcb2",
+          "total_characters": 399,
+          "word_correct": 399,
+          "word_wrong": 0,
+          "word_unresolved": 0
+        },
+        {
+          "case": "noise_10db_seed29",
+          "sha256": "28dab1e35b58de735f9c596865e710c836db69cb887d8116190fff293deec8ec",
+          "total_characters": 399,
+          "word_correct": 399,
+          "word_wrong": 0,
+          "word_unresolved": 0
+        },
+        {
+          "case": "noise_0db_seed17",
+          "sha256": "f2040fbd0c15c394de8701308da6487b37570fa8734a9712c1d2af76041cc8ce",
+          "total_characters": 399,
+          "word_correct": 397,
+          "word_wrong": 0,
+          "word_unresolved": 2
+        },
+        {
+          "case": "noise_0db_seed29",
+          "sha256": "e2f53c0d5a65237b9c1384089bfdc963f682cc880edf6f3095a99e5eb1a3736c",
+          "total_characters": 399,
+          "word_correct": 397,
+          "word_wrong": 0,
+          "word_unresolved": 2
+        },
+        {
+          "case": "overlap_25pct",
+          "sha256": "e28fb61739f5c602d918abd48b0f54df5cb5c1b835df845317c0e54d5ae82904",
+          "total_characters": 399,
+          "word_correct": 329,
+          "word_wrong": 0,
+          "word_unresolved": 70
+        },
+        {
+          "case": "overlap_25pct_noise10db",
+          "sha256": "0680bd7e36bb1ee257645ff928b2a889be6b482e7d97108dbb997a2a163c56a5",
+          "total_characters": 399,
+          "word_correct": 331,
+          "word_wrong": 0,
+          "word_unresolved": 68
+        },
+        {
+          "case": "overlap_50pct",
+          "sha256": "1bca3b6a07d4218748bf73caadcc4201a020ed3c06e1de38f3ffb75dd44c473e",
+          "total_characters": 399,
+          "word_correct": 204,
+          "word_wrong": 0,
+          "word_unresolved": 195
+        },
+        {
+          "case": "overlap_50pct_noise10db",
+          "sha256": "7814eb7f63d0db4b80e53ac135c5b98c10724eec6481ae771023349c66e7fedf",
+          "total_characters": 399,
+          "word_correct": 207,
+          "word_wrong": 0,
+          "word_unresolved": 192
+        }
+      ],
+      "totals": {
+        "total_characters": 4389,
+        "word_correct": 3860,
+        "word_wrong": 0,
+        "word_unresolved": 529
+      },
+      "ami": {
+        "total": 38.919999999999995,
+        "missed detection": 16.599999999999998,
+        "false alarm": 1.679999999999998,
+        "confusion": 1.3200000000000074,
+        "diarization error rate": 0.5035971223021584
+      },
+      "provenance": {
+        "source_sha256": "768c08ceca1432d49b0ee9bc2dda18769aa1164df63f6f35bde4c230d466b7bb",
+        "checkpoint_sha256": "bc74dfd8ca314240abcdc7e2949901eeaa72947a04ce1fab893e373d81f1e689",
+        "model_revision": "9f17b10df44c0a4c8f3c86fbddc9ee2d6ab9ac08",
+        "versions": {
+          "nemo_toolkit": "2.5.0",
+          "torch": "2.14.0"
+        },
+        "device": "cpu",
+        "threads": 4,
+        "seed": 0,
+        "elapsed_seconds": 3.6316378749907017,
+        "predictions_sha256": "a269f395261c2d270c82efb0d9113716fb024df06b61e6b447c35e4951a2b809"
+      },
+      "ami_predicted_speakers": 4
+    },
+    "sortformer_v21": {
+      "cases": [
+        {
+          "case": "clean",
+          "sha256": "5cc5b547c37847557f8233e2882a468a563662cfa38d7a8d93a8ee457887ddd1",
+          "total_characters": 399,
+          "word_correct": 399,
+          "word_wrong": 0,
+          "word_unresolved": 0
+        },
+        {
+          "case": "noise_20db_seed17",
+          "sha256": "0aa32ce7da05cc6e45d36bf37817be3a0f68f5fe6a2b55bea8b16ff844c6bad4",
+          "total_characters": 399,
+          "word_correct": 399,
+          "word_wrong": 0,
+          "word_unresolved": 0
+        },
+        {
+          "case": "noise_20db_seed29",
+          "sha256": "4250648059bef91b2cd42bb241b586d2024519a839af58492f9ddd96b353330a",
+          "total_characters": 399,
+          "word_correct": 399,
+          "word_wrong": 0,
+          "word_unresolved": 0
+        },
+        {
+          "case": "noise_10db_seed17",
+          "sha256": "af48294d77221c42c0d9c62714570f2f10f2d722ad7ec57f34f016b5b405dcb2",
+          "total_characters": 399,
+          "word_correct": 399,
+          "word_wrong": 0,
+          "word_unresolved": 0
+        },
+        {
+          "case": "noise_10db_seed29",
+          "sha256": "28dab1e35b58de735f9c596865e710c836db69cb887d8116190fff293deec8ec",
+          "total_characters": 399,
+          "word_correct": 399,
+          "word_wrong": 0,
+          "word_unresolved": 0
+        },
+        {
+          "case": "noise_0db_seed17",
+          "sha256": "f2040fbd0c15c394de8701308da6487b37570fa8734a9712c1d2af76041cc8ce",
+          "total_characters": 399,
+          "word_correct": 397,
+          "word_wrong": 0,
+          "word_unresolved": 2
+        },
+        {
+          "case": "noise_0db_seed29",
+          "sha256": "e2f53c0d5a65237b9c1384089bfdc963f682cc880edf6f3095a99e5eb1a3736c",
+          "total_characters": 399,
+          "word_correct": 397,
+          "word_wrong": 0,
+          "word_unresolved": 2
+        },
+        {
+          "case": "overlap_25pct",
+          "sha256": "e28fb61739f5c602d918abd48b0f54df5cb5c1b835df845317c0e54d5ae82904",
+          "total_characters": 399,
+          "word_correct": 322,
+          "word_wrong": 0,
+          "word_unresolved": 77
+        },
+        {
+          "case": "overlap_25pct_noise10db",
+          "sha256": "0680bd7e36bb1ee257645ff928b2a889be6b482e7d97108dbb997a2a163c56a5",
+          "total_characters": 399,
+          "word_correct": 332,
+          "word_wrong": 0,
+          "word_unresolved": 67
+        },
+        {
+          "case": "overlap_50pct",
+          "sha256": "1bca3b6a07d4218748bf73caadcc4201a020ed3c06e1de38f3ffb75dd44c473e",
+          "total_characters": 399,
+          "word_correct": 201,
+          "word_wrong": 0,
+          "word_unresolved": 198
+        },
+        {
+          "case": "overlap_50pct_noise10db",
+          "sha256": "7814eb7f63d0db4b80e53ac135c5b98c10724eec6481ae771023349c66e7fedf",
+          "total_characters": 399,
+          "word_correct": 204,
+          "word_wrong": 0,
+          "word_unresolved": 195
+        }
+      ],
+      "totals": {
+        "total_characters": 4389,
+        "word_correct": 3848,
+        "word_wrong": 0,
+        "word_unresolved": 541
+      },
+      "ami": {
+        "total": 38.919999999999995,
+        "missed detection": 18.910000000000007,
+        "false alarm": 0.6299999999999848,
+        "confusion": 0.1999999999999984,
+        "diarization error rate": 0.5071942446043164
+      },
+      "provenance": {
+        "source_sha256": "768c08ceca1432d49b0ee9bc2dda18769aa1164df63f6f35bde4c230d466b7bb",
+        "checkpoint_sha256": "8abd32832159c6ac1148c926b7276f35ba34582c444e559dce1f1253fea42ef8",
+        "model_revision": "fafaab5faa1617a0ca52d38dd3dc4bd636800d3d",
+        "versions": {
+          "nemo_toolkit": "2.5.0",
+          "torch": "2.14.0"
+        },
+        "device": "cpu",
+        "threads": 4,
+        "seed": 0,
+        "elapsed_seconds": 4.2033386250259355,
+        "predictions_sha256": "2fa89e8c605a1fc9d4f1213637384385d5237745bd645c8bc15be4d5c9885b7d"
+      },
+      "ami_predicted_speakers": 4
+    }
+  },
+  "postprocessing": {
+    "onset": 0.5,
+    "offset": 0.5,
+    "pad_onset": 0.0,
+    "pad_offset": 0.0,
+    "min_duration_on": 0.0,
+    "min_duration_off": 0.0
+  },
+  "note": "Initial private outputs said checkpoint_defaults; installed NeMo 2.5.0 actually used PostProcessingParams defaults shown here. No threshold tuning. Raw output files preserved.",
+  "dicow_followup": {
+    "status": "failed",
+    "exit_code": 137,
+    "completed_rows": 0,
+    "expected_rows": 4,
+    "memory_limit_gib": 7,
+    "docker_vm_bytes": 8318709760,
+    "manifest_sha256": "dfba50772167f2e2344267f21dcc9c123c2b7a4d32bee445ca7dd5a40a9680b1",
+    "cause": "SIGKILL; OOM suspected but unconfirmed; no completed predictions",
+    "deploy_allowed": false
+  }
+}

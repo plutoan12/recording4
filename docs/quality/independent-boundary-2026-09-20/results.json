@@ -1,0 +1,82 @@
+{
+  "source": {
+    "dataset": "diarizers-community/ami",
+    "config": "ihm",
+    "split": "test",
+    "row_offset": 2,
+    "evaluation_seconds": 120,
+    "extended_seconds": 300,
+    "evaluation_audio_sha256": "551f54bb9ecad533584992ff16eb18e5ff9b4520fd524b51ba557de53fbe37b6",
+    "extended_audio_sha256": "6efb73489811f074f7245c697d4d37ad78dab6a20a8ae155da0090eb70a0012d",
+    "pcm_differs_from_prior_evaluation": true
+  },
+  "community": {
+    "model_revision": "3533c8cf8e369892e6b79ff1bf80f7b0286a54ee",
+    "turns_120": 16,
+    "speakers_120": 2,
+    "turns_300": 29
+  },
+  "sortformer": {
+    "model_revision": "fafaab5faa1617a0ca52d38dd3dc4bd636800d3d",
+    "turns": 34,
+    "speakers": 3
+  },
+  "baseline_asr_words": 78,
+  "consensus_gaps": {
+    "count": 2,
+    "seconds": 1.6000000000000014,
+    "word_guard_seconds": 0.1,
+    "minimum_gap_seconds": 0.5,
+    "whisper_candidate_groups": 1,
+    "whisper_proposed_words": 2
+  },
+  "dicow": {
+    "decode_rows": 4,
+    "alignment_statuses": {
+      "partial_timing_consensus": 1,
+      "timing_consensus_only": 1,
+      "invalid_alignment_time": 1,
+      "empty_decoding": 1
+    },
+    "candidate_groups": 1,
+    "proposed_words": 7,
+    "reference_supplied_to_model": false
+  },
+  "extended_voice_verification": {
+    "target_mapping_original_coverage": 0.9801891040072038,
+    "target_mapping_extended_purity": 0.9966689529287189,
+    "target_anchor_seconds": 65.8078125,
+    "competing_anchor_seconds": 79.14375,
+    "anchor_status": "candidate_only",
+    "voice_similarity": 0.23921582102775574,
+    "voice_similarity_threshold": 0.6,
+    "voice_margin": 0.12347433716058731,
+    "voice_margin_threshold": 0.15,
+    "independent_asr_agreed": false,
+    "accepted_words": 0
+  },
+  "posthoc_reference_diagnostic": {
+    "source": "diarizers-community/ami official speaker timestamps",
+    "candidate_overlaps_reference_speech": false,
+    "candidate_start": 47.46,
+    "candidate_end": 48.34,
+    "previous_reference_speech_end": 30.24,
+    "next_reference_speech_start": 50.13,
+    "used_for_selection_or_thresholds": false
+  },
+  "whisper_confidence_diagnostic": {
+    "reference_speech_intervals": 16,
+    "reference_speech_intervals_with_words": 13,
+    "reference_nonspeech_intervals": 10,
+    "reference_nonspeech_intervals_with_context_words": 9,
+    "false_candidate_no_speech_probability": 0.39192941784858704,
+    "false_candidate_average_log_probability": -0.9869833929198129,
+    "quiet_true_speech_no_speech_probability": 0.44550958275794983,
+    "quiet_true_speech_average_log_probability": -1.0167627533276875,
+    "confidence_gate_adopted": false,
+    "locally_amplified_silero_veto_adopted": false
+  },
+  "evaluation_output_changed": false,
+  "deployment_allowed": false,
+  "four_language_improvement_proven": false
+}

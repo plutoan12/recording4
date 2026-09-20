@@ -1,0 +1,6 @@
+# Isolated compatibility overlay for BUT-FIT/DiCoW_v3_2 at
+# 00a09c622bf58c34fdc76c3b5676f4da706f2a8e. Never install in the worker environment.
+transformers==4.42.4
+tokenizers==0.19.1
+numpy==1.26.4
+accelerate==0.33.0

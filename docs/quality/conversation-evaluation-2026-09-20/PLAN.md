@@ -1,0 +1,107 @@
+# 새 다국어 실제 대화 평가 준비
+
+이번 변경은 **입력 일관성 검사**이며 실제 음성 품질 측정이나 운영 적용 승인이 아닙니다. 기존 11조건·4,389자와 영어 AMI의 과거 결과는 그대로 유지합니다. 낭독 FLEURS를 실제 대화 실적으로 합산하지 않습니다.
+
+## 먼저 고정할 것
+
+모델 결과를 보기 전에 원본 출처·고정 리비전·이용 조건·선정 규칙·평가 시작/끝·사람 정답을 정합니다. 한국어·영어·일본어·중국어를 모두 포함하고 각 녹음에는 사람이 주석한 화자가 2명 이상 있어야 합니다. 각 언어 한 건은 입력 준비의 최소 조건일 뿐 대표성이나 품질 합격 조건이 아닙니다. 화자 수·현장 소음·겹말 비율별 추가 표본은 사전 계획으로 고정해야 합니다.
+
+`human_annotated=true`는 자료 제공자의 선언입니다. 이 도구가 사람이 실제로 주석했는지, 실제 대화인지, 이용 권한이 있는지, 모델 학습에 없던 화자인지 검증하지 않습니다. 별도 출처 확인과 사람 검수가 필요합니다. 자료 ID는 익명 식별자를 사용합니다.
+
+## 비공개 파일 형식
+
+비공개 루트 아래 PCM WAV, 정답 JSON, manifest JSON을 둡니다. 원시 파일·대사·화자 신원은 Git에 넣지 않습니다. 정답은 `{"segments": [{"start": 0.2, "end": 1.7, "speaker": "s1", "text": "..."}, ...]}` 형식입니다. 시각은 WAV 시작 기준이며 겹말 구간도 겹친 채 남깁니다. 모든 정답 구간은 지정된 평가 구간 안에 있어야 합니다. 자동으로 잘라 분모를 줄이지 않습니다.
+
+Manifest 예시(실제 데이터가 아닌 형식 설명):
+
+```json
+{
+  "schema": 1,
+  "policy": {"der_collar": 0, "include_overlap": true, "sync_tolerance_seconds": 0.5},
+  "cases": [{
+    "id": "ko-conversation-001", "language": "ko",
+    "kind": "real_conversation", "human_annotated": true,
+    "source": "출처 식별자", "revision": "고정 리비전", "license": "확인한 이용 조건",
+    "selection_rule": "모델 평가 전 정한 선정 규칙",
+    "audio": "ko/source.wav", "audio_sha256": "실제 SHA256",
+    "reference": "ko/reference.json", "reference_sha256": "실제 SHA256",
+    "evaluation_start": 0, "evaluation_end": 120
+  }]
+}
+```
+
+명령:
+
+```bash
+python scripts/prepare_conversation_evaluation.py \
+  --root /비공개/평가자료 \
+  --manifest /비공개/평가자료/manifest.json \
+  --output /비공개/평가자료/cohort-lock.json
+```
+
+종료 0은 네 언어의 입력 형식·해시 조건 충족, 2는 언어 누락입니다. 잘못된 입력은 오류로 중단합니다. 출력은 파일 해시·구간·화자/문자 수이며 대사를 싣지 않습니다. 기존 출력과 다른 표본/정책/출처/선정 규칙이면 덮어쓰지 않습니다. 출력 해시를 기준·후보 양쪽 결과에 연결하는 평가 실행기는 **후속 작업**입니다.
+
+## 후속 측정에서 지킬 기준
+
+- 기존 11조건 회귀 검사는 별도로 유지합니다. 새 코호트는 기준·후보가 동일한 lock을 사용해야 합니다.
+- 새 대화 DER은 고정된 전체 평가 구간을 UEM으로 지정하고 collar 0·겹말 포함으로 측정할 계획입니다. 과거 AMI의 reference/hypothesis 합집합 UEM 결과와 직접 개선율로 비교하지 않습니다.
+- CER 원문 지표는 유지하고 간체 변환 등 표기 정규화 결과를 별도로 표시합니다. 화자 배정 정답·오배정·미확인 문자 수와 CER을 서로 대체하지 않습니다.
+- 실패/거부는 제외하지 않습니다. 코호트 전체와 언어/조건별 결과를 함께 보며 정답 증가·오배정 비증가를 확인하기 전에는 운영 기본을 바꾸지 않습니다.
+- 기준 목소리가 없는 50% 겹말과 대상 ASR의 독립 음성·시각 근거는 별도 개선 과제입니다. 대사 일치만으로 기존 화자를 덮어쓰지 않습니다.
+
+## 현재 검증
+
+합성된 테스트 파일로 해시 변경, 중복 음원/ID, 네 언어 누락, 낭독/자동 정답 선언, 잘못된 시각, 정책 변경, 덮어쓰기 방어를 검사했습니다. 이는 실제 대화 음원 실측이 아닙니다. 실제 한·일·중 대화 자료 준비와 네 언어 기준·후보 실행은 아직 남아 있습니다.
+
+### 검토 반영과 주석의 완전성
+
+UTF-8을 명시하고 중복 JSON 키·비유한 수·불리언/숫자 정책 혼동을 거부합니다. CLI 오류는 원시 파일 경로를 포함한 traceback 대신 고정 문구로 알립니다. manifest 해시는 JSON 내용의 정규형 기준이며 단순 들여쓰기 변경은 새 코호트로 세지 않습니다. 실제 음원/정답은 파일 바이트 SHA로 검사합니다.
+
+발화 구간 밖이 실제 무음인지 누락된 주석인지 입력 형식만으로 판별할 수 없습니다. 임의 최소 발화 비율을 넣어 쉬운 표본만 남기지 않으며 전체 구간의 주석 완전성은 사람 검수에서 확인해야 합니다. 동일 정답 문구가 다른 음원에 존재할 수 있어 정답 해시 중복만으로 음원/대사 불일치를 단정하지 않습니다. 출력 문자 수는 공백 제외 문자 분모이며 WER 단어 수를 뜻하지 않습니다. 파일 독점 생성 중 경쟁 쓰기가 발생하면 실패로 중단해 기존 결과를 보존합니다.
+
+입력 파일 검사에서 WAV 헤더뿐 아니라 PCM payload가 선언된 프레임 수만큼 존재하는지 확인합니다. 잘린 파일은 해시가 manifest와 일치해도 거부합니다. 비객체 manifest와 표현 범위를 넘는 시각도 입력 오류이며 CLI는 비공개 경로·원문 traceback을 출력하지 않습니다. PCM 완전성은 실제 발화 품질이나 정답 일치 검증을 대신하지 않습니다.
+
+## 고정 코호트에 연결한 점수 비교
+
+`compare_conversation_evaluation.py`는 manifest와 실제 파일을 다시 검사해 현재 lock과 일치하는지 확인한 뒤 기준·후보 점수를 비교합니다. 명령:
+
+```bash
+python scripts/compare_conversation_evaluation.py \
+  --manifest /비공개/평가자료/manifest.json --root /비공개/평가자료 \
+  --lock /비공개/평가자료/cohort-lock.json \
+  --baseline /비공개/평가자료/baseline.json \
+  --candidate /비공개/평가자료/candidate.json \
+  --output /비공개/평가자료/comparison.json
+```
+
+점수 파일은 `schema: 1`, `cohort_sha256`, `cases`를 갖습니다. `cohort_sha256`은 이 모듈의 `fingerprint(lock)`으로 구합니다. 각 case는 기존 화자 점수의 `case`, `sha256`, `total_characters`, `word_correct`, `word_wrong`, `word_unresolved`에 `language`, `reference_sha256`, `status`를 더합니다. 모든 lock ID가 양쪽에 정확히 한 번 있어야 하며 음원·정답·언어·문자 분모가 lock과 같아야 합니다.
+
+상태는 `succeeded`, `failed`, `rejected`입니다. 실패/거부는 전체 문자 분모를 미확인으로 보존합니다. 후보에 한 건이라도 남으면 다른 건의 정답 증가와 관계없이 개선 합격을 거부합니다. 기준에서 실패했던 건이 후보에서 성공한 경우는 분모를 유지한 회복으로 비교하며, 동일하게 오배정 비증가를 요구합니다. 조건별 정답 비감소·오배정 비증가와 전체 정답 증가도 기존 기준대로 확인합니다. 언어별 분모와 기준/후보 수치를 따로 출력합니다.
+
+종료 0은 이 코호트의 점수 조건 충족, 2는 비개선/실패 포함, 1은 잘못된 입력입니다. 다른 내용의 기존 비교 파일은 덮어쓰지 않습니다. `deploy_allowed`는 항상 false입니다. 입력이 바뀐 오류에서 과거 결과 파일을 보존하므로 호출자는 **이번 명령의 종료 코드**를 반드시 확인해야 합니다.
+
+이 도구는 이미 계산된 화자 배정 문자 점수를 검증합니다. 모델 추론·독립 화자 채점·DER/CER 생성기는 아직 연결하지 않았습니다. 잘못 계산하거나 꾸민 점수의 진위를 이 비교기로 보장할 수 없습니다. 기존 11조건 회귀 검사도 별도로 통과해야 하며 이 결과만으로 운영을 바꾸지 않습니다.
+
+기존 11조건용 `check_speaker_quality.py` 단독 CLI도 같은 엄격 JSON/UTF-8/덮어쓰기 방어를 적용합니다. 정상 출력의 `inputs`에는 기준·후보 파일 SHA가 있어 같은 변화량이더라도 다른 입력이면 새 출력 경로가 필요합니다. 기존 SHA 없는 결과는 보존하며 자동 덮어쓰지 않습니다. `invalid` 출력은 `schema/verdict/deploy_allowed/reasons`만 있으므로 종료 1 또는 invalid를 먼저 확인하고 delta/cases를 읽지 않아야 합니다.
+
+## 독립 DER 채점 연결
+
+`scripts/score_conversation_diarization.py`가 저장된 예측 화자 구간과 사람 정답을 [pyannote.metrics](https://pyannote.github.io/pyannote-metrics/reference.html#diarization)로 채점합니다. 새 모델 추론은 하지 않습니다. collar 0·겹말 포함, manifest 전체 구간의 명시적 UEM을 사용합니다. 다른 화자 이름은 최적 대응으로 비교하며 같은 화자의 중복 트랙은 합칩니다. 구간 밖/잘못된 시각을 잘라 숨기지 않고 거부합니다.
+
+평가 전용 별도 Python 3.12 환경에서 `pip install -r scripts/requirements-der-evaluation.txt`로 검증한 라이브러리 버전을 설치합니다. 운영/개발 환경과 NumPy 버전이 다르므로 같은 환경에 덮어 설치하지 않습니다. CI의 **DER 채점 검증** 작업도 별도 환경에서 17개 테스트를 실행합니다. 토큰·모델 다운로드·유료 API 없이 수행합니다.
+
+```bash
+python scripts/score_conversation_diarization.py \
+  --manifest /비공개/평가자료/manifest.json --root /비공개/평가자료 \
+  --lock /비공개/평가자료/cohort-lock.json \
+  --predictions /비공개/평가자료/diarization.json \
+  --output /비공개/평가자료/der.json
+```
+
+예측 파일은 `schema: 1`, `cohort_sha256`(비교 모듈의 fingerprint(lock)), 고정 `model_revision`, `cases`를 갖습니다. 각 case는 `id`, `audio_sha256`, `status`, `turns`이며 각 turn은 `start/end/speaker`입니다. status는 succeeded/failed/rejected이고 실패/거부의 turns는 빈 배열이어야 합니다. 모든 코호트 조건을 포함해야 합니다. 실패도 정답 발화 시간 분모를 보존하며 누락으로 채점하고 실패 개수를 함께 보고합니다.
+
+DER 결과는 전체·언어별 missed detection/false alarm/confusion/total 초와 시간 가중 DER, 조건별 수치, 평가 버전, 입력 지문을 기록합니다. 원문 대사와 화자 이름은 출력하지 않습니다. 기존 다른 결과는 덮어쓰지 않습니다. 정상 채점 종료 0, 실패/거부 포함 2, 무효 입력/출력/의존성 부재 1이며 배포 승인은 항상 false입니다.
+
+테스트 fixture에서 정답 화자 이름 변경은 DER 0, 겹말 누락 2초+무음 오검출 1초/정답 발화 4초는 DER 0.75, 예측 없음은 누락률 1.0을 확인했습니다. 이는 채점기 검증으로 실제 영상 품질 개선 실측이 아닙니다. 실제 네 언어 자료/모델 결과 연결은 남아 있습니다. DER을 기존 문자 화자 배정 정답/오배정 수치로 바꾸어 쓰지 않습니다. CER과 문자 화자 독립 채점도 별도 후속 과제입니다.
+
+추가 검토: 모델이 두 화자를 하나로 합친 경우 혼동 2초/정답 4초=DER 0.5를 검증했습니다. 예측은 고정 평가 구간 기준으로 준비해야 하며 구간을 가로지르는 예측도 scorer에서 임의 자르지 않습니다. 사람이 정한 window와 입력을 다시 준비해 새 지문으로 평가합니다. model_revision은 비공개 예측 파일 안에 있고 predictions_sha256이 이를 포함해 고정합니다. 결과에는 조건별 평가 시작/끝을 명시합니다. 원본 모델 식별 정보가 필요하면 일치하는 비공개 예측 파일을 확인합니다.

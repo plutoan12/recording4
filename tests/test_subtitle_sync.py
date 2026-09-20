@@ -16,7 +16,8 @@ from pipeline.subtitle_files import dump_subtitles, parse_subtitles
 
 pytest.importorskip("ffsubsync", reason="subtitles extra가 있어야 보정기를 돌립니다.")
 
-from worker.analysis import SyncOptions, sync_subtitles  # noqa: E402
+from worker.analysis import SyncOptions  # noqa: E402
+from worker.analysis import _sync_acoustic as sync_subtitles  # noqa: E402
 
 TRUE_CUES = [
     Cue(start=5, end=7, text="첫 문장입니다"),
@@ -132,3 +133,62 @@ def test_constant_sync_never_truncates_long_cue_duration(tmp_path, monkeypatch):
     monkeypatch.setattr(analysis, "_run_sync", tool)
     actual, _ = sync_subtitles(tmp_path / "audio.wav", original)
     assert actual == [Cue(start=5, end=20, text=original[0].text)]
+
+
+@pytest.mark.parametrize("profile", ["quiet", "long_cues"])
+def test_profiles_keep_source_text_and_duration(tmp_path, monkeypatch, profile):
+    import worker.analysis as analysis
+
+    source = tmp_path / "source.wav"
+    source.write_bytes(b"original audio")
+    original = [Cue(start=3, end=24.125, text="original words")]
+    attempts = []
+
+    def normalize(given, output):
+        assert given == source and output != source
+        output.write_bytes(b"analysis copy")
+
+    def tool(args):
+        attempts.append(args)
+        # Long mode retries a rejected alignment, but not an already accepted one.
+        if profile == "long_cues" and len(attempts) == 1:
+            assert args.max_subtitle_seconds >= 21.125
+            return {"sync_was_successful": False}
+        assert Path(args.reference).read_bytes() == b"analysis copy"
+        Path(args.srtout).write_text(dump_subtitles(original))
+        return {"offset_seconds": 1, "sync_was_successful": True}
+
+    monkeypatch.setattr(analysis, "_normalize_sync_audio", normalize)
+    monkeypatch.setattr(analysis, "_run_sync", tool)
+    actual, report = sync_subtitles(source, original, SyncOptions(profile=profile))
+    assert source.read_bytes() == b"original audio"
+    assert actual == [Cue(start=4, end=25.125, text="original words")]
+    assert report["audio_normalized"] and report["profile"] == profile
+    assert len(attempts) == (2 if profile == "long_cues" else 1)
+
+
+def test_normalization_failure_does_not_run_aligner(tmp_path, monkeypatch):
+    import worker.analysis as analysis
+
+    def fail(*args):
+        raise RuntimeError("normalization failed")
+
+    monkeypatch.setattr(analysis, "_normalize_sync_audio", fail)
+    monkeypatch.setattr(analysis, "_run_sync", lambda args: pytest.fail("must not run"))
+    with pytest.raises(RuntimeError, match="normalization failed"):
+        sync_subtitles(tmp_path / "audio.wav", TRUE_CUES, SyncOptions(profile="quiet"))
+
+
+def test_profile_is_validated():
+    with pytest.raises(ValueError, match="보정 방식"):
+        SyncOptions(profile="unknown").arguments()
+
+
+@pytest.mark.parametrize("speech", [False, True])
+def test_constant_reference_mask_is_rejected(tmp_path, speech):
+    import numpy as np
+
+    reference_mask = tmp_path / "mask.npz"
+    np.savez_compressed(reference_mask, speech=np.full(2000, float(speech)))
+    with pytest.raises(ValueError, match="발화·무음 구간이 부족"):
+        sync_subtitles(reference_mask, TRUE_CUES)

@@ -1,0 +1,36 @@
+{
+  "dataset": "google/fleurs",
+  "revision": "70bb2e84b976b7e960aa89f1c648e09c59f894dd",
+  "license": "CC-BY-4.0",
+  "language": "ja",
+  "config": "ja_jp",
+  "split": "validation",
+  "selection": "first matching regular files in dev.tar.gz",
+  "skipped_matching_files": 3,
+  "clips": [
+    {
+      "filename": "10411584430488337925.wav",
+      "sha256": "091c2c7fc285593a60dc4b90db1c1c20cffa5a0551c8eb2e26df687dffbb1fd8"
+    },
+    {
+      "filename": "10539391412073794332.wav",
+      "sha256": "2ad888f9450c6ea557554bf3aa77e4eadd755cef17d51960629be08eafd67121"
+    },
+    {
+      "filename": "10564629450010212761.wav",
+      "sha256": "0fcf82aa092043c81ba71b28cce19320242b8a56c46c667b8cab6941e7f3cd53"
+    },
+    {
+      "filename": "1062963029061341657.wav",
+      "sha256": "d99f4f3bd73b6140b2b0f3fd374e8aeba0c51d1ff10b57f39feb83ce605debea"
+    },
+    {
+      "filename": "10867881014320783582.wav",
+      "sha256": "3afe6e551a55f8745439bc4077408bd94f9a2fe17f96d25232cb8bd9b6bd2459"
+    },
+    {
+      "filename": "10920211949244193018.wav",
+      "sha256": "2cb36dfdd19dee5c1a942e1a2d2f9fb49c43dcd42d46107b3a9c8b0df8c5cb65"
+    }
+  ]
+}

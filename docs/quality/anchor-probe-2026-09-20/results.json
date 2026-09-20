@@ -1,0 +1,303 @@
+{
+  "cases": {
+    "clean": {
+      "sha256": {
+        "audio": "5cc5b547c37847557f8233e2882a468a563662cfa38d7a8d93a8ee457887ddd1",
+        "prediction": "46b30d348c26934d92d6224f5631fdf4086b11e802ab33098780278621abc545"
+      },
+      "anchors": {
+        "speaker_0": {
+          "solo_seconds": 17.28,
+          "status": "candidate_only",
+          "within_similarity": 0.8230953216552734,
+          "maximum_cross_similarity": 0.15712270140647888,
+          "margin": 0.6659726202487946
+        },
+        "speaker_1": {
+          "solo_seconds": 10.88,
+          "status": "candidate_only",
+          "within_similarity": 0.7862544059753418,
+          "maximum_cross_similarity": 0.15712270140647888,
+          "margin": 0.6291317045688629
+        }
+      },
+      "model": "speechbrain/spkrec-ecapa-voxceleb",
+      "model_hyperparameters_sha256": "6f78854fa04ba59e761437b76a2575d3aba5e5016de3e9b69f0c9a5077fb1a41",
+      "identity_mapping_verified": false,
+      "reference_purity_verified": false,
+      "deployment_allowed": false
+    },
+    "noise_0db_seed17": {
+      "sha256": {
+        "audio": "f2040fbd0c15c394de8701308da6487b37570fa8734a9712c1d2af76041cc8ce",
+        "prediction": "89e791cd8e5c00e1bda4b1a8df8b63693751fcf7c65faebba63bff02179f8b3a"
+      },
+      "anchors": {
+        "speaker_0": {
+          "solo_seconds": 16.64,
+          "status": "candidate_only",
+          "within_similarity": 0.7572752833366394,
+          "maximum_cross_similarity": 0.235609233379364,
+          "margin": 0.5216660499572754
+        },
+        "speaker_1": {
+          "solo_seconds": 10.24,
+          "status": "candidate_only",
+          "within_similarity": 0.718375563621521,
+          "maximum_cross_similarity": 0.235609233379364,
+          "margin": 0.482766330242157
+        }
+      },
+      "model": "speechbrain/spkrec-ecapa-voxceleb",
+      "model_hyperparameters_sha256": "6f78854fa04ba59e761437b76a2575d3aba5e5016de3e9b69f0c9a5077fb1a41",
+      "identity_mapping_verified": false,
+      "reference_purity_verified": false,
+      "deployment_allowed": false
+    },
+    "noise_0db_seed29": {
+      "sha256": {
+        "audio": "e2f53c0d5a65237b9c1384089bfdc963f682cc880edf6f3095a99e5eb1a3736c",
+        "prediction": "9aa9c6d6af24a1c221e62090a1aab18a4065af24fae159f03c5180dfe75487d7"
+      },
+      "anchors": {
+        "speaker_0": {
+          "solo_seconds": 16.48,
+          "status": "candidate_only",
+          "within_similarity": 0.748947262763977,
+          "maximum_cross_similarity": 0.17989325523376465,
+          "margin": 0.5690540075302124
+        },
+        "speaker_1": {
+          "solo_seconds": 10.24,
+          "status": "candidate_only",
+          "within_similarity": 0.6743972301483154,
+          "maximum_cross_similarity": 0.17989325523376465,
+          "margin": 0.4945039749145508
+        }
+      },
+      "model": "speechbrain/spkrec-ecapa-voxceleb",
+      "model_hyperparameters_sha256": "6f78854fa04ba59e761437b76a2575d3aba5e5016de3e9b69f0c9a5077fb1a41",
+      "identity_mapping_verified": false,
+      "reference_purity_verified": false,
+      "deployment_allowed": false
+    },
+    "noise_10db_seed17": {
+      "sha256": {
+        "audio": "af48294d77221c42c0d9c62714570f2f10f2d722ad7ec57f34f016b5b405dcb2",
+        "prediction": "379dd1e752cda27a8996a1ceeb2ba2152614a29bda0b9df78586a31b6ab4d0ed"
+      },
+      "anchors": {
+        "speaker_0": {
+          "solo_seconds": 16.72,
+          "status": "candidate_only",
+          "within_similarity": 0.7464719414710999,
+          "maximum_cross_similarity": 0.11211241036653519,
+          "margin": 0.6343595311045647
+        },
+        "speaker_1": {
+          "solo_seconds": 10.4,
+          "status": "candidate_only",
+          "within_similarity": 0.705450177192688,
+          "maximum_cross_similarity": 0.11211241036653519,
+          "margin": 0.5933377668261528
+        }
+      },
+      "model": "speechbrain/spkrec-ecapa-voxceleb",
+      "model_hyperparameters_sha256": "6f78854fa04ba59e761437b76a2575d3aba5e5016de3e9b69f0c9a5077fb1a41",
+      "identity_mapping_verified": false,
+      "reference_purity_verified": false,
+      "deployment_allowed": false
+    },
+    "noise_10db_seed29": {
+      "sha256": {
+        "audio": "28dab1e35b58de735f9c596865e710c836db69cb887d8116190fff293deec8ec",
+        "prediction": "3dd80deca331e6def0afc000caab1d8c2dc1b4b4b1087de176e2af4da6e5261a"
+      },
+      "anchors": {
+        "speaker_0": {
+          "solo_seconds": 16.88,
+          "status": "candidate_only",
+          "within_similarity": 0.7689239978790283,
+          "maximum_cross_similarity": 0.19628028571605682,
+          "margin": 0.5726437121629715
+        },
+        "speaker_1": {
+          "solo_seconds": 10.32,
+          "status": "candidate_only",
+          "within_similarity": 0.6787118911743164,
+          "maximum_cross_similarity": 0.19628028571605682,
+          "margin": 0.4824316054582596
+        }
+      },
+      "model": "speechbrain/spkrec-ecapa-voxceleb",
+      "model_hyperparameters_sha256": "6f78854fa04ba59e761437b76a2575d3aba5e5016de3e9b69f0c9a5077fb1a41",
+      "identity_mapping_verified": false,
+      "reference_purity_verified": false,
+      "deployment_allowed": false
+    },
+    "noise_20db_seed17": {
+      "sha256": {
+        "audio": "0aa32ce7da05cc6e45d36bf37817be3a0f68f5fe6a2b55bea8b16ff844c6bad4",
+        "prediction": "c0fc2bdaa9fcd4eea13e984a24490448cb1ce8cadfadd370eb8f0d834475551a"
+      },
+      "anchors": {
+        "speaker_0": {
+          "solo_seconds": 16.88,
+          "status": "candidate_only",
+          "within_similarity": 0.7876071929931641,
+          "maximum_cross_similarity": 0.12815997004508972,
+          "margin": 0.6594472229480743
+        },
+        "speaker_1": {
+          "solo_seconds": 10.32,
+          "status": "candidate_only",
+          "within_similarity": 0.795112133026123,
+          "maximum_cross_similarity": 0.12815997004508972,
+          "margin": 0.6669521629810333
+        }
+      },
+      "model": "speechbrain/spkrec-ecapa-voxceleb",
+      "model_hyperparameters_sha256": "6f78854fa04ba59e761437b76a2575d3aba5e5016de3e9b69f0c9a5077fb1a41",
+      "identity_mapping_verified": false,
+      "reference_purity_verified": false,
+      "deployment_allowed": false
+    },
+    "noise_20db_seed29": {
+      "sha256": {
+        "audio": "4250648059bef91b2cd42bb241b586d2024519a839af58492f9ddd96b353330a",
+        "prediction": "cdbd87420b8a0b4e52d292d7225910c8cb27260e5486c556b10857345b46af65"
+      },
+      "anchors": {
+        "speaker_0": {
+          "solo_seconds": 17.04,
+          "status": "candidate_only",
+          "within_similarity": 0.8050136566162109,
+          "maximum_cross_similarity": 0.09177981317043304,
+          "margin": 0.7132338434457779
+        },
+        "speaker_1": {
+          "solo_seconds": 10.32,
+          "status": "candidate_only",
+          "within_similarity": 0.7446222901344299,
+          "maximum_cross_similarity": 0.09177981317043304,
+          "margin": 0.6528424769639969
+        }
+      },
+      "model": "speechbrain/spkrec-ecapa-voxceleb",
+      "model_hyperparameters_sha256": "6f78854fa04ba59e761437b76a2575d3aba5e5016de3e9b69f0c9a5077fb1a41",
+      "identity_mapping_verified": false,
+      "reference_purity_verified": false,
+      "deployment_allowed": false
+    },
+    "overlap_25pct": {
+      "sha256": {
+        "audio": "e28fb61739f5c602d918abd48b0f54df5cb5c1b835df845317c0e54d5ae82904",
+        "prediction": "844c46cb9f1667add4b63619447e880ede10869ba8add202d9bd26b9139da319"
+      },
+      "anchors": {
+        "speaker_0": {
+          "solo_seconds": 14.48,
+          "status": "candidate_only",
+          "within_similarity": 0.8083898425102234,
+          "maximum_cross_similarity": 0.19404596090316772,
+          "margin": 0.6143438816070557
+        },
+        "speaker_1": {
+          "solo_seconds": 7.92,
+          "status": "candidate_only",
+          "within_similarity": 0.7343877553939819,
+          "maximum_cross_similarity": 0.19404596090316772,
+          "margin": 0.5403417944908142
+        }
+      },
+      "model": "speechbrain/spkrec-ecapa-voxceleb",
+      "model_hyperparameters_sha256": "6f78854fa04ba59e761437b76a2575d3aba5e5016de3e9b69f0c9a5077fb1a41",
+      "identity_mapping_verified": false,
+      "reference_purity_verified": false,
+      "deployment_allowed": false
+    },
+    "overlap_25pct_noise10db": {
+      "sha256": {
+        "audio": "0680bd7e36bb1ee257645ff928b2a889be6b482e7d97108dbb997a2a163c56a5",
+        "prediction": "c0db5ec47c84b9a243a93a37f19dd38ab83e9476e63b32800b0f618a18692995"
+      },
+      "anchors": {
+        "speaker_0": {
+          "solo_seconds": 14.24,
+          "status": "candidate_only",
+          "within_similarity": 0.7175158262252808,
+          "maximum_cross_similarity": 0.0957934632897377,
+          "margin": 0.6217223629355431
+        },
+        "speaker_1": {
+          "solo_seconds": 8.16,
+          "status": "candidate_only",
+          "within_similarity": 0.6912930011749268,
+          "maximum_cross_similarity": 0.0957934632897377,
+          "margin": 0.5954995378851891
+        }
+      },
+      "model": "speechbrain/spkrec-ecapa-voxceleb",
+      "model_hyperparameters_sha256": "6f78854fa04ba59e761437b76a2575d3aba5e5016de3e9b69f0c9a5077fb1a41",
+      "identity_mapping_verified": false,
+      "reference_purity_verified": false,
+      "deployment_allowed": false
+    },
+    "overlap_50pct": {
+      "sha256": {
+        "audio": "1bca3b6a07d4218748bf73caadcc4201a020ed3c06e1de38f3ffb75dd44c473e",
+        "prediction": "f6d7a5c203f7a530f46234ba66be733ff61e23f6a1ab0eeb7c96aa8e89463d3f"
+      },
+      "anchors": {
+        "speaker_0": {
+          "solo_seconds": 10.72,
+          "status": "candidate_only",
+          "within_similarity": 0.7187726497650146,
+          "maximum_cross_similarity": 0.16793058812618256,
+          "margin": 0.5508420616388321
+        },
+        "speaker_1": {
+          "solo_seconds": 3.84,
+          "status": "rejected_acoustic_consistency",
+          "within_similarity": 0.5910534858703613,
+          "maximum_cross_similarity": 0.16793058812618256,
+          "margin": 0.42312289774417877
+        }
+      },
+      "model": "speechbrain/spkrec-ecapa-voxceleb",
+      "model_hyperparameters_sha256": "6f78854fa04ba59e761437b76a2575d3aba5e5016de3e9b69f0c9a5077fb1a41",
+      "identity_mapping_verified": false,
+      "reference_purity_verified": false,
+      "deployment_allowed": false
+    },
+    "overlap_50pct_noise10db": {
+      "sha256": {
+        "audio": "7814eb7f63d0db4b80e53ac135c5b98c10724eec6481ae771023349c66e7fedf",
+        "prediction": "37dce0428ae8d60997e358db67e17617a5cf544dd86c66bff54b13223aa3acd6"
+      },
+      "anchors": {
+        "speaker_0": {
+          "solo_seconds": 10.4,
+          "status": "candidate_only",
+          "within_similarity": 0.6181457042694092,
+          "maximum_cross_similarity": 0.07306024432182312,
+          "margin": 0.5450854599475861
+        },
+        "speaker_1": {
+          "solo_seconds": 3.84,
+          "status": "rejected_acoustic_consistency",
+          "within_similarity": 0.4728667736053467,
+          "maximum_cross_similarity": 0.07306024432182312,
+          "margin": 0.39980652928352356
+        }
+      },
+      "model": "speechbrain/spkrec-ecapa-voxceleb",
+      "model_hyperparameters_sha256": "6f78854fa04ba59e761437b76a2575d3aba5e5016de3e9b69f0c9a5077fb1a41",
+      "identity_mapping_verified": false,
+      "reference_purity_verified": false,
+      "deployment_allowed": false
+    }
+  },
+  "acoustic_reference_approval": false,
+  "deployment_allowed": false
+}

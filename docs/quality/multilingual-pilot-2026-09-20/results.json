@@ -1,0 +1,205 @@
+{
+  "schema": 1,
+  "metric": "DER",
+  "collar": 0,
+  "include_overlap": true,
+  "complete_multilingual_cohort": false,
+  "deploy_allowed": false,
+  "cases": [
+    {
+      "language": "zh",
+      "evaluation_start": 0,
+      "evaluation_end": 120,
+      "reference_sha256": "ae55dbb993bc00763401251822d990386d96b7139c0867dcf6e99bc46b20fee9",
+      "source_sha256": "80cf2405c23411b662e86950957e6ab45b7ac6c9d5f18bbea53553da6ef1ebe7",
+      "prediction_results": {
+        "community_original": {
+          "status": "succeeded",
+          "prediction_sha256": "f054e5f8a8a77d1b63f27c854bc8a2d9499c3491787dde909cc5d8989b026bfc",
+          "audio_sha256": "80cf2405c23411b662e86950957e6ab45b7ac6c9d5f18bbea53553da6ef1ebe7",
+          "total": 118.00999999999998,
+          "missed detection": 4.339187499999955,
+          "false alarm": 3.509187499999987,
+          "confusion": 5.002562500000018,
+          "diarization error rate": 0.10889702143886079
+        },
+        "community_gain": {
+          "status": "succeeded",
+          "prediction_sha256": "da83d44201647f4914164f34a5ac76bd9a34b6c6c336bbec4a6a03ba57d2a931",
+          "audio_sha256": "012ef9a289c3857e622373f88fcc9e8cbbbe12ab54fc1c30f732ff1471ea06b0",
+          "total": 118.00999999999998,
+          "missed detection": 4.339187499999955,
+          "false alarm": 3.526062499999993,
+          "confusion": 4.951937500000007,
+          "diarization error rate": 0.10861102872637876
+        },
+        "sortformer_original": {
+          "status": "succeeded",
+          "prediction_sha256": "aaed0238240c0626ff275f23c9b3c5e82ddf4670ab6fb20989952541bfdd9b27",
+          "audio_sha256": "80cf2405c23411b662e86950957e6ab45b7ac6c9d5f18bbea53553da6ef1ebe7",
+          "total": 118.00999999999998,
+          "missed detection": 14.409999999999991,
+          "false alarm": 0.8700000000000268,
+          "confusion": 0.09999999999999432,
+          "diarization error rate": 0.13032793831031284
+        },
+        "sortformer_gain": {
+          "status": "succeeded",
+          "prediction_sha256": "6983a932698ba12cb2ec935ebc2fb20fd198540926592dd0efe00e881099d59e",
+          "audio_sha256": "012ef9a289c3857e622373f88fcc9e8cbbbe12ab54fc1c30f732ff1471ea06b0",
+          "total": 118.00999999999998,
+          "missed detection": 13.56,
+          "false alarm": 0.8200000000000154,
+          "confusion": 0.01999999999999602,
+          "diarization error rate": 0.1220235573256505
+        }
+      },
+      "gain_db": 8.772615514369825
+    },
+    {
+      "language": "ja",
+      "evaluation_start": 0,
+      "evaluation_end": 120,
+      "reference_sha256": "96307bc84322797be9c99cb166ca457c8b4e498e80f1f0b3771918957584cdd2",
+      "source_sha256": "73e67f795e5076a53cf82c765e9520dcb9e03e5f6634bcc179c57fcf249736e0",
+      "prediction_results": {
+        "community_original": {
+          "status": "succeeded",
+          "prediction_sha256": "150e5c3ffc0e9b7022486ec5e9ad6ae56e33a785a6d569b72abd2d0a78fe93bd",
+          "audio_sha256": "73e67f795e5076a53cf82c765e9520dcb9e03e5f6634bcc179c57fcf249736e0",
+          "total": 58.86300000000002,
+          "missed detection": 6.90721875,
+          "false alarm": 1.9767187499999848,
+          "confusion": 23.349531250000013,
+          "diarization error rate": 0.5476015281246281
+        },
+        "community_gain": {
+          "status": "succeeded",
+          "prediction_sha256": "bd7f0059400a9fd46e819577f66fa5be296d89b0f3690d79191bafbdda03ff57",
+          "audio_sha256": "b10b9f4203dccfe68ea9f93438b43898587c787a249cf1dd02b5e9a2fa2e536d",
+          "total": 58.86300000000002,
+          "missed detection": 6.94225000000001,
+          "false alarm": 1.9273749999999845,
+          "confusion": 23.331375000000016,
+          "diarization error rate": 0.5470499294973072
+        },
+        "sortformer_original": {
+          "status": "succeeded",
+          "prediction_sha256": "886e2ccf042c3e79fc19674fc3e5d0b5625c818b5a70d12841fa826cc6f4656c",
+          "audio_sha256": "73e67f795e5076a53cf82c765e9520dcb9e03e5f6634bcc179c57fcf249736e0",
+          "total": 58.86300000000002,
+          "missed detection": 8.521000000000022,
+          "false alarm": 1.5679999999999916,
+          "confusion": 0.8460000000000001,
+          "diarization error rate": 0.18577034809642745
+        },
+        "sortformer_gain": {
+          "status": "succeeded",
+          "prediction_sha256": "3abca45d66f5a20b27b5da7957d5a9248ff154d4a7238af7bcc4eda5fb196e5e",
+          "audio_sha256": "b10b9f4203dccfe68ea9f93438b43898587c787a249cf1dd02b5e9a2fa2e536d",
+          "total": 58.86300000000002,
+          "missed detection": 7.050000000000014,
+          "false alarm": 1.9370000000000038,
+          "confusion": 0.766,
+          "diarization error rate": 0.16568982212935146
+        }
+      },
+      "gain_db": 14.13530170154554
+    },
+    {
+      "language": "en",
+      "evaluation_start": 0,
+      "evaluation_end": 120,
+      "reference_sha256": "2f63a540efae918dd0350cc94cff47b833b8451495af7333ba953968eb2b0623",
+      "source_sha256": "12b29461406fe6725138fff370086ce15bb9bcab47c21801043e3ac88e3ea9f5",
+      "prediction_results": {
+        "community_original": {
+          "status": "succeeded",
+          "prediction_sha256": "8e9b1fa6679c6af73b7893cad9f12074962846958244ede191fc433fbd3bdd42",
+          "audio_sha256": "12b29461406fe6725138fff370086ce15bb9bcab47c21801043e3ac88e3ea9f5",
+          "total": 86.65399999999998,
+          "missed detection": 12.964906249999954,
+          "false alarm": 0.4765312499999972,
+          "confusion": 0.08715624999999783,
+          "diarization error rate": 0.15612197648117745
+        },
+        "community_gain": {
+          "status": "succeeded",
+          "prediction_sha256": "6ecdfe0951a75a84eac210dce339873bd080ca86a98620892c914e23a9cfb741",
+          "audio_sha256": "3a54e538dcb0cc16088d0264b6b8c864065de4ea100df4938ff206dc0756c5cb",
+          "total": 86.65399999999998,
+          "missed detection": 12.678031249999949,
+          "false alarm": 0.4934062499999996,
+          "confusion": 0.20528124999999697,
+          "diarization error rate": 0.15436931647702296
+        },
+        "sortformer_original": {
+          "status": "succeeded",
+          "prediction_sha256": "a3e5d905b5eb993e25a7eb3264a4b33637e94780d81056a3b5f937b7d2bb9c49",
+          "audio_sha256": "12b29461406fe6725138fff370086ce15bb9bcab47c21801043e3ac88e3ea9f5",
+          "total": 86.65399999999998,
+          "missed detection": 36.53399999999998,
+          "false alarm": 0.3499999999999943,
+          "confusion": 0.6999999999999975,
+          "diarization error rate": 0.43372492902808846
+        },
+        "sortformer_gain": {
+          "status": "succeeded",
+          "prediction_sha256": "524e1c3fa1b50ed8f5b33412471e6dc486d7728c72cc93d0026952f4b85c5862",
+          "audio_sha256": "3a54e538dcb0cc16088d0264b6b8c864065de4ea100df4938ff206dc0756c5cb",
+          "total": 86.654,
+          "missed detection": 36.28399999999999,
+          "false alarm": 0.4200000000000017,
+          "confusion": 0.6199999999999992,
+          "diarization error rate": 0.430724490502458
+        }
+      },
+      "gain_db": 20.0
+    }
+  ],
+  "community_environment": {
+    "versions": {
+      "whisperx": "3.8.6",
+      "pyannote.audio": "4.0.7",
+      "torch": "2.8.0+cpu"
+    },
+    "snapshots": {
+      "models--pyannote--speaker-diarization-community-1": [
+        "3533c8cf8e369892e6b79ff1bf80f7b0286a54ee"
+      ]
+    }
+  },
+  "sortformer_revision": "fafaab5faa1617a0ca52d38dd3dc4bd636800d3d",
+  "sortformer_environment": {
+    "nemo_toolkit": "2.5.0",
+    "torch": "2.14.0",
+    "device": "cpu",
+    "streaming_profile": "checkpoint"
+  },
+  "blockers": [
+    "Korean conversation speaker ground truth missing",
+    "English transcript absent",
+    "11-condition regression and character speaker accuracy not measured for gain candidate"
+  ],
+  "source_files": {
+    "kmsav-asd.zip": "60ff47c9b7359d64c43cbdf003395bc857a470eefb95c10b8b4a9acd948ada32",
+    "R8001_M8004.TextGrid": "e5fe941174fe4140bb5923b7caf2cbdd68d8d2a86086e4f00c68afc90d09dbad",
+    "ja-info.json": "0bad24548be6c9ea3b7d63056025a935045a3aadc3f9e60d6022319540bdab34",
+    "ja-original.wav": "39ca7d11a2e5e97e1f0107912929c79d966aa8d80c388284bdad797d3d703399",
+    "ja-transcription.txt": "271728969c3045d90d0bb7b5ac6767ccab824918814028c14caf8e9f08ba486a",
+    "en-original.wav": "b6ce59ff735c234afdd94b13744aa26f6785af746170543fd03b33160e920a6d",
+    "subset-lock.json": "689b4c646d028c55c200d610d303878ff5be46fc28d47b83f2061ad82ccb17f9",
+    "ja-lock.json": "501f4f3f4caae041b190b86cd83639adc22eacf4f7d55b99a92637db7200701d"
+  },
+  "korean_annotation_audit": {
+    "annotation_files": 43805,
+    "header_fields": [
+      "# Audio Duration(ms)",
+      "# FPS",
+      "# ImageSize",
+      "# Index X Y W H",
+      "# Script"
+    ],
+    "usable_cross_utterance_speaker_ids": false
+  }
+}

@@ -1,0 +1,198 @@
+{
+  "claim": "Four-language real-conversation accuracy improvement",
+  "status": "not_demonstrated",
+  "languages_required": [
+    "ko",
+    "ja",
+    "zh",
+    "en"
+  ],
+  "measured_der_languages": [
+    "ja",
+    "zh",
+    "en"
+  ],
+  "source_sha256": "29d543aeea86450c3c09b2134631285c5c3439dc61a3c08cf976aec577ce9c45",
+  "comparisons": [
+    {
+      "language": "zh",
+      "baseline": "community_original",
+      "candidate": "sortformer_original",
+      "baseline_der_percent": 10.88970214388608,
+      "candidate_der_percent": 13.032793831031283,
+      "delta": {
+        "diarization error rate": 0.021430916871452044,
+        "missed detection": 10.070812500000036,
+        "false alarm": -2.6391874999999603,
+        "confusion": -4.902562500000023
+      },
+      "regressed": [
+        "diarization error rate",
+        "missed detection"
+      ],
+      "reference_sha256": "ae55dbb993bc00763401251822d990386d96b7139c0867dcf6e99bc46b20fee9",
+      "baseline_prediction_sha256": "f054e5f8a8a77d1b63f27c854bc8a2d9499c3491787dde909cc5d8989b026bfc",
+      "candidate_prediction_sha256": "aaed0238240c0626ff275f23c9b3c5e82ddf4670ab6fb20989952541bfdd9b27"
+    },
+    {
+      "language": "zh",
+      "baseline": "community_original",
+      "candidate": "community_gain",
+      "baseline_der_percent": 10.88970214388608,
+      "candidate_der_percent": 10.861102872637876,
+      "delta": {
+        "diarization error rate": -0.0002859927124820305,
+        "missed detection": 0.0,
+        "false alarm": 0.01687500000000597,
+        "confusion": -0.0506250000000108
+      },
+      "regressed": [
+        "false alarm"
+      ],
+      "reference_sha256": "ae55dbb993bc00763401251822d990386d96b7139c0867dcf6e99bc46b20fee9",
+      "baseline_prediction_sha256": "f054e5f8a8a77d1b63f27c854bc8a2d9499c3491787dde909cc5d8989b026bfc",
+      "candidate_prediction_sha256": "da83d44201647f4914164f34a5ac76bd9a34b6c6c336bbec4a6a03ba57d2a931"
+    },
+    {
+      "language": "zh",
+      "baseline": "sortformer_original",
+      "candidate": "sortformer_gain",
+      "baseline_der_percent": 13.032793831031283,
+      "candidate_der_percent": 12.20235573256505,
+      "delta": {
+        "diarization error rate": -0.008304380984662338,
+        "missed detection": -0.8499999999999908,
+        "false alarm": -0.05000000000001137,
+        "confusion": -0.0799999999999983
+      },
+      "regressed": [],
+      "reference_sha256": "ae55dbb993bc00763401251822d990386d96b7139c0867dcf6e99bc46b20fee9",
+      "baseline_prediction_sha256": "aaed0238240c0626ff275f23c9b3c5e82ddf4670ab6fb20989952541bfdd9b27",
+      "candidate_prediction_sha256": "6983a932698ba12cb2ec935ebc2fb20fd198540926592dd0efe00e881099d59e"
+    },
+    {
+      "language": "ja",
+      "baseline": "community_original",
+      "candidate": "sortformer_original",
+      "baseline_der_percent": 54.76015281246281,
+      "candidate_der_percent": 18.577034809642747,
+      "delta": {
+        "diarization error rate": -0.3618311800282007,
+        "missed detection": 1.613781250000022,
+        "false alarm": -0.40871874999999314,
+        "confusion": -22.503531250000012
+      },
+      "regressed": [
+        "missed detection"
+      ],
+      "reference_sha256": "96307bc84322797be9c99cb166ca457c8b4e498e80f1f0b3771918957584cdd2",
+      "baseline_prediction_sha256": "150e5c3ffc0e9b7022486ec5e9ad6ae56e33a785a6d569b72abd2d0a78fe93bd",
+      "candidate_prediction_sha256": "886e2ccf042c3e79fc19674fc3e5d0b5625c818b5a70d12841fa826cc6f4656c"
+    },
+    {
+      "language": "ja",
+      "baseline": "community_original",
+      "candidate": "community_gain",
+      "baseline_der_percent": 54.76015281246281,
+      "candidate_der_percent": 54.70499294973072,
+      "delta": {
+        "diarization error rate": -0.0005515986273209039,
+        "missed detection": 0.03503125000001006,
+        "false alarm": -0.04934375000000024,
+        "confusion": -0.018156249999996987
+      },
+      "regressed": [
+        "missed detection"
+      ],
+      "reference_sha256": "96307bc84322797be9c99cb166ca457c8b4e498e80f1f0b3771918957584cdd2",
+      "baseline_prediction_sha256": "150e5c3ffc0e9b7022486ec5e9ad6ae56e33a785a6d569b72abd2d0a78fe93bd",
+      "candidate_prediction_sha256": "bd7f0059400a9fd46e819577f66fa5be296d89b0f3690d79191bafbdda03ff57"
+    },
+    {
+      "language": "ja",
+      "baseline": "sortformer_original",
+      "candidate": "sortformer_gain",
+      "baseline_der_percent": 18.577034809642747,
+      "candidate_der_percent": 16.568982212935147,
+      "delta": {
+        "diarization error rate": -0.02008052596707599,
+        "missed detection": -1.471000000000008,
+        "false alarm": 0.3690000000000122,
+        "confusion": -0.08000000000000007
+      },
+      "regressed": [
+        "false alarm"
+      ],
+      "reference_sha256": "96307bc84322797be9c99cb166ca457c8b4e498e80f1f0b3771918957584cdd2",
+      "baseline_prediction_sha256": "886e2ccf042c3e79fc19674fc3e5d0b5625c818b5a70d12841fa826cc6f4656c",
+      "candidate_prediction_sha256": "3abca45d66f5a20b27b5da7957d5a9248ff154d4a7238af7bcc4eda5fb196e5e"
+    },
+    {
+      "language": "en",
+      "baseline": "community_original",
+      "candidate": "sortformer_original",
+      "baseline_der_percent": 15.612197648117746,
+      "candidate_der_percent": 43.372492902808844,
+      "delta": {
+        "diarization error rate": 0.27760295254691103,
+        "missed detection": 23.56909375000002,
+        "false alarm": -0.12653125000000287,
+        "confusion": 0.6128437499999997
+      },
+      "regressed": [
+        "diarization error rate",
+        "missed detection",
+        "confusion"
+      ],
+      "reference_sha256": "2f63a540efae918dd0350cc94cff47b833b8451495af7333ba953968eb2b0623",
+      "baseline_prediction_sha256": "8e9b1fa6679c6af73b7893cad9f12074962846958244ede191fc433fbd3bdd42",
+      "candidate_prediction_sha256": "a3e5d905b5eb993e25a7eb3264a4b33637e94780d81056a3b5f937b7d2bb9c49"
+    },
+    {
+      "language": "en",
+      "baseline": "community_original",
+      "candidate": "community_gain",
+      "baseline_der_percent": 15.612197648117746,
+      "candidate_der_percent": 15.436931647702295,
+      "delta": {
+        "diarization error rate": -0.0017526600041544993,
+        "missed detection": -0.28687500000000554,
+        "false alarm": 0.016875000000002416,
+        "confusion": 0.11812499999999915
+      },
+      "regressed": [
+        "false alarm",
+        "confusion"
+      ],
+      "reference_sha256": "2f63a540efae918dd0350cc94cff47b833b8451495af7333ba953968eb2b0623",
+      "baseline_prediction_sha256": "8e9b1fa6679c6af73b7893cad9f12074962846958244ede191fc433fbd3bdd42",
+      "candidate_prediction_sha256": "6ecdfe0951a75a84eac210dce339873bd080ca86a98620892c914e23a9cfb741"
+    },
+    {
+      "language": "en",
+      "baseline": "sortformer_original",
+      "candidate": "sortformer_gain",
+      "baseline_der_percent": 43.372492902808844,
+      "candidate_der_percent": 43.0724490502458,
+      "delta": {
+        "diarization error rate": -0.0030004385256304777,
+        "missed detection": -0.2499999999999858,
+        "false alarm": 0.07000000000000739,
+        "confusion": -0.0799999999999983
+      },
+      "regressed": [
+        "false alarm"
+      ],
+      "reference_sha256": "2f63a540efae918dd0350cc94cff47b833b8451495af7333ba953968eb2b0623",
+      "baseline_prediction_sha256": "a3e5d905b5eb993e25a7eb3264a4b33637e94780d81056a3b5f937b7d2bb9c49",
+      "candidate_prediction_sha256": "524e1c3fa1b50ed8f5b33412471e6dc486d7728c72cc93d0026952f4b85c5862"
+    }
+  ],
+  "missing": [
+    "complete Korean human speaker/overlap/transcript reference",
+    "four-language end-to-end CER and character speaker metrics",
+    "independent multi-conversation held-out cohort",
+    "same selected candidate regression on original 11 conditions"
+  ],
+  "deployment_allowed": false
+}

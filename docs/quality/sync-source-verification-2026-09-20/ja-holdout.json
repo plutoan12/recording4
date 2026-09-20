@@ -1,0 +1,344 @@
+{
+  "profile": "long_cues",
+  "language": "ja",
+  "limit": 0.5,
+  "offsets": [
+    -0.73,
+    1.37,
+    4.12
+  ],
+  "results": [
+    {
+      "variant": "short",
+      "cases": {
+        "-0.73": {
+          "pass": false,
+          "rejected": "발화 보정과 원문 대사 정렬이 충돌합니다. 보정을 적용하지 않습니다."
+        },
+        "1.37": {
+          "pass": false,
+          "rejected": "발화 보정과 원문 대사 정렬이 충돌합니다. 보정을 적용하지 않습니다."
+        },
+        "4.12": {
+          "pass": false,
+          "rejected": "발화 보정과 원문 대사 정렬이 충돌합니다. 보정을 적용하지 않습니다."
+        }
+      }
+    },
+    {
+      "variant": "long_repeated",
+      "cases": {
+        "-0.73": {
+          "pass": true,
+          "max_error_seconds": 0.003,
+          "text_preserved": true,
+          "offset_seconds": 0.727,
+          "boundary_support": 10,
+          "recovery_used": false,
+          "verified_by": "source_boundaries",
+          "denoised": false
+        },
+        "1.37": {
+          "pass": true,
+          "max_error_seconds": 0.003,
+          "text_preserved": true,
+          "offset_seconds": -1.373,
+          "boundary_support": 10,
+          "recovery_used": false,
+          "verified_by": "source_boundaries",
+          "denoised": false
+        },
+        "4.12": {
+          "pass": true,
+          "max_error_seconds": 0.003,
+          "text_preserved": true,
+          "offset_seconds": -4.123,
+          "boundary_support": 10,
+          "recovery_used": false,
+          "verified_by": "source_boundaries",
+          "denoised": false
+        }
+      }
+    },
+    {
+      "variant": "dense",
+      "cases": {
+        "-0.73": {
+          "pass": true,
+          "max_error_seconds": 0.03,
+          "text_preserved": true,
+          "offset_seconds": 0.7,
+          "boundary_support": 0,
+          "recovery_used": false,
+          "verified_by": "source_text",
+          "denoised": false
+        },
+        "1.37": {
+          "pass": true,
+          "max_error_seconds": 0.03,
+          "text_preserved": true,
+          "offset_seconds": -1.4,
+          "boundary_support": 0,
+          "recovery_used": false,
+          "verified_by": "source_text",
+          "denoised": false
+        },
+        "4.12": {
+          "pass": true,
+          "max_error_seconds": 0.03,
+          "text_preserved": true,
+          "offset_seconds": -4.15,
+          "boundary_support": 0,
+          "recovery_used": false,
+          "verified_by": "source_text",
+          "denoised": false
+        }
+      }
+    },
+    {
+      "variant": "long_pauses",
+      "cases": {
+        "-0.73": {
+          "pass": true,
+          "max_error_seconds": 0.003,
+          "text_preserved": true,
+          "offset_seconds": 0.727,
+          "boundary_support": 4,
+          "recovery_used": false,
+          "verified_by": "source_boundaries",
+          "denoised": false
+        },
+        "1.37": {
+          "pass": true,
+          "max_error_seconds": 0.003,
+          "text_preserved": true,
+          "offset_seconds": -1.373,
+          "boundary_support": 4,
+          "recovery_used": false,
+          "verified_by": "source_boundaries",
+          "denoised": false
+        },
+        "4.12": {
+          "pass": true,
+          "max_error_seconds": 0.003,
+          "text_preserved": true,
+          "offset_seconds": -4.123,
+          "boundary_support": 4,
+          "recovery_used": false,
+          "verified_by": "source_boundaries",
+          "denoised": false
+        }
+      }
+    },
+    {
+      "variant": "fast",
+      "cases": {
+        "-0.73": {
+          "pass": true,
+          "max_error_seconds": 0.012,
+          "text_preserved": true,
+          "offset_seconds": 0.742,
+          "boundary_support": 4,
+          "recovery_used": false,
+          "verified_by": "source_boundaries",
+          "denoised": false
+        },
+        "1.37": {
+          "pass": true,
+          "max_error_seconds": 0.012,
+          "text_preserved": true,
+          "offset_seconds": -1.358,
+          "boundary_support": 4,
+          "recovery_used": false,
+          "verified_by": "source_boundaries",
+          "denoised": false
+        },
+        "4.12": {
+          "pass": true,
+          "max_error_seconds": 0.012,
+          "text_preserved": true,
+          "offset_seconds": -4.108,
+          "boundary_support": 4,
+          "recovery_used": false,
+          "verified_by": "source_boundaries",
+          "denoised": false
+        }
+      }
+    },
+    {
+      "variant": "slow",
+      "cases": {
+        "-0.73": {
+          "pass": true,
+          "max_error_seconds": 0.002,
+          "text_preserved": true,
+          "offset_seconds": 0.728,
+          "boundary_support": 4,
+          "recovery_used": false,
+          "verified_by": "source_boundaries",
+          "denoised": false
+        },
+        "1.37": {
+          "pass": true,
+          "max_error_seconds": 0.002,
+          "text_preserved": true,
+          "offset_seconds": -1.372,
+          "boundary_support": 4,
+          "recovery_used": false,
+          "verified_by": "source_boundaries",
+          "denoised": false
+        },
+        "4.12": {
+          "pass": true,
+          "max_error_seconds": 0.002,
+          "text_preserved": true,
+          "offset_seconds": -4.122,
+          "boundary_support": 4,
+          "recovery_used": false,
+          "verified_by": "source_boundaries",
+          "denoised": false
+        }
+      }
+    },
+    {
+      "variant": "quiet_voice",
+      "cases": {
+        "-0.73": {
+          "pass": true,
+          "max_error_seconds": 0.001,
+          "text_preserved": true,
+          "offset_seconds": 0.729,
+          "boundary_support": 4,
+          "recovery_used": true,
+          "verified_by": "source_boundaries",
+          "denoised": false
+        },
+        "1.37": {
+          "pass": true,
+          "max_error_seconds": 0.001,
+          "text_preserved": true,
+          "offset_seconds": -1.371,
+          "boundary_support": 4,
+          "recovery_used": false,
+          "verified_by": "source_boundaries",
+          "denoised": false
+        },
+        "4.12": {
+          "pass": true,
+          "max_error_seconds": 0.001,
+          "text_preserved": true,
+          "offset_seconds": -4.121,
+          "boundary_support": 4,
+          "recovery_used": false,
+          "verified_by": "source_boundaries",
+          "denoised": false
+        }
+      }
+    },
+    {
+      "variant": "noise_15db",
+      "cases": {
+        "-0.73": {
+          "pass": true,
+          "max_error_seconds": 0.034,
+          "text_preserved": true,
+          "offset_seconds": 0.764,
+          "boundary_support": 4,
+          "recovery_used": false,
+          "verified_by": "source_boundaries",
+          "denoised": false
+        },
+        "1.37": {
+          "pass": true,
+          "max_error_seconds": 0.034,
+          "text_preserved": true,
+          "offset_seconds": -1.336,
+          "boundary_support": 4,
+          "recovery_used": false,
+          "verified_by": "source_boundaries",
+          "denoised": false
+        },
+        "4.12": {
+          "pass": true,
+          "max_error_seconds": 0.034,
+          "text_preserved": true,
+          "offset_seconds": -4.086,
+          "boundary_support": 4,
+          "recovery_used": false,
+          "verified_by": "source_boundaries",
+          "denoised": false
+        }
+      }
+    },
+    {
+      "variant": "noise_5db",
+      "cases": {
+        "-0.73": {
+          "pass": true,
+          "max_error_seconds": 0.05,
+          "text_preserved": true,
+          "offset_seconds": 0.78,
+          "boundary_support": 0,
+          "recovery_used": false,
+          "verified_by": "source_text",
+          "denoised": false
+        },
+        "1.37": {
+          "pass": true,
+          "max_error_seconds": 0.05,
+          "text_preserved": true,
+          "offset_seconds": -1.32,
+          "boundary_support": 0,
+          "recovery_used": false,
+          "verified_by": "source_text",
+          "denoised": false
+        },
+        "4.12": {
+          "pass": true,
+          "max_error_seconds": 0.05,
+          "text_preserved": true,
+          "offset_seconds": -4.07,
+          "boundary_support": 0,
+          "recovery_used": false,
+          "verified_by": "source_text",
+          "denoised": false
+        }
+      }
+    },
+    {
+      "variant": "music_intro",
+      "cases": {
+        "-0.73": {
+          "pass": true,
+          "max_error_seconds": 0.031,
+          "text_preserved": true,
+          "offset_seconds": 0.761,
+          "boundary_support": 3,
+          "recovery_used": false,
+          "verified_by": "source_boundaries",
+          "denoised": false
+        },
+        "1.37": {
+          "pass": true,
+          "max_error_seconds": 0.031,
+          "text_preserved": true,
+          "offset_seconds": -1.339,
+          "boundary_support": 3,
+          "recovery_used": false,
+          "verified_by": "source_boundaries",
+          "denoised": false
+        },
+        "4.12": {
+          "pass": true,
+          "max_error_seconds": 0.031,
+          "text_preserved": true,
+          "offset_seconds": -4.089,
+          "boundary_support": 3,
+          "recovery_used": false,
+          "verified_by": "source_boundaries",
+          "denoised": false
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,78 @@
+from pathlib import Path
+
+import numpy as np
+import pytest
+
+
+def test_stno_mask_separates_target_others_overlap_and_silence(monkeypatch):
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[1] / "scripts"))
+    from benchmark_target_asr import stno_mask
+
+    turns = [dict(start=0, end=2, speaker="A"), dict(start=1, end=3, speaker="B")]
+    mask = stno_mask(turns, "A", 200)
+    assert np.all(mask.sum(axis=0) == 1)
+    assert mask[:, 25].tolist() == [0, 1, 0, 0]
+    assert mask[:, 75].tolist() == [0, 0, 0, 1]
+    assert mask[:, 125].tolist() == [0, 0, 1, 0]
+    assert mask[:, 175].tolist() == [1, 0, 0, 0]
+    other = stno_mask(turns, "B", 100, start=1)
+    assert other[:, 25].tolist() == [0, 0, 0, 1]
+    assert other[:, 75].tolist() == [0, 1, 0, 0]
+
+
+def test_missing_target_is_not_fabricated(monkeypatch):
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[1] / "scripts"))
+    from benchmark_target_asr import stno_mask
+
+    mask = stno_mask([dict(start=0, end=1, speaker="A")], "unknown", 100)
+    assert not mask[1].any() and not mask[3].any()
+    assert mask[2, :50].all()
+
+
+def test_resume_requires_same_reference_masks_and_decoder(monkeypatch):
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[1] / "scripts"))
+    from benchmark_target_asr import run_fingerprint
+
+    item = dict(reference="hello", target="A", turns=[])
+    original = run_fingerprint(item, "rev1", True, 0.0)
+    assert original == run_fingerprint(dict(item), "rev1", True, 0.0)
+    for changed in [dict(item, reference="bye"), dict(item, target="B")]:
+        assert original != run_fingerprint(changed, "rev1", True, 0.0)
+    assert original != run_fingerprint(item, "rev1", True, 0.3)
+    assert original != run_fingerprint(item, "rev2", True, 0.0)
+
+
+def test_crop_padding_is_silence_even_when_recording_turn_continues(monkeypatch):
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[1] / "scripts"))
+    from benchmark_target_asr import stno_mask
+
+    mask = stno_mask([dict(start=0, end=60, speaker="A")], "A", 1500, start=10, duration=2)
+    assert mask[1, :100].all()
+    assert not mask[1:, 100:].any()
+    assert mask[0, 100:].all()
+
+
+def test_gpu_evidence_never_reuses_cpu_results(monkeypatch):
+    import hashlib
+    import json
+
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[1] / "scripts"))
+    from benchmark_target_asr import run_fingerprint
+
+    item = dict(reference="hello", target="A", turns=[])
+    legacy = dict(item=item, revision="rev1", quantized=False, ctc_weight=0.0)
+    original = hashlib.sha256(json.dumps(legacy, sort_keys=True).encode()).hexdigest()
+    assert run_fingerprint(item, "rev1", False, 0.0, "cpu") == original
+    assert run_fingerprint(item, "rev1", False, 0.0, "cuda") != original
+
+
+def test_gpu_must_not_silently_fallback_or_use_cpu_quantization(monkeypatch):
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[1] / "scripts"))
+    from benchmark_target_asr import validate_device
+
+    with pytest.raises(ValueError, match="unavailable"):
+        validate_device("cuda", False, False)
+    with pytest.raises(ValueError, match="CPU-only"):
+        validate_device("cuda", True, True)
+    validate_device("cuda", False, True)
+    validate_device("cpu", True, False)

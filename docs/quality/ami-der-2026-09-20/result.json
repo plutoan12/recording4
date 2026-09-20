@@ -1,0 +1,47 @@
+{
+  "source": "diarizers-community/ami ihm test row0 first120",
+  "scope": "single_english_diagnostic_not_multilingual_gate",
+  "fixed_uem_seconds": [
+    0,
+    120
+  ],
+  "collar": 0,
+  "include_overlap": true,
+  "reference_speakers": 4,
+  "predicted_speakers": 2,
+  "reference_turns": 20,
+  "predicted_turns": 24,
+  "fixed_uem": {
+    "total": 38.92,
+    "missed detection": 7.436531249999996,
+    "false alarm": 1.1190312499999848,
+    "confusion": 4.867093749999988,
+    "diarization error rate": 0.3448781153648502
+  },
+  "legacy_implicit_uem": {
+    "total": 38.92,
+    "correct": 26.61637500000002,
+    "confusion": 4.867093749999988,
+    "missed detection": 7.436531249999996,
+    "false alarm": 1.1190312499999848,
+    "diarization error rate": 0.3448781153648502
+  },
+  "sha256": {
+    "source_sha256": "50e2c8e4737850c4bf3cc24e7087c755e1c733cd91822106afd0df485ba64893",
+    "crop_sha256": "768c08ceca1432d49b0ee9bc2dda18769aa1164df63f6f35bde4c230d466b7bb",
+    "reference_full": "e92de3f3fe90c58e94ff55a65773e6b84ba460dc1bef60ad7e1b3fdcfd4fd518",
+    "reference120": "737eeb7d8861751d3dadf7fb2b490c49f05914cf8198d5211c35a67078603502",
+    "predictions": "e347a32f0bcc13b67e9aea70e0c2860f47e787e7acb4cd5bd6ed01d970221581",
+    "scorer": "d4595ecb99c3bc42cfca513b3bf70c0caaf97d7bc9f821f6942bbbd4d1681793"
+  },
+  "versions": {
+    "whisperx": "3.8.6",
+    "pyannote.audio": "4.0.7",
+    "torch": "2.8.0+cpu",
+    "pyannote.metrics": "3.2.1",
+    "pyannote.core": "5.0.0"
+  },
+  "worker_analysis_sha256": "efefd8303d13390c61cc7b975f73537c55c26f5ede6d64f2c6dd5f10db1aab32",
+  "elapsed_inference_seconds": 132.03578235200257,
+  "deploy_allowed": false
+}
