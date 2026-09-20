@@ -21,7 +21,7 @@ jobs:
           cache: pip
           cache-dependency-path: scripts/requirements-der-evaluation.txt
       - run: pip install -r scripts/requirements-der-evaluation.txt
-      - run: python -m pytest --noconftest tests/test_conversation_der.py -q
+      - run: python -m pytest --noconftest tests/test_conversation_der.py tests/test_manual_word_speakers.py -q
 
   python:
     name: 파이썬 검사
