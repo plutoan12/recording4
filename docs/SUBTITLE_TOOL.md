@@ -49,7 +49,7 @@ python -m pipeline.subtitle_tool --help   # 같은 도구
 
 템플릿은 **영상에 굽는 자막의 모양**입니다. 어떤 자막을 언제 보일지(줄바꿈·분할·구간)는 표시 규칙이 정하고, SRT·VTT 파일에는 모양이 들어가지 않습니다.
 
-내장 템플릿은 카테고리별로 82종입니다. 인스타그램 브이로그 편집자들이 파는 "자막 템플릿 팩"의 흔한 모양(파스텔 상자, 네온 글로우, 픽셀, 통통한 외곽선, 손글씨, 영화 자막, 레트로)을 libass가 그릴 수 있는 값으로 옮긴 것입니다. 전체 목록은 `r4-subtitles templates list`, 실제 렌더 모양은 `r4-subtitles sheet`로 봅니다.
+내장 템플릿은 카테고리별로 90종입니다. 인스타그램 브이로그 편집자들이 파는 "자막 템플릿 팩"의 흔한 모양(파스텔 상자, 네온 글로우, 픽셀, 통통한 외곽선, 손글씨, 영화 자막, 레트로)을 libass가 그릴 수 있는 값으로 옮긴 것입니다. 전체 목록은 `r4-subtitles templates list`, 실제 렌더 모양은 `r4-subtitles sheet`로 봅니다.
 
 | 카테고리 | 이름 | 모양 |
 |---|---|---|
@@ -62,6 +62,7 @@ python -m pipeline.subtitle_tool --help   # 같은 도구
 | 상자·카드 | `box`, `pink-cabinet`, `note-yellow`, `note-pink`, `note-blue`, `tmi-blue`, `white-card`, `black-tag`, `cyan-strip`, `news-bar`, `wanted-mint-card` | 파스텔 상자·테두리 카드·검은 태그·빨간 뉴스 바·민트 카드. 소제목, 짧은 한마디, 제품 정보에 |
 | 손글씨 | `pen-white`, `melody-pink`, `gamja-yellow`, `brush-white`, `brush-shadow`, `diary`, `brush-red` | 나눔손글씨 펜·붓, 하이멜로디, 감자꽃, 서툰이야기, 독도 붓글씨 |
 | 레트로·세리프 | `movie-serif`, `luxury-serif`, `retro-orange`, `retro-blue-pixel`, `retro-blue-3d`, `songmyung-cream`, `elegant-serif`, `grandiflora-pink` | 고운바탕 영화 자막, 모이라이 레트로, 송명·디필레이아·그랜디플로라 세리프, 파란 도트 |
+| 그라데이션 | `infomercial-gold`, `tv-blue-caps`, `night-show-pink`, `sunset-jalnan`, `gold-across`, `aurora-hollow`, `ice-live` | 90년대 TV 홈쇼핑·광고 느낌. 금색(노랑→주황)에 입체 그림자, 흰→하늘 대문자, 흰 테두리 핑크 쇼 로고, 가로 금색 전화번호, 선이 흐르는 네온, LIVE 자막. 상자 카테고리의 `as-seen-on-red`(빨간 배지)와 짝 |
 | 움직임 | `pop-jalnan`, `bounce-sticker`, `slide-vlog`, `drop-card`, `fade-film`, `zoom-title`, `wiggle-cute`, `neon-pulse`, `typewriter-pixel`, `typewriter-serif`, `word-pop-clean`, `karaoke-yellow`, `karaoke-card` | 위 모양에 움직임을 붙인 것. 팝·바운스·슬라이드·페이드·줌·흔들림·맥박·타자기·단어별 등장·노래방 강조. 아래 [움직임](#움직임) 참고 |
 
 값을 바꾸려면 내보내서 고칩니다.
@@ -102,6 +103,8 @@ r4-subtitles burn source.mp4 captions.srt result.mp4 --template mine.json
 | `letter_spacing` | 자간 | 0 |
 | `prefix`, `suffix` | 자막 앞뒤 장식 기호(★ ☆ ♡ ✳ ♪ ✧ 등), 8자 이하. 글꼴에 있는 글자여야 그려지고 이모지는 안 됩니다 | 빈 값 |
 | `animation` | 움직임 종류. `none`, `fade`, `pop`, `bounce`, `slide-up`, `slide-down`, `zoom`, `wiggle`, `pulse`, `typewriter`, `word-pop`, `karaoke` | `none` |
+| `gradient_color` | 그라데이션 끝 색. 비우면 단색. 글자 색(속 빈 글자는 선 색)에서 이 색으로 흐릅니다 | 빈 값 |
+| `gradient_direction` | `vertical`(위→아래) 또는 `horizontal`(왼쪽→오른쪽) | `vertical` |
 | `animation_ms` | 움직임 시간(ms, 40~3000). 등장 효과는 등장에 걸리는 시간, 타자기는 글자 하나, 단어별 등장은 단어 하나, 흔들림·맥박은 한 주기. 비우면 종류별 기본값 | 빈 값 |
 
 ### 움직임
@@ -131,9 +134,18 @@ r4-subtitles reel motion.gif --category motion --width 540 --height 540 --fonts-
 r4-subtitles style in.srt out.ass --template karaoke-yellow           # 움직임이 든 ASS
 ```
 
+### 그라데이션
+
+ASS에는 그라데이션이 없습니다. `gradient_color`가 있으면 앞 층 글자를 24개 띠로 나눠, 띠마다 색을 조금씩 바꾼 같은 글자를 `\clip`(사각형)으로 잘라 겹칩니다(`gradient_strips`). 띠는 겹치지 않으므로 반투명 겹침이 생기지 않고, 첫 띠와 끝 띠는 화면 끝까지 늘려 외곽선·그림자가 잘리지 않습니다. 띠의 위치는 글자 폭·높이를 재서 정하며(`text_block`, 글꼴 메트릭) 글꼴을 못 찾으면 어림값이라 조금 어긋날 수 있습니다. libass는 같은 층·같은 시간의 이벤트를 겹치지 않게 위로 쌓으므로 띠에 `\pos`를 붙여 자리를 고정합니다. 이동하는 움직임(슬라이드·바운스)에서는 `\clip`도 `\t`로 함께 움직여 띠가 글자를 따라가고, 크기가 변하는 움직임(팝·줌·맥박)에서는 변하는 동안 잠깐 어긋날 수 있습니다. 속 빈 글자는 선 색(`\3c`)이 흐릅니다. 입체 돌출·바깥 테두리 층은 단색 그대로입니다.
+
 ### 이모지
 
-libass는 컬러 이모지(🍓🍵💗)를 못 그립니다. 자막 글자에 이모지가 있으면 그 구간에만 흑백 Noto Emoji 글꼴을 붙여 선 그림으로 그립니다(`pipeline/subtitle_markup.py`의 `split_emoji`). 색은 자막 글자 색을 따릅니다. ★☆♡♪✳✧ 같은 기호는 한글 글꼴에 있으므로 그대로 둡니다. 글꼴 대체에 맡기면 픽셀 글꼴의 이모지가 걸리는 등 결과가 달라져 명시합니다.
+libass는 컬러 이모지 글꼴(CBDT 비트맵·COLR·SVG)을 못 그리고 윤곽선 글리프만 그립니다. 그래서 두 단계로 처리합니다(`pipeline/subtitle_emoji.py`).
+
+- **컬러**: Twemoji Mozilla(COLRv0) 글꼴을 받을 때 색 층 글리프마다 사용자 영역 코드를 붙이고 폭을 0으로 만든 `R4 Color Emoji` 글꼴과 표 JSON(`R4ColorEmoji.json`)을 만듭니다. 자막에서는 이모지 하나를 `{\1c&H색1&}층1{\1c&H색2&}층2…자리표`로 써서 같은 자리에 층을 겹칩니다(libass는 채움을 글자 순서로 칠합니다). 보통 글자와 같은 경로라 외곽선·글로우·그림자·움직임·타자기·노래방이 그대로 먹고, 국기·직업·가족·피부색 같은 조합 이모지도 GSUB 합자에서 옮겨 표에 있습니다. 표에 없는 이모지는 아래 흑백으로 갑니다.
+- **흑백**: 표가 없거나(컬러 이모지를 설치하지 않은 환경) 표에 없는 이모지는 그 구간에만 Noto Emoji 글꼴을 붙여 선 그림으로 그립니다. 색은 자막 글자 색을 따릅니다.
+
+★☆♡♪✳✧ 같은 기호는 한글 글꼴에 있으므로 그대로 둡니다(`pipeline/subtitle_markup.py`의 `split_emoji`). 글꼴 대체에 맡기면 픽셀 글꼴의 이모지가 걸리는 등 결과가 달라져 구간마다 글꼴을 명시합니다. 관리화면 미리보기는 브라우저 이모지를 그대로 씁니다.
 
 ### 단어별 강조 `[[...]]`
 
@@ -147,7 +159,7 @@ libass는 컬러 이모지(🍓🍵💗)를 못 그립니다. 자막 글자에 �
 
 ## 글꼴
 
-템플릿이 쓰는 글꼴 35종은 모두 무료로 상업 사용과 영상 삽입이 허용됩니다. 대부분 SIL Open Font License 1.1이고, 잘난체·카페24·지마켓 산스는 각 회사의 자체 라이선스(무료, 수정·판매 금지)입니다. 목록·출처(커밋 해시 고정)·SHA-256·라이선스 링크는 `packages/pipeline/pipeline/subtitle_fonts.py`에 있고, 파일은 저장소에 넣지 않습니다.
+템플릿이 쓰는 글꼴 35종과 이모지 글꼴 2종은 모두 무료로 상업 사용과 영상 삽입이 허용됩니다. 대부분 SIL Open Font License 1.1이고, 잘난체·카페24·지마켓 산스는 각 회사의 자체 라이선스(무료, 수정·판매 금지)입니다. 목록·출처(커밋 해시 고정)·SHA-256·라이선스 링크는 `packages/pipeline/pipeline/subtitle_fonts.py`에 있고, 파일은 저장소에 넣지 않습니다.
 
 | 글꼴(ASS 이름) | 라이선스 | 출처 | 쓰는 템플릿 |
 |---|---|---|---|
@@ -155,6 +167,7 @@ libass는 컬러 이모지(🍓🍵💗)를 못 그립니다. 자막 글자에 �
 | Jua, Black Han Sans, Bagel Fat One, Gaegu, Do Hyeon, Gowun Batang, Nanum Pen, Gugi, Moirai One, Dongle, Single Day, Hi Melody, Gamja Flower, East Sea Dokdo, Gasoek One, Kirang Haerang, Yeon Sung, Sunflower, Cute Font, Nanum Brush Script, Song Myung, Orbit, Diphylleia, Dokdo, Gothic A1, Poor Story, Grandiflora One | OFL | Google Fonts 저장소(`google/fonts` 커밋 고정) | 브이로그·귀여운·네온·상자·손글씨·레트로 |
 | Galmuri11 Regular, Galmuri9 Regular | OFL | `quiple/galmuri` 커밋 고정 | 픽셀 |
 | Noto Emoji(흑백) | OFL | Google Fonts 저장소 | 템플릿 글꼴이 아니라 이모지 구간에 자동으로 붙는 대체 글꼴 |
+| R4 Color Emoji(컬러, Twemoji Mozilla에서 변환) | CC-BY-4.0(그림, Twitter Twemoji) / MIT(코드, Mozilla) | `mozilla/twemoji-colr` 릴리스 v0.7.0 고정 → 층 겹침 글꼴 + 표 JSON | 템플릿 글꼴이 아니라 컬러 이모지 구간에 자동으로 붙음. 영상에 Twemoji 출처 표기가 필요합니다 |
 | Jalnan(여기어때 잘난체) | 잘난체 라이선스 | 눈누 `projectnoonnu/noonfonts_four` 커밋 고정 WOFF → OTF 변환 | 잘난체 스티커·노랑·핑크, 네온 퍼플 |
 | Cafe24 Ssurround, Cafe24 Simplehae | 카페24 서체 라이선스 | 눈누 `noonfonts_2105_2`·`noonfonts_twelve` WOFF → TTF 변환 | 써라운드 라임·하늘·피치, 심플해, 민트 파스텔, 핑크 캐비닛, 하늘 띠 |
 | Gmarket Sans(Bold) | 지마켓 산스 라이선스 | 눈누 `noonfonts_2001` WOFF → OTF 변환 | 지마켓 노랑, 흰 카드 |
@@ -170,7 +183,7 @@ Nanum Pen Script와 Galmuri는 파일 안의 family 이름이 Google Fonts 이�
 
 ```bash
 r4-subtitles templates check --fonts-dir .fonts                      # 글꼴이 실제로 찾아지는지
-r4-subtitles sheet templates.png --fonts-dir .fonts                  # 82종 전부 한 장 (흐름 배치, 1080x약 5600)
+r4-subtitles sheet templates.png --fonts-dir .fonts                  # 90종 전부 한 장 (흐름 배치, 1080x약 6000)
 r4-subtitles sheet neon.png --category neon pixel --columns 1 --width 720 --text "같은 예문"
 r4-subtitles preview one.png --template neon-pink --text "제발... 제발!!!!!" --height 400
 r4-subtitles reel motion.mp4 --category motion --width 720 --height 720 --fonts-dir .fonts  # 움직임 확인

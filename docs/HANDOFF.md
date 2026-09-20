@@ -1,3 +1,11 @@
+## 2026-09-20: 그라데이션 글자·컬러 이모지 (Claude)
+
+- 사용자 요청: "그라데이션 글자, 컬러 이모지, 움직이는 자막은 지원해줘" + 핀터레스트 90년대 TV 광고 자막 스크린샷. [PR #36](https://github.com/plutoan12/recording4/pull/36) 후속 커밋. 담당: `pipeline/subtitle_emoji.py`(신규), `pipeline/subtitle_templates.py`, `pipeline/subtitle_motion.py`, `pipeline/subtitle_fonts.py`, `scripts/fetch_fonts.py`, `apps/web/src/ClipEditor.tsx`, 테스트·문서.
+- 그라데이션: 템플릿 항목 `gradient_color`·`gradient_direction`. 앞 층을 24개 `\clip` 띠로 나눠 겹치고 `\pos`로 고정(libass 충돌 회피 때문). 이동 움직임은 clip을 `\t`로 함께 움직임. 그라데이션 카테고리 7종(홈쇼핑 금색·TV 하늘색·심야 쇼 핑크·노을 잘난체·가로 금색·오로라 네온·얼음 흰색)과 상자 `as-seen-on-red` 추가(총 90종).
+- 컬러 이모지: Twemoji Mozilla(COLRv0)를 `scripts/fetch_fonts.py`가 받아 층 글리프에 사용자 영역 코드·폭 0을 준 `R4 Color Emoji` 글꼴과 표 JSON으로 변환. 자막에서 이모지를 `{\1c}층…자리표`로 겹쳐 libass가 그림. 표가 없으면 흑백 Noto Emoji. 조합 이모지(국기 등)는 GSUB 합자에서 표로 옮김. 움직임 토크나이저는 겹침 한 묶음을 글자 하나로 취급.
+- 검증: 이 환경에서 그라데이션 7종·컬러 이모지(🍓🍵🇰🇷📞🔥)·타자기/노래방/슬라이드와의 조합을 실제 렌더해 확인. `python -m pytest -q` 통과(기존 환경 전용 실패 1개), `ruff`, `tsc`, `vite build` 통과.
+- 남은 것: 워커 이미지에서 Twemoji 릴리스 다운로드·변환이 도는지 CI 확인. 크기가 변하는 움직임 중 그라데이션 띠가 잠깐 어긋남(문서화). 편집기 미리보기의 속 빈 그라데이션은 시작 색 단색.
+
 ## 2026-09-20: 움직이는 자막 (Claude)
 
 - 사용자 요청: "움직이는 자막도 만들어줘". [PR #36](https://github.com/plutoan12/recording4/pull/36) 후속 커밋, 같은 브랜치. 담당: `pipeline/subtitle_motion.py`(신규), `pipeline/subtitle_templates.py`, `pipeline/subtitle_tool.py`, `pipeline/editing.py`, `worker/rendering.py`, `worker/composition.py`, `adminapi/routers/editing.py`, `apps/web`(ClipEditor.tsx, WorkflowPanel.tsx, styles.css), `.github/workflows/ci.yml`, 테스트·문서.

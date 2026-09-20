@@ -136,11 +136,14 @@ def test_font_manifest_is_consistent():
     families = [source.family for source in FONT_SOURCES]
     assert len(set(families)) == len(families)
     for source in FONT_SOURCES:
-        assert source.url.startswith("https://raw.githubusercontent.com/")
+        # 커밋 고정 raw 파일이거나, 컬러 이모지처럼 태그 고정 릴리스 파일입니다.
+        assert source.url.startswith(("https://raw.githubusercontent.com/", "https://github.com/"))
+        assert "/releases/download/v" in source.url or "raw.githubusercontent" in source.url
         assert len(source.sha256) == 64 and source.license
         # Google Fonts에서 받는 것은 모두 OFL입니다. 회사 글꼴은 자체 라이선스입니다.
         assert source.license == "OFL-1.1" or not source.google
-        assert source.family in FONT_FAMILIES
+        # 컬러 이모지 글꼴은 템플릿이 직접 고르는 글꼴이 아닙니다.
+        assert (source.family in FONT_FAMILIES) != source.color_emoji
     assert "Noto Sans CJK KR" in FONT_FAMILIES
     # 화면 미리보기는 Google Fonts 이름을 씁니다. 파일 이름과 다른 것만 바꿉니다.
     assert "Nanum Pen Script" in GOOGLE_FONTS_CSS_FAMILIES
@@ -167,7 +170,11 @@ def test_sheet_places_every_template_in_a_grid_with_its_own_style():
     assert document.info["PlayResY"] == str(height)
     # 앞 층 이벤트만 셉니다(두 겹 템플릿은 -Back 층이 하나 더 있고, 별·카테고리 줄도 있습니다).
     events = [e for e in document.events if e.style.startswith("T") and "-" not in e.style]
-    assert len(events) == len(templates)
+    # 그라데이션 템플릿은 앞 층이 띠 수만큼 있습니다.
+    from pipeline.subtitle_templates import GRADIENT_STEPS
+
+    expected = sum(GRADIENT_STEPS if t.gradient else 1 for t in templates)
+    assert len(events) == expected
     assert all(e.text.startswith("{\\pos(") for e in events)
     assert len({e.style for e in events}) == len(templates)
     backs = [e for e in document.events if e.style.endswith("-Back")]
@@ -434,10 +441,14 @@ def test_flow_layout_packs_rows_by_measured_width_and_keeps_integer_height():
     assert isinstance(height, int) and height % 2 == 0
     assert document.info["PlayResY"] == str(height)
     fronts = [e for e in document.events if e.style.startswith("T") and "-" not in e.style]
-    assert len(fronts) == len(templates)
-    # 같은 줄(같은 y)에 놓인 항목은 서로 겹치지 않고 화면 안에 있습니다.
+    assert len({e.style for e in fronts}) == len(templates)
+    # 같은 줄(같은 y)에 놓인 항목은 서로 겹치지 않고 화면 안에 있습니다. 그라데이션은
+    # 같은 자리에 띠가 여럿이므로 스타일마다 첫 이벤트만 봅니다.
     rows: dict[str, list[float]] = {}
+    first_of: dict[str, object] = {}
     for event in fronts:
+        first_of.setdefault(event.style, event)
+    for event in first_of.values():
         x, y = event.text[6 : event.text.index(")")].split(",")
         rows.setdefault(y, []).append(float(x))
         assert 0 < float(x) < 1080
@@ -556,3 +567,68 @@ def test_render_applies_the_animation_named_in_the_edit_spec(tmp_path):
         write_subtitles(path, spec.model_copy(update={"subtitle_animation": "spin"}))
     with pytest.raises(ValidationError):
         EditSpec(start=0, end=5, subtitle_animation="Spin!")
+
+
+def test_gradient_splits_the_front_layer_into_pinned_clip_strips():
+    from pipeline.subtitle_templates import GRADIENT_STEPS, TextBlock
+
+    gold = get_template("infomercial-gold")
+    assert gold.gradient and gold.category == "gradient"
+    block = TextBlock(left=300, top=1500, width=480, height=120)
+    strips = gold.gradient_strips(block, 1080, 1920)
+    assert len(strips) == GRADIENT_STEPS
+    # 첫 띠는 화면 위 끝부터, 끝 띠는 화면 아래 끝까지 덮어 외곽선이 잘리지 않습니다.
+    assert strips[0].startswith("\\clip(0,0,1080,1505)\\1c&HA8F6FF&")
+    assert strips[-1].startswith("\\clip(0,1615,1080,1920)\\1c&H1F9AFF&")
+    layers = gold.event_text_layers("지금 전화", anchor=(540, 1670), block=block)
+    front = [body for _, body, suffix in layers if suffix == ""]
+    assert len(front) == GRADIENT_STEPS and all(
+        body.startswith("{\\pos(540,1670)\\clip(") for body in front
+    )
+    assert len([1 for _, _, suffix in layers if suffix == "-Extrude"]) == gold.extrude
+    # 상자 뒤에 놓는 시트 경로처럼 anchor가 없으면 pos 없이, block이 없으면 단색 한 겹입니다.
+    assert gold.event_text_layers("가", block=block)[-1][1].startswith("{\\clip(")
+    assert len([1 for _, _, suffix in gold.event_text_layers("가") if suffix == ""]) == 1
+    # 가로 그라데이션은 세로 띠, 이동하는 움직임은 clip도 함께 움직입니다.
+    across = get_template("gold-across")
+    assert across.gradient_strips(block, 1080, 1920)[1].startswith("\\clip(320,0,340,1920)")
+    sliding = gold.with_animation("slide-up")
+    moving = sliding.gradient_strips(block, 1080, 1920)[1]
+    assert moving.startswith("\\clip(0,1575,1080,1580)\\t(0,320,\\clip(0,1505,1080,1510))")
+    document = styled_document(
+        [Cue(start=0, end=2, text="지금 전화")], sliding, width=1080, height=1920, duration=2
+    )
+    assert all("\\pos(" not in e.text and "\\move(" in e.text for e in document.events)
+    # 속 빈 글자는 선 색이 흐릅니다.
+    hollow = get_template("aurora-hollow")
+    assert hollow.gradient_strips(block, 1080, 1920)[0].endswith("\\3c&HFFE85F&")
+    with pytest.raises(ValidationError):
+        SubtitleTemplate(name="g", label="g", gradient_color="red")
+
+
+def test_measure_line_uses_the_emoji_font_for_emoji_runs(monkeypatch):
+    from pipeline import subtitle_templates
+
+    template = get_template("yellow")
+    monkeypatch.setattr(subtitle_templates, "color_emoji_map", lambda: {})
+    calls = []
+
+    def fake_measure(text, family, size, letter_spacing=0, bold=False):
+        calls.append((text, family))
+        return subtitle_templates.TextSize(
+            width=10 * len(text), line_height=size * 1.2, measured=True
+        )
+
+    monkeypatch.setattr(subtitle_templates, "measure_text", fake_measure)
+    size = template.measure_line("딸기 🍓", 64)
+    assert size.width == 40 and size.line_height == pytest.approx(76.8)
+    assert ("딸기 ", "Noto Sans CJK KR") in calls and ("🍓", "Noto Emoji") in calls
+    block = template.text_block(
+        "가\n나다", 64, anchor=(540, 1670), vertical="bottom", horizontal="center"
+    )
+    assert (block.left, block.top, block.width, block.height) == (
+        530,
+        1670 - 2 * 76.8,
+        20,
+        2 * 76.8,
+    )

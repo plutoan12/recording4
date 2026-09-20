@@ -11,7 +11,8 @@ type Template = { name: string; label: string; description: string; category: st
   outline: number; outline2: number; outline2_color: string; shadow: number; glow: number; angle: number;
   hollow: boolean; extrude: number; extrude_color: string; accent_color: string; box_radius: number;
   border_style: 'outline' | 'box' | 'box-outline'; letter_spacing: number; prefix: string; suffix: string;
-  animation: string; animation_ms: number | null; animation_label: string }
+  animation: string; animation_ms: number | null; animation_label: string;
+  gradient_color: string; gradient_direction: 'vertical' | 'horizontal' }
 type AnimationChoice = { name: string; label: string }
 
 // 워커의 ASS 움직임을 CSS 키프레임(styles.css의 r4-motion-*)으로 흉내 냅니다. 타자기·단어별·
@@ -50,13 +51,21 @@ function templatePreviewStyle(t: Template): React.CSSProperties {
   if (t.shadow > 0 && t.border_style === 'outline') shadows.push(`${Math.round(t.shadow)}px ${Math.round(t.shadow)}px 0 rgba(0,0,0,.6)`)
   // 입체 돌출: 그림자를 1px씩 밀어 쌓습니다(워커의 -Extrude 층과 같은 방식).
   for (let d = 1; d <= Math.round(t.extrude / 2); d++) shadows.push(`${d}px ${d}px 0 ${cssColor(t.extrude_color)}`)
+  // 그라데이션은 글자 모양으로 자른 배경으로 흉내 냅니다. 속 빈 글자는 선 색이 흐르는데
+  // CSS로는 못 하므로 시작 색 선만 보여 줍니다.
+  const gradient = t.gradient_color && !t.hollow
+    ? `linear-gradient(${t.gradient_direction === 'horizontal' ? 'to right' : 'to bottom'}, ${cssColor(t.primary_color)}, ${cssColor(t.gradient_color)})`
+    : undefined
   const style: React.CSSProperties = {
     fontFamily: `'${family}', 'Noto Sans KR', sans-serif`,
     fontSize: `${size}px`,
     fontWeight: t.bold ? 700 : 400,
     fontStyle: t.italic ? 'italic' : 'normal',
     // 속 빈 글자는 채움을 투명으로 두고 선만 보입니다.
-    color: t.hollow ? 'transparent' : cssColor(t.primary_color),
+    color: t.hollow || gradient ? 'transparent' : cssColor(t.primary_color),
+    backgroundImage: gradient,
+    WebkitBackgroundClip: gradient ? 'text' : undefined,
+    backgroundClip: gradient ? 'text' : undefined,
     letterSpacing: `${t.letter_spacing / 3}px`,
     WebkitTextStroke: t.border_style === 'outline' && stroke > 0 ? `${stroke}px ${cssColor(t.outline_color)}` : undefined,
     paintOrder: 'stroke fill',

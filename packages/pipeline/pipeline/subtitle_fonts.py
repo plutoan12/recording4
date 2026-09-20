@@ -25,6 +25,15 @@ SYSTEM_FONTS = ("Noto Sans CJK KR",)
 EMOJI_FONT = "Noto Emoji"
 """워커 이미지에 패키지로 이미 있는 글꼴. 받지 않습니다."""
 
+DEFAULT_FONTS_DIR = "/usr/share/fonts/truetype/r4"
+"""워커 이미지가 받은 글꼴을 두는 곳(infra/Dockerfile.worker). 로컬은 `R4_FONTS_DIR`."""
+
+# 컬러 이모지. Twemoji Mozilla(COLRv0)를 받아 색 층을 겹쳐 그릴 수 있는 글꼴로 바꿉니다
+# (pipeline/subtitle_emoji.py). 표 JSON이 글꼴 옆에 놓입니다.
+COLOR_EMOJI_FONT = "R4 Color Emoji"
+COLOR_EMOJI_MAP = "R4ColorEmoji.json"
+TWEMOJI_RELEASE = "v0.7.0"
+
 
 _NOONNU = "https://raw.githubusercontent.com/projectnoonnu"
 NOONNU_COMMITS = {
@@ -53,10 +62,12 @@ class FontSource:
     # name 테이블이 빈 글꼴(잘난체·지마켓 산스 OTF)에 변환할 때 써 넣는 이름입니다.
     # libass는 이름이 없는 글꼴을 등록하지 못해 조용히 다른 글꼴로 바꿉니다.
     style: str = "Regular"
+    # COLRv0 컬러 이모지 글꼴. 받은 뒤 색 층 겹침 글꼴과 표 JSON으로 바꿔 설치합니다.
+    color_emoji: bool = False
 
     @property
     def needs_conversion(self) -> bool:
-        return self.url.lower().endswith(".woff")
+        return self.url.lower().endswith(".woff") or self.color_emoji
 
 
 def _google(family: str, folder: str, filename: str, sha256: str) -> FontSource:
@@ -319,10 +330,23 @@ FONT_SOURCES: tuple[FontSource, ...] = (
         license_url=f"https://github.com/quiple/galmuri/blob/{GALMURI_COMMIT}/OFL.md",
         google=False,
     ),
+    FontSource(
+        family=COLOR_EMOJI_FONT,
+        filename="R4ColorEmoji.ttf",
+        url=(
+            "https://github.com/mozilla/twemoji-colr/releases/download/"
+            f"{TWEMOJI_RELEASE}/Twemoji.Mozilla.ttf"
+        ),
+        sha256="6d90152ee0d29e82fe2a87793af5aa4b7ad13e6538360889e141e81ed299ee8e",
+        license="CC-BY-4.0 (그림, Twitter Twemoji) / MIT (코드, Mozilla)",
+        license_url=f"https://github.com/mozilla/twemoji-colr/blob/{TWEMOJI_RELEASE}/LICENSE.md",
+        google=False,
+        color_emoji=True,
+    ),
 )
 
 FONT_FAMILIES: frozenset[str] = frozenset(SYSTEM_FONTS) | frozenset(
-    source.family for source in FONT_SOURCES
+    source.family for source in FONT_SOURCES if not source.color_emoji
 )
 """템플릿이 써도 되는 글꼴 이름. 없는 이름은 libass가 기본 글꼴로 대체해 모양이 달라집니다."""
 

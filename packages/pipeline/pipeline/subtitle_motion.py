@@ -18,6 +18,8 @@ from __future__ import annotations
 import re
 from typing import Literal
 
+from pipeline.subtitle_emoji import layer_group_pattern
+
 __all__ = [
     "ANIMATION_DEFAULT_MS",
     "ANIMATION_LABELS",
@@ -27,6 +29,7 @@ __all__ = [
     "PER_RUN",
     "Animation",
     "animate_runs",
+    "motion_offset",
     "motion_tags",
     "tokens",
 ]
@@ -145,6 +148,21 @@ def motion_tags(
     raise ValueError(f"모르는 움직임입니다: {kind}")
 
 
+def motion_offset(kind: str, ms: int) -> tuple[int, int] | None:
+    """`\\move`로 움직이는 종류의 (시작 세로 오프셋 px, 도착까지 ms). 아니면 None.
+
+    그라데이션 띠(`\\clip`)처럼 글자를 따라가야 하는 것이 씁니다.
+    """
+    ms = _ms(ms)
+    if kind == "bounce":
+        return -_DROP_PX, _ms(ms * 0.5)
+    if kind == "slide-up":
+        return _SLIDE_PX, ms
+    if kind == "slide-down":
+        return -_SLIDE_PX, ms
+    return None
+
+
 def _pop(ms: int) -> str:
     over = _ms(ms * 0.6)
     return (
@@ -187,16 +205,19 @@ def _pulse(ms: int, duration_ms: int, glow: float) -> str:
 
 # ---------------------------------------------------------------- 조각별 명령
 
-_TOKEN = re.compile(r"\{[^{}]*\}|\\[Nnh]|.", re.DOTALL)
+_OVERRIDE = r"\{[^{}]*\}"
+# 컬러 이모지 한 개(색 층 겹침)는 글자 하나로 다룹니다. 층마다 나타나면 안 됩니다.
+_TOKEN = re.compile(rf"{layer_group_pattern()}|{_OVERRIDE}|\\[Nnh]|.", re.DOTALL)
+_OVERRIDE_ONLY = re.compile(_OVERRIDE, re.DOTALL)
 
 
 def tokens(ass_text: str) -> list[str]:
-    """이벤트 글자를 명령 묶음(`{...}`), 줄바꿈(`\\N`), 글자 하나로 나눕니다."""
+    """이벤트 글자를 컬러 이모지 묶음, 명령 묶음(`{...}`), 줄바꿈(`\\N`), 글자 하나로 나눕니다."""
     return _TOKEN.findall(ass_text)
 
 
 def _is_override(token: str) -> bool:
-    return token.startswith("{")
+    return _OVERRIDE_ONLY.fullmatch(token) is not None
 
 
 def _is_break(token: str) -> bool:

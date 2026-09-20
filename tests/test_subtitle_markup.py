@@ -50,9 +50,12 @@ def test_markup_never_reaches_srt_vtt_or_the_title():
     assert parsed[0].plaintext or True  # 파싱만 되면 됩니다.
 
 
-def test_emoji_runs_get_the_monochrome_emoji_font():
+def test_emoji_runs_get_the_monochrome_emoji_font(monkeypatch):
+    from pipeline import subtitle_templates
     from pipeline.subtitle_markup import is_emoji, split_emoji
 
+    # 컬러 이모지 표가 설치돼 있어도 이 테스트는 흑백 경로를 봅니다.
+    monkeypatch.setattr(subtitle_templates, "color_emoji_map", lambda: {})
     assert split_emoji("라떼 🍓🍵!") == [("라떼 ", False), ("🍓🍵", True), ("!", False)]
     # 한글 글꼴에 있는 기호는 이모지로 보지 않습니다(글꼴을 바꾸면 모양이 달라집니다).
     assert not any(is_emoji(c) for c in "★☆♡♪✳✧")
@@ -61,3 +64,26 @@ def test_emoji_runs_get_the_monochrome_emoji_font():
     assert template.body_text("라떼 🍓") == "라떼 {\\fnNoto Emoji}🍓{\\fnJua}"
     accented = template.model_copy(update={"accent_color": "#FF0000"})
     assert "{\\fnNoto Emoji}🍓{\\fnJua}" in accented.body_text("[[딸기 🍓]]라떼")
+
+
+def test_emoji_runs_use_stacked_color_layers_when_the_color_table_is_installed(monkeypatch):
+    from pipeline import subtitle_templates
+    from pipeline.subtitle_emoji import ColorEmoji
+
+    layer, spacer = chr(0xF0000), chr(0xF0001)
+    table = {"1f353": ColorEmoji(layers=((layer, "#BE1931"),), spacer=spacer)}
+    monkeypatch.setattr(subtitle_templates, "color_emoji_map", lambda: table)
+    template = SubtitleTemplate(name="e", label="e", font_name="Jua", letter_spacing=2)
+    assert template.body_text("라떼 🍓") == (
+        "라떼 {\\fnR4 Color Emoji\\fsp0}{\\1c&H3119BE&}"
+        + layer
+        + spacer
+        + "{\\fnJua\\fsp2\\1c&HFFFFFF&}"
+    )
+    # 강조 조각 안의 이모지는 강조 색으로 되돌리고, 표에 없는 이모지는 흑백으로 갑니다.
+    accented = template.model_copy(update={"accent_color": "#FF0000"})
+    assert "\\fsp2\\1c&H0000FF&}" in accented.body_text("[[딸기 🍓]]라떼")
+    assert "{\\fnNoto Emoji}🎃{\\fnJua}" in template.body_text("호박 🎃")
+    # 속 빈 글자는 채움을 되돌리지 않습니다(층 색만 남습니다).
+    hollow = template.model_copy(update={"hollow": True})
+    assert hollow.body_text("🍓").endswith("{\\fnJua\\fsp2}")

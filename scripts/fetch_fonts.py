@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import json
 import shutil
 import subprocess
 import sys
@@ -27,7 +28,7 @@ import tempfile
 import urllib.request
 from pathlib import Path
 
-from pipeline.subtitle_fonts import FONT_SOURCES, FontSource
+from pipeline.subtitle_fonts import COLOR_EMOJI_MAP, FONT_SOURCES, FontSource
 
 
 def sha256_of(path: Path) -> str:
@@ -107,7 +108,16 @@ def fetch(source: FontSource, out: Path, *, timeout: float) -> str:
         raise RuntimeError(
             f"{source.filename}: 체크섬이 다릅니다. 기대 {source.sha256[:12]}…, 실제 {actual[:12]}…"
         )
-    installed = convert_woff(data, source.family, source.style) if source.needs_conversion else data
+    sidecar: bytes | None = None
+    if source.color_emoji:
+        from pipeline.subtitle_emoji import build_color_emoji_font
+
+        installed, table = build_color_emoji_font(data, source.family)
+        sidecar = json.dumps(table, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    elif source.needs_conversion:
+        installed = convert_woff(data, source.family, source.style)
+    else:
+        installed = data
     # 이름 확인이 끝나기 전에는 제자리에 두지 않습니다. 실패한 파일이 남아 다음
     # 실행에서 "이미 있음"으로 통과하면 안 됩니다. 임시 파일도 **같은 파일 이름**을
     # 씁니다. name 테이블이 빈 글꼴(잘난체·지마켓 산스 OTF)은 fontconfig가 파일
@@ -117,9 +127,15 @@ def fetch(source: FontSource, out: Path, *, timeout: float) -> str:
         partial.write_bytes(installed)
         _check_family(source, partial)
         partial.replace(target)
+    if sidecar is not None:
+        (out / COLOR_EMOJI_MAP).write_bytes(sidecar)
     if source.needs_conversion:
         target.with_name(target.name + ".source-sha256").write_text(actual, encoding="utf-8")
-    note = " (WOFF→변환)" if source.needs_conversion else ""
+    note = ""
+    if source.color_emoji:
+        note = " (COLR 층 겹침 글꼴로 변환, 표 JSON 포함)"
+    elif source.needs_conversion:
+        note = " (WOFF→변환)"
     return f"{source.family:<20} {source.filename:<28} {len(data) / 1024 / 1024:.1f}MB 받음{note}"
 
 

@@ -38,6 +38,7 @@ import json
 import random
 import re
 import unicodedata
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
@@ -45,10 +46,11 @@ import pysubs2
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from pipeline.editing import Cue
+from pipeline.subtitle_emoji import color_emoji_map, expand_color_emoji
 from pipeline.subtitle_files import plain_ass
-from pipeline.subtitle_fonts import EMOJI_FONT, FONT_FAMILIES
+from pipeline.subtitle_fonts import COLOR_EMOJI_FONT, EMOJI_FONT, FONT_FAMILIES
 from pipeline.subtitle_markup import split_emoji, split_markup, strip_markup
-from pipeline.subtitle_metrics import measure_text
+from pipeline.subtitle_metrics import TextSize, measure_text
 from pipeline.subtitle_motion import (
     ANIMATION_DEFAULT_MS,
     ANIMATION_LABELS,
@@ -56,6 +58,7 @@ from pipeline.subtitle_motion import (
     PER_RUN,
     Animation,
     animate_runs,
+    motion_offset,
     motion_tags,
 )
 from pipeline.subtitles import text_width
@@ -67,8 +70,18 @@ Position = Literal["bottom", "middle", "top"]
 Horizontal = Literal["left", "center", "right"]
 BorderStyle = Literal["outline", "box", "box-outline"]
 Category = Literal[
-    "basic", "vlog", "cute", "neon", "pixel", "box", "handwriting", "retro", "motion"
+    "basic",
+    "vlog",
+    "cute",
+    "neon",
+    "pixel",
+    "box",
+    "handwriting",
+    "retro",
+    "gradient",
+    "motion",
 ]
+GradientDirection = Literal["vertical", "horizontal"]
 
 CATEGORY_LABELS: dict[str, str] = {
     "basic": "기본",
@@ -79,6 +92,7 @@ CATEGORY_LABELS: dict[str, str] = {
     "box": "상자·카드",
     "handwriting": "손글씨",
     "retro": "레트로·세리프",
+    "gradient": "그라데이션",
     "motion": "움직임",
 }
 
@@ -110,6 +124,9 @@ def format_color(color: pysubs2.Color) -> str:
 # ASS 정렬은 숫자 키패드 배치입니다. 1·2·3 아래, 4·5·6 가운데, 7·8·9 위.
 # 노래방 강조 색이 템플릿에 없을 때 쓰는 노랑.
 KARAOKE_ACCENT = "#FFE14D"
+# 그라데이션을 나누는 띠 수. ASS에는 그라데이션이 없어 색을 바꾼 글자를 `\clip`으로 잘라
+# 겹칩니다. 띠가 많을수록 부드럽고 이벤트도 많아집니다.
+GRADIENT_STEPS = 24
 
 _ROW = {"bottom": 1, "middle": 4, "top": 7}
 _COLUMN = {"left": 0, "center": 1, "right": 2}
@@ -118,6 +135,16 @@ _BORDER = {"outline": 1, "box": 3, "box-outline": 4}
 
 def alignment_for(position: Position, horizontal: Horizontal = "center") -> pysubs2.Alignment:
     return pysubs2.Alignment(_ROW[position] + _COLUMN[horizontal])
+
+
+@dataclass(frozen=True)
+class TextBlock:
+    """글자 전체가 차지하는 사각형(px). 그라데이션 띠와 둥근 상자가 씁니다."""
+
+    left: float
+    top: float
+    width: float
+    height: float
 
 
 class SubtitleTemplate(BaseModel):
@@ -175,6 +202,10 @@ class SubtitleTemplate(BaseModel):
     # 한 주기입니다. 화면 제목과 미리보기 시트에는 적용하지 않습니다.
     animation: Animation = "none"
     animation_ms: int | None = Field(default=None, ge=40, le=3000)
+    # 그라데이션 끝 색. 비우면 단색. 글자 색(속 빈 글자는 선 색)에서 이 색으로 위→아래
+    # (vertical) 또는 왼쪽→오른쪽(horizontal)으로 변합니다.
+    gradient_color: str = ""
+    gradient_direction: GradientDirection = "vertical"
 
     @field_validator(
         "primary_color",
@@ -189,7 +220,7 @@ class SubtitleTemplate(BaseModel):
         parse_color(value)
         return value.upper()
 
-    @field_validator("accent_color")
+    @field_validator("accent_color", "gradient_color")
     @classmethod
     def _valid_optional_color(cls, value: str) -> str:
         if value:
@@ -373,11 +404,13 @@ class SubtitleTemplate(BaseModel):
             glow=self.glow,
         )
 
-    def _animate(self, body: str, duration_ms: int | None, prefix: str) -> str:
+    def _animate(
+        self, body: str, duration_ms: int | None, prefix: str, base_color: str | None = None
+    ) -> str:
         """조각별 움직임(타자기·단어별·노래방)을 본문에 넣습니다."""
         if not duration_ms or self.animation not in PER_RUN:
             return body
-        base = self.outline_color if self.hollow else self.primary_color
+        base = base_color or self.base_color
         return animate_runs(
             self.animation,
             body,
@@ -393,17 +426,22 @@ class SubtitleTemplate(BaseModel):
         c = parse_color(color)
         return f"\\{'3' if self.hollow else '1'}c&H{c.b:02X}{c.g:02X}{c.r:02X}&"
 
-    def body_text(self, text: str, *, accent: bool = True) -> str:
+    @property
+    def base_color(self) -> str:
+        """글자가 실제로 보이는 색. 속 빈 글자는 선 색입니다."""
+        return self.outline_color if self.hollow else self.primary_color
+
+    def body_text(self, text: str, *, accent: bool = True, base_color: str | None = None) -> str:
         """사용자 글자를 안전하게 만들고 장식과 `[[...]]` 강조 색을 붙인 이벤트 글자.
 
         강조는 앞 층에만 넣습니다(`accent=False`면 표기만 뺍니다). 속 빈 글자는 채움이
         투명이라 외곽선 색(\\3c)을 바꿉니다. 색을 되돌리는 명령을 뒤에 붙여 다음 조각이
-        원래 색으로 돌아가게 합니다.
+        원래 색(`base_color`, 비우면 템플릿 색)으로 돌아가게 합니다.
         """
         decorated = self.decorate(text)
+        base = base_color or self.base_color
         if not accent or not self.accent_color:
-            return self._with_emoji_font(strip_markup(decorated))
-        base = self.outline_color if self.hollow else self.primary_color
+            return self._with_emoji_font(strip_markup(decorated), base)
         pieces = []
         for piece, highlighted in split_markup(decorated):
             if highlighted:
@@ -411,30 +449,134 @@ class SubtitleTemplate(BaseModel):
                     "{"
                     + self._ass_color_tag(self.accent_color)
                     + "}"
-                    + self._with_emoji_font(piece)
+                    + self._with_emoji_font(piece, self.accent_color)
                     + "{"
                     + self._ass_color_tag(base)
                     + "}"
                 )
             else:
-                pieces.append(self._with_emoji_font(piece))
+                pieces.append(self._with_emoji_font(piece, base))
         return "".join(pieces)
 
-    def _with_emoji_font(self, text: str) -> str:
-        """이모지 구간에 흑백 이모지 글꼴을 붙입니다. libass는 컬러 이모지를 못 그립니다.
+    def _with_emoji_font(self, text: str, base_color: str | None = None) -> str:
+        """이모지 구간을 컬러(색 층 겹침) 또는 흑백 이모지 글꼴로 그리게 합니다.
 
-        글꼴 대체에 맡기면 어떤 글꼴이 걸릴지 알 수 없어(픽셀 글꼴의 이모지가 나오기도
-        합니다) 구간마다 명시합니다. 글꼴 이름은 검증돼 있어 명령에 넣어도 안전합니다.
+        libass는 컬러 이모지 글꼴을 못 그립니다. 컬러 이모지 표(`subtitle_emoji`)가
+        설치돼 있으면 색 층을 겹치는 글자로 바꾸고, 없으면 흑백 Noto Emoji를 씁니다.
+        글꼴 대체에 맡기면 어떤 글꼴이 걸릴지 알 수 없어 구간마다 명시합니다. 글꼴
+        이름은 검증돼 있어 명령에 넣어도 안전합니다.
         """
+        table = color_emoji_map()
+        restore = f"\\fn{self.font_name}\\fsp{self.letter_spacing:g}"
+        if not self.hollow:
+            # 층 색이 채움 색을 바꿨으므로 원래 색으로 되돌립니다. 속 빈 글자는 채움이
+            # 투명이라 층 색만 남고 되돌릴 것이 없습니다.
+            restore += self._ass_color_tag(base_color or self.base_color)
         pieces = []
         for piece, emoji in split_emoji(text):
-            if emoji:
+            if not emoji:
+                pieces.append(plain_ass(piece))
+                continue
+            expanded = expand_color_emoji(piece, table, restore=restore)
+            if expanded is not None:
+                pieces.append(f"{{\\fn{COLOR_EMOJI_FONT}\\fsp0}}" + expanded[0])
+            else:
                 pieces.append(
                     f"{{\\fn{EMOJI_FONT}}}" + plain_ass(piece) + f"{{\\fn{self.font_name}}}"
                 )
-            else:
-                pieces.append(plain_ass(piece))
         return "".join(pieces)
+
+    def measure_line(self, line: str, size: float) -> TextSize:
+        """한 줄의 폭과 줄 높이. 글자는 템플릿 글꼴로, 이모지는 이모지 글꼴로 잽니다."""
+        table = color_emoji_map()
+        width = 0.0
+        heights = [0.0]
+        measured = True
+        for piece, emoji in split_emoji(line):
+            if emoji:
+                expanded = expand_color_emoji(piece, table, restore="")
+                if expanded is not None:
+                    # 자리표 하나가 1em이고 겹침 안에서는 자간을 없앱니다.
+                    size_of = measure_text(expanded[1], COLOR_EMOJI_FONT, size)
+                else:
+                    size_of = measure_text(
+                        piece, EMOJI_FONT, size, letter_spacing=self.letter_spacing
+                    )
+            else:
+                size_of = measure_text(
+                    piece, self.font_name, size, letter_spacing=self.letter_spacing, bold=self.bold
+                )
+                heights.append(size_of.line_height)
+            width += size_of.width
+            measured = measured and size_of.measured
+        if len(heights) == 1:
+            heights.append(measure_text("가", self.font_name, size).line_height)
+        return TextSize(width=width, line_height=max(heights), measured=measured)
+
+    def text_block(
+        self,
+        text: str,
+        size: float,
+        *,
+        anchor: tuple[float, float],
+        vertical: Position,
+        horizontal: Horizontal,
+    ) -> TextBlock:
+        """장식을 붙인 글자 전체가 차지하는 사각형(정렬점 기준)."""
+        lines = strip_markup(self.decorate(text)).split("\n") or [""]
+        sizes = [self.measure_line(line, size) for line in lines]
+        width = max(item.width for item in sizes)
+        height = sum(item.line_height for item in sizes)
+        left = {
+            "left": anchor[0],
+            "center": anchor[0] - width / 2,
+            "right": anchor[0] - width,
+        }[horizontal]
+        top = {
+            "top": anchor[1],
+            "middle": anchor[1] - height / 2,
+            "bottom": anchor[1] - height,
+        }[vertical]
+        return TextBlock(left=left, top=top, width=width, height=height)
+
+    @property
+    def gradient(self) -> bool:
+        return bool(self.gradient_color)
+
+    def gradient_strips(self, block: TextBlock, play_width: int, play_height: int) -> list[str]:
+        """띠마다 (색 명령 + clip 명령). 첫 띠와 끝 띠는 화면 끝까지 늘려 외곽선을 덮습니다."""
+        start = parse_color(self.base_color)
+        end = parse_color(self.gradient_color)
+        strips = []
+        for index in range(GRADIENT_STEPS):
+            ratio = index / (GRADIENT_STEPS - 1)
+            color = pysubs2.Color(
+                round(start.r + (end.r - start.r) * ratio),
+                round(start.g + (end.g - start.g) * ratio),
+                round(start.b + (end.b - start.b) * ratio),
+            )
+            tag = f"\\{'3' if self.hollow else '1'}c&H{color.b:02X}{color.g:02X}{color.r:02X}&"
+            if self.gradient_direction == "vertical":
+                step = block.height / GRADIENT_STEPS
+                y1 = 0 if index == 0 else block.top + step * index
+                y2 = play_height if index == GRADIENT_STEPS - 1 else block.top + step * (index + 1)
+                rect = (0, y1, play_width, y2)
+            else:
+                step = block.width / GRADIENT_STEPS
+                x1 = 0 if index == 0 else block.left + step * index
+                x2 = play_width if index == GRADIENT_STEPS - 1 else block.left + step * (index + 1)
+                rect = (x1, 0, x2, play_height)
+            strips.append((tag, rect, color))
+        out = []
+        offset = motion_offset(self.animation, self.motion_ms) if self.animated else None
+        for tag, (x1, y1, x2, y2), _ in strips:
+            clip = f"\\clip({x1:.0f},{y1:.0f},{x2:.0f},{y2:.0f})"
+            if offset:
+                # 이동하는 동안에도 띠가 글자를 따라가게 clip을 함께 움직입니다.
+                dy, ms = offset
+                clip = f"\\clip({x1:.0f},{y1 + dy:.0f},{x2:.0f},{y2 + dy:.0f})\\t(0,{ms},{clip})"
+            out.append(clip + tag)
+        return out
 
     def event_text_layers(
         self,
@@ -442,36 +584,62 @@ class SubtitleTemplate(BaseModel):
         *,
         duration_ms: int | None = None,
         anchor: tuple[float, float] | None = None,
+        block: TextBlock | None = None,
+        play_size: tuple[int, int] = (1080, 1920),
     ) -> list[tuple[int, str, str]]:
         """(layer, 이벤트 글자, 스타일 접미사) 목록. 뒤 층이 먼저 옵니다.
 
         접미사는 "" (앞 층), "-Back" (바깥 테두리·번짐), "-Extrude" (입체 돌출)입니다.
         글로우는 뒤 층에만 붙여 앞 층 글자는 또렷하게 둡니다. `duration_ms`(자막 길이)를
         주면 움직임 명령을 모든 층에 같게 붙이고, 없으면 정지 화면입니다. `anchor`는
-        글자가 정렬되는 점으로 이동하는 움직임의 목적지입니다.
+        글자가 정렬되는 점으로 이동하는 움직임의 목적지입니다. 그라데이션은 `block`
+        (글자가 차지하는 사각형)이 있어야 띠로 나눌 수 있고, 없으면 시작 색 단색입니다.
         """
         lead = self.motion_tags(duration_ms, anchor)
         lead = "{" + lead + "}" if lead else ""
         # 노래방은 단어 색을 스스로 바꾸므로 `[[...]]` 강조와 겹치지 않게 뺍니다.
-        front = self.body_text(text, accent=self.animation != "karaoke" or not duration_ms)
+        accent = self.animation != "karaoke" or not duration_ms
         blur = self._override_inner()
-        if not self.layered:
-            body = self._animate(front, duration_ms, blur)
-            return [(0, lead + self.override_tags() + body, "")]
-        plain = self.body_text(text, accent=False)
         layers: list[tuple[int, str, str]] = []
         layer = 0
-        for depth in range(self.extrude, 0, -1):
-            inner = f"\\shad0\\xshad{depth}\\yshad{depth}"
-            body = self._animate(plain, duration_ms, inner)
-            layers.append((layer, lead + "{" + inner + "}" + body, "-Extrude"))
-            layer += 1
-        if self.has_back_layer:
-            body = self._animate(plain, duration_ms, blur)
-            layers.append((layer, lead + self.override_tags() + body, "-Back"))
-            layer += 1
-        layers.append((layer, lead + self._animate(front, duration_ms, ""), ""))
+        if self.layered:
+            plain = self.body_text(text, accent=False)
+            for depth in range(self.extrude, 0, -1):
+                inner = f"\\shad0\\xshad{depth}\\yshad{depth}"
+                body = self._animate(plain, duration_ms, inner)
+                layers.append((layer, lead + "{" + inner + "}" + body, "-Extrude"))
+                layer += 1
+            if self.has_back_layer:
+                body = self._animate(plain, duration_ms, blur)
+                layers.append((layer, lead + self.override_tags() + body, "-Back"))
+                layer += 1
+            front_tags = ""
+        else:
+            front_tags = self.override_tags()
+        if self.gradient and block is not None:
+            # 띠마다 색을 바꾼 앞 층을 clip으로 잘라 겹칩니다. 띠는 겹치지 않습니다.
+            # libass는 같은 층·같은 시간의 이벤트를 겹치지 않게 위로 쌓으므로(충돌 회피)
+            # 띠가 clip 밖으로 밀리지 않도록 `\\pos`로 자리를 고정합니다. 이동하는 움직임은
+            # `\\move`가 이미 자리를 정합니다.
+            fixed = ""
+            if anchor is not None and not (self.moves and duration_ms):
+                fixed = f"\\pos({anchor[0]:.0f},{anchor[1]:.0f})"
+            for strip in self.gradient_strips(block, *play_size):
+                tag = strip[strip.rindex("\\") :]
+                color = self._color_from_tag(tag)
+                front = self.body_text(text, accent=accent, base_color=color)
+                body = self._animate(front, duration_ms, blur if not self.layered else "", color)
+                layers.append((layer, lead + "{" + fixed + strip + "}" + front_tags + body, ""))
+            return layers
+        front = self.body_text(text, accent=accent)
+        body = self._animate(front, duration_ms, blur if not self.layered else "")
+        layers.append((layer, lead + front_tags + body, ""))
         return layers
+
+    @staticmethod
+    def _color_from_tag(tag: str) -> str:
+        value = tag[tag.index("&H") + 2 : -1]
+        return f"#{value[4:6]}{value[2:4]}{value[0:2]}"
 
     def decorate(self, text: str) -> str:
         """장식을 붙입니다. 여러 줄이면 첫 줄 앞과 마지막 줄 뒤에만 붙입니다."""
@@ -1485,6 +1653,137 @@ BUILTIN_TEMPLATES: dict[str, SubtitleTemplate] = {
             prefix="✳",
             suffix="✳",
         ),
+        # ---- 그라데이션 -------------------------------------------------
+        # 90년대 TV 홈쇼핑·광고 자막 느낌(금색 그라데이션에 진한 그림자, 하늘색 대문자,
+        # 흰 테두리 핑크 제목). ASS에는 그라데이션이 없어 색 띠를 clip으로 겹칩니다.
+        _builtin(
+            name="infomercial-gold",
+            label="홈쇼핑 금색",
+            description="연노랑→주황 금색 글자에 남색 외곽선과 진한 입체 그림자. 90년대 광고.",
+            sample="단돈 2만 원!! 📞 지금 전화",
+            category="gradient",
+            font_name="Gasoek One",
+            font_size=84,
+            primary_color="#FFF6A8",
+            gradient_color="#FF9A1F",
+            outline_color="#1B2A6B",
+            outline=3,
+            shadow=0,
+            extrude=6,
+            extrude_color="#2A1A00",
+        ),
+        _builtin(
+            name="tv-blue-caps",
+            label="TV 하늘색",
+            description="흰색→하늘색 굵은 글자에 남색 외곽선. 옛날 TV 공익광고 제목.",
+            sample="DON'T DO DRUGS!",
+            category="gradient",
+            font_name="Black Han Sans",
+            font_size=88,
+            primary_color="#FFFFFF",
+            gradient_color="#5FC8FF",
+            outline_color="#0D2A6B",
+            outline=3,
+            shadow=2,
+            letter_spacing=2,
+        ),
+        _builtin(
+            name="night-show-pink",
+            label="심야 쇼 핑크",
+            description="연핑크→진핑크 글자에 흰 테두리와 자주 바깥선, 달·별 장식. 레트로 쇼 로고.",
+            sample="NIGHT TIME SHOW",
+            category="gradient",
+            font_name="Gasoek One",
+            font_size=84,
+            primary_color="#FFB3D1",
+            gradient_color="#FF3D8A",
+            outline_color="#FFFFFF",
+            outline=3,
+            outline2=2,
+            outline2_color="#4A1030",
+            shadow=0,
+            suffix="☽★",
+        ),
+        _builtin(
+            name="sunset-jalnan",
+            label="노을 잘난체",
+            description="노랑에서 핑크로 흐르는 잘난체 글자에 검은 외곽선. 예능 강조에.",
+            sample="이거 진짜 대박 🔥",
+            category="gradient",
+            font_name="Jalnan",
+            font_size=84,
+            primary_color="#FFD84D",
+            gradient_color="#FF4D8D",
+            outline_color="#111111",
+            outline=4,
+            shadow=0,
+        ),
+        _builtin(
+            name="gold-across",
+            label="가로 금색",
+            description="왼쪽 연노랑→오른쪽 주황 가로 금색 글자에 갈색 입체. 전화번호·가격 자막.",
+            sample="1-800-GIF-GIFT",
+            category="gradient",
+            font_name="Black Han Sans",
+            font_size=92,
+            primary_color="#FFF0A0",
+            gradient_color="#FF9F1C",
+            gradient_direction="horizontal",
+            outline_color="#3A2200",
+            outline=2,
+            shadow=0,
+            extrude=5,
+            extrude_color="#3A2200",
+        ),
+        _builtin(
+            name="aurora-hollow",
+            label="오로라 네온",
+            description="속 빈 글자의 선이 하늘색에서 보라로 흐르며 빛납니다. 네온 간판.",
+            sample="OPEN 24 HOURS ✨",
+            category="gradient",
+            font_name="Gaegu",
+            font_size=88,
+            bold=True,
+            outline_color="#5FE8FF",
+            gradient_color="#C55FFF",
+            outline=3,
+            shadow=0,
+            glow=7,
+            hollow=True,
+        ),
+        _builtin(
+            name="ice-live",
+            label="얼음 흰색",
+            description="흰색→연하늘 프리텐다드 굵은 글자에 남색 외곽선. LIVE·정보 자막.",
+            sample="🔴 LIVE 방송 중",
+            category="gradient",
+            font_name="Pretendard",
+            font_size=64,
+            bold=True,
+            primary_color="#FFFFFF",
+            gradient_color="#BFE9FF",
+            outline_color="#1B3A5C",
+            outline=3,
+            shadow=0,
+        ),
+        _builtin(
+            name="as-seen-on-red",
+            label="AS SEEN ON 배지",
+            description="빨간 둥근 배지에 흰 굵은 글자. 90년대 광고의 'AS SEEN ON TV' 배지.",
+            sample="AS SEEN ON TV",
+            category="box",
+            font_name="Black Han Sans",
+            font_size=56,
+            primary_color="#FFFFFF",
+            border_style="box-outline",
+            box_radius=18,
+            outline2=3,
+            box_color="#E8342B",
+            outline_color="#FFFFFF",
+            outline=6,
+            shadow=0,
+            letter_spacing=1,
+        ),
         # ---- 움직임 -----------------------------------------------------
         # 위 카테고리의 모양에 움직임을 붙인 것입니다. 어떤 템플릿이든 `animation` 값을
         # 주면(편집기의 움직임 선택, CLI --animation) 같은 움직임이 붙습니다.
@@ -1784,13 +2083,13 @@ def styled_document(
             update={"prefix": "", "suffix": "", "accent_color": "", "animation": "none"}
         )
         lift = 0
+        title_style = subs.styles["Title"]
+        opposite: Position = "bottom" if template.position == "top" else "top"
+        anchor_x = (title_style.marginl + width - title_style.marginr) / 2
+        anchor_y = float(
+            height - title_style.marginv if opposite == "bottom" else title_style.marginv
+        )
         if template.rounded_box:
-            title_style = subs.styles["Title"]
-            opposite: Position = "bottom" if template.position == "top" else "top"
-            anchor_x = (title_style.marginl + width - title_style.marginr) / 2
-            anchor_y = float(
-                height - title_style.marginv if opposite == "bottom" else title_style.marginv
-            )
             subs.append(
                 pysubs2.SSAEvent(
                     start=0,
@@ -1809,7 +2108,16 @@ def styled_document(
                 )
             )
             lift = 1
-        for layer, text, suffix in plain_title.event_text_layers(title):
+        title_block = plain_title.text_block(
+            title,
+            title_style.fontsize,
+            anchor=(anchor_x, anchor_y),
+            vertical=opposite,
+            horizontal="center",
+        )
+        for layer, text, suffix in plain_title.event_text_layers(
+            title, block=title_block, play_size=(width, height)
+        ):
             subs.append(
                 pysubs2.SSAEvent(
                     start=0,
@@ -1863,8 +2171,15 @@ def append_cue(
             )
         )
         layer += 1
+    block = template.text_block(
+        text,
+        style.fontsize,
+        anchor=anchor,
+        vertical=template.position,
+        horizontal=template.horizontal,
+    )
     for offset, body, suffix in template.event_text_layers(
-        text, duration_ms=duration, anchor=anchor
+        text, duration_ms=duration, anchor=anchor, block=block, play_size=(width, height)
     ):
         subs.append(
             pysubs2.SSAEvent(
@@ -1990,21 +2305,11 @@ def rounded_box_text(
     상자도 글자와 같은 정렬(`\\an`)로 그 점 가까이에 놓아 크기·회전 움직임이 글자와
     같은 점을 중심으로 일어나게 합니다. `duration_ms`를 주면 글자와 같은 움직임을 붙입니다.
     """
-    lines = strip_markup(template.decorate(text)).split("\n") or [""]
-    sizes = [
-        measure_text(
-            line,
-            template.font_name,
-            font_size,
-            letter_spacing=template.letter_spacing,
-            bold=template.bold,
-        )
-        for line in lines
-    ]
-    text_width = max(size.width for size in sizes)
-    text_height = sum(size.line_height for size in sizes)
+    block = template.text_block(
+        text, font_size, anchor=(anchor_x, anchor_y), vertical=vertical, horizontal=horizontal
+    )
     pad = template.outline
-    width, height = text_width + 2 * pad, text_height + 2 * pad
+    width, height = block.width + 2 * pad, block.height + 2 * pad
     # 상자의 정렬점은 글자의 정렬점에서 여백만큼 바깥입니다.
     box_x = anchor_x + {"left": -pad, "center": 0, "right": pad}[horizontal]
     box_y = anchor_y + {"top": -pad, "middle": 0, "bottom": pad}[vertical]
@@ -2248,15 +2553,11 @@ def sheet_document(
             # 글자 폭을 재서 한 줄에 들어가는 만큼 채웁니다. 크기는 템플릿 값에 가깝게 둡니다.
             fit = min(template.font_size, 48)
             extra = 2 * (template.outline + template.outline2) + 2 * template.extrude + 16
-            size = measure_text(
-                shown, template.font_name, fit, letter_spacing=template.letter_spacing
-            )
+            size = template.measure_line(shown, fit)
             item_w = size.width + extra
             if item_w > usable:
                 fit = max(24, int(fit * usable / item_w))
-                size = measure_text(
-                    shown, template.font_name, fit, letter_spacing=template.letter_spacing
-                )
+                size = template.measure_line(shown, fit)
                 item_w = size.width + extra
             item_h = size.line_height + 2 * (template.outline + template.outline2) + 28
             if flow_row and flow_width + gap + item_w > usable:
@@ -2278,6 +2579,8 @@ def sheet_document(
     elif column:
         y += row_height
 
+    height = int(round(y)) + SHEET_PADDING
+    height += height % 2
     for index, template, sample, fit, x, cy in placements:
         style = template.style(SHEET_ROW_HEIGHT, font_size=fit)
         style.alignment = pysubs2.Alignment.MIDDLE_CENTER
@@ -2304,7 +2607,12 @@ def sheet_document(
                 )
             )
             lift = 2
-        for layer, body, suffix in template.event_text_layers(sample):
+        block = template.text_block(
+            sample, fit, anchor=(x, cy), vertical="middle", horizontal="center"
+        )
+        for layer, body, suffix in template.event_text_layers(
+            sample, block=block, play_size=(width, height)
+        ):
             events.append(
                 pysubs2.SSAEvent(
                     start=0,
@@ -2314,8 +2622,6 @@ def sheet_document(
                     text=f"{{\\pos({x:.0f},{cy:.0f})}}" + body,
                 )
             )
-    height = int(round(y)) + SHEET_PADDING
-    height += height % 2
     subs.info["PlayResY"] = str(height)
 
     # 배경 별. 글자 뒤(layer 0)에 두고 씨앗을 고정해 렌더마다 같은 자리에 나옵니다.
