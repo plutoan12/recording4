@@ -8,7 +8,7 @@ from prepare_conversation_evaluation import load_json, number
 from run_sortformer_evaluation import sha256, write_private_json
 
 
-def solo_spans(turns, duration):
+def solo_spans(turns, duration, minimum_fragment=0.5):
     if not number(duration) or duration <= 0:
         raise ValueError("Invalid duration")
     for t in turns:
@@ -20,6 +20,8 @@ def solo_spans(turns, duration):
             or not t["speaker"]
         ):
             raise ValueError("Invalid turn")
+    if not number(minimum_fragment) or minimum_fragment < 0:
+        raise ValueError("Invalid minimum fragment")
     result = {}
     for label in sorted({t["speaker"] for t in turns}):
         merged = []
@@ -41,7 +43,7 @@ def solo_spans(turns, duration):
                     if other["end"] < b:
                         remaining.append([other["end"], b])
             merged = remaining
-        result[label] = [(a, b) for a, b in merged if b - a >= 0.5]
+        result[label] = [(a, b) for a, b in merged if b - a >= minimum_fragment]
     return result
 
 

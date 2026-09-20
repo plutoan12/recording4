@@ -1,0 +1,61 @@
+{
+  "community": {
+    "anchors": {
+      "SPEAKER_00": {
+        "predicted_seconds": 72.30937500000003,
+        "overlap_removed": 1.8562500000000028,
+        "solo_before_fragment_filter": 70.45312500000003,
+        "short_fragment_removed": 1.1625000000000085,
+        "query_context_removed": 2.4099999999999966,
+        "eligible_seconds": 66.88062500000002,
+        "status": "eligible_duration_only"
+      },
+      "SPEAKER_01": {
+        "predicted_seconds": 1.8562500000000028,
+        "overlap_removed": 1.8562500000000028,
+        "solo_before_fragment_filter": 0,
+        "short_fragment_removed": 0.0,
+        "query_context_removed": 0.0,
+        "eligible_seconds": 0,
+        "status": "insufficient_duration"
+      }
+    },
+    "source_sha256": "12b29461406fe6725138fff370086ce15bb9bcab47c21801043e3ac88e3ea9f5",
+    "prediction_sha256": "8e9b1fa6679c6af73b7893cad9f12074962846958244ede191fc433fbd3bdd42",
+    "selection_unchanged": true
+  },
+  "sortformer": {
+    "anchors": {
+      "speaker_0": {
+        "predicted_seconds": 48.31000000000001,
+        "overlap_removed": 0.240000000000002,
+        "solo_before_fragment_filter": 48.07000000000001,
+        "short_fragment_removed": 5.599999999999994,
+        "query_context_removed": 0.5600000000000023,
+        "eligible_seconds": 41.91000000000001,
+        "status": "eligible_duration_only"
+      },
+      "speaker_1": {
+        "predicted_seconds": 1.6799999999999962,
+        "overlap_removed": 0.0,
+        "solo_before_fragment_filter": 1.6799999999999962,
+        "short_fragment_removed": 1.0399999999999956,
+        "query_context_removed": 0.0,
+        "eligible_seconds": 0.6400000000000006,
+        "status": "insufficient_duration"
+      },
+      "speaker_2": {
+        "predicted_seconds": 0.4800000000000004,
+        "overlap_removed": 0.240000000000002,
+        "solo_before_fragment_filter": 0.23999999999999844,
+        "short_fragment_removed": 0.23999999999999844,
+        "query_context_removed": 0.0,
+        "eligible_seconds": 0,
+        "status": "insufficient_duration"
+      }
+    },
+    "source_sha256": "12b29461406fe6725138fff370086ce15bb9bcab47c21801043e3ac88e3ea9f5",
+    "prediction_sha256": "a3e5d905b5eb993e25a7eb3264a4b33637e94780d81056a3b5f937b7d2bb9c49",
+    "selection_unchanged": true
+  }
+}

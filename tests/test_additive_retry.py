@@ -65,3 +65,26 @@ def test_uncertain_zero_length_existing_word_blocks_same_time_addition():
         append_preserving_baseline(
             [dict(start=1, end=1, text="keep")], [dict(start=0.5, end=1.5, text="new")]
         )
+
+
+def test_anchor_loss_distinguishes_short_fragments_and_query_context():
+    from verify_additive_voice import anchor_availability
+
+    turns = [dict(start=0, end=10, speaker="a"), dict(start=11, end=11.3, speaker="b")]
+    spans, report = anchor_availability(turns, 12, 4, 5)
+    assert spans["a"] == [(0, 3), (6, 10)]
+    assert report["a"]["query_context_removed"] == 3
+    assert report["a"]["eligible_seconds"] == 7
+    assert report["b"]["short_fragment_removed"] > 0.29
+    assert report["b"]["status"] == "insufficient_duration"
+
+
+def test_overlapping_voice_is_not_reported_as_clean_solo():
+    from verify_additive_voice import anchor_availability
+
+    turns = [dict(start=0, end=10, speaker="a"), dict(start=1, end=2, speaker="b")]
+    _, report = anchor_availability(turns, 12, 10, 11)
+    assert report["b"]["predicted_seconds"] == 1
+    assert report["b"]["overlap_removed"] == 1
+    assert report["b"]["solo_before_fragment_filter"] == 0
+    assert report["b"]["short_fragment_removed"] == 0

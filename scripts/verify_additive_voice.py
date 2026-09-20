@@ -38,6 +38,39 @@ def append_preserving_baseline(baseline, additions):
     return result
 
 
+def anchor_availability(turns, duration, start, end):
+    """Explain losses at each fixed anchor gate without using reference labels."""
+    raw_solo = solo_spans(turns, duration, minimum_fragment=0)
+    selected = solo_spans(turns, duration)
+    spans, report = {}, {}
+    for label, intervals in selected.items():
+        pieces = []
+        context_removed = 0.0
+        short_removed = 0.0
+        for x, y in intervals:
+            remainder = [(x, min(y, start - 1)), (max(x, end + 1), y)]
+            positive = [(a, b) for a, b in remainder if b > a]
+            context_removed += y - x - sum(b - a for a, b in positive)
+            short_removed += sum(b - a for a, b in positive if b - a < 0.5)
+            pieces.extend((a, b) for a, b in positive if b - a >= 0.5)
+        total = sum(b - a for a, b in pieces)
+        all_solo = sum(b - a for a, b in raw_solo[label])
+        eligible_solo = sum(b - a for a, b in intervals)
+        spans[label] = pieces
+        own = solo_spans([t for t in turns if t["speaker"] == label], duration, 0)[label]
+        predicted_seconds = sum(b - a for a, b in own)
+        report[label] = dict(
+            predicted_seconds=predicted_seconds,
+            overlap_removed=predicted_seconds - all_solo,
+            solo_before_fragment_filter=all_solo,
+            short_fragment_removed=all_solo - eligible_solo + short_removed,
+            query_context_removed=context_removed,
+            eligible_seconds=total,
+            status="eligible_duration_only" if total >= 1 else "insufficient_duration",
+        )
+    return spans, report
+
+
 def main():
     import numpy as np
     import soundfile as sf
@@ -78,17 +111,13 @@ def main():
         a, b = item["start"], item["end"]
         if not 0 <= a < b <= len(audio) / rate:
             raise ValueError("Invalid candidate interval")
-        spans = solo_spans(item["turns"], len(audio) / rate)
+        spans, availability = anchor_availability(item["turns"], len(audio) / rate, a, b)
         vectors = {}
         pairs = {}
         solo_seconds = {}
         for label, intervals in spans.items():
-            # Anchor audio must be disjoint from the candidate, including context.
-            fragments = []
-            for x, y in intervals:
-                for left, right in [(x, min(y, a - 1)), (max(x, b + 1), y)]:
-                    if right - left >= 0.5:
-                        fragments.append(audio[int(left * rate) : int(right * rate)])
+            # Selection is shared with the duration-loss diagnostic.
+            fragments = [audio[int(x * rate) : int(y * rate)] for x, y in intervals]
             samples = np.concatenate(fragments) if fragments else np.empty(0, dtype="float32")
             solo_seconds[label] = len(samples) / rate
             if len(samples) < rate:
@@ -134,6 +163,7 @@ def main():
                 id=item["id"],
                 duration=b - a,
                 anchor_seconds=solo_seconds,
+                anchor_availability=availability,
                 target_anchor_available=target in vectors,
                 comparison_available=target in vectors and len(vectors) > 1,
                 anchor_status=anchor_status,
