@@ -48,6 +48,22 @@
     "candidate_groups": 0,
     "proposed_words": 0
   },
+  "consensus_gap_dicow": {
+    "decode_rows": 6,
+    "nonempty_decodings": 4,
+    "truncated_decodings": 0,
+    "alignment_statuses": {
+      "core_membership_disagreement": 2,
+      "timing_consensus_only": 1,
+      "alignment_disagreement": 1,
+      "empty_decoding": 2
+    },
+    "aligned_core_word_candidates": 0,
+    "reference_supplied_to_model": false,
+    "model_revision": "00a09c622bf58c34fdc76c3b5676f4da706f2a8e",
+    "ctc_weight": 0.0,
+    "dtype": "float32"
+  },
   "accepted_words": 0,
   "evaluation_output_changed": false,
   "deployment_allowed": false,

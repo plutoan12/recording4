@@ -36,10 +36,7 @@ def consensus_gaps(words, predictions, duration, *, word_guard=0.1, minimum=0.5)
     common = timelines[0]
     for timeline in timelines[1:]:
         common = merge_spans(
-            (max(a, c), min(b, d))
-            for a, b in common
-            for c, d in timeline
-            if max(a, c) < min(b, d)
+            (max(a, c), min(b, d)) for a, b in common for c, d in timeline if max(a, c) < min(b, d)
         )
     for word in words:
         if word.get("timing_valid") is False:

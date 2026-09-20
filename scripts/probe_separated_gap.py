@@ -63,9 +63,7 @@ def main():
             segments, _ = asr.transcribe(
                 stem, language="en", beam_size=5, vad_filter=False, word_timestamps=True
             )
-            text = overlapping_text(
-                segments, item["start"], item["end"], begin / rate
-            )
+            text = overlapping_text(segments, item["start"], item["end"], begin / rate)
             stems.append(
                 dict(
                     channel=channel,
