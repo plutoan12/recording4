@@ -49,13 +49,18 @@ def test_transcript_snapshots_and_suggestions(client, auth_headers, asset):
     cues = [{"start": 2, "end": 10, "text": "hello"}]
     assert client.put(path, headers=auth_headers, json={"cues": cues}).json()["version"] == 1
     assert client.get(path, headers=auth_headers).json() == cues
+    # 단어 시각은 저장되고 그대로 돌아옵니다. 없으면 항목 자체가 빠집니다.
+    timed = [{**cues[0], "words": [{"start": 2.0, "end": 2.5, "text": "hello"}]}]
+    assert client.put(path, headers=auth_headers, json={"cues": timed}).json()["version"] == 2
+    assert client.get(path, headers=auth_headers).json() == timed
+    assert client.put(path, headers=auth_headers, json={"cues": cues}).json()["version"] == 3
     assert (
         client.get(f"/source-assets/{asset.id}/suggestions", headers=auth_headers).json()[0][
             "start"
         ]
         == 2
     )
-    assert client.put(path, headers=auth_headers, json={"cues": cues}).json()["version"] == 2
+    assert client.put(path, headers=auth_headers, json={"cues": cues}).json()["version"] == 4
     cues[0]["end"] = 200
     assert client.put(path, headers=auth_headers, json={"cues": cues}).status_code == 422
 

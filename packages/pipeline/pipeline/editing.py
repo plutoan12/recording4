@@ -7,11 +7,29 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
+class Word(BaseModel):
+    """자막 안 단어 하나의 시각. 정렬기(whisper)가 준 값이며 노래방·단어별 움직임이 씁니다."""
+
+    model_config = ConfigDict(allow_inf_nan=False, extra="forbid")
+    start: float = Field(ge=0)
+    end: float = Field(ge=0)
+    text: str = Field(min_length=1, max_length=200)
+
+    @model_validator(mode="after")
+    def ordered(self):
+        if self.end < self.start:
+            raise ValueError("단어 종료는 시작보다 앞일 수 없습니다.")
+        return self
+
+
 class Cue(BaseModel):
     model_config = ConfigDict(allow_inf_nan=False, extra="forbid")
     start: float = Field(ge=0)
     end: float = Field(gt=0)
     text: str = Field(min_length=1, max_length=2000)
+    # 단어 시각. 정렬·전사 결과에만 있고 사람이 글자를 고치면 비웁니다(맞지 않으므로).
+    # 렌더는 없거나 글자와 맞지 않으면 자막 길이를 고르게 나눠 씁니다.
+    words: list[Word] | None = Field(default=None, max_length=500)
 
     @model_validator(mode="after")
     def ordered(self):
@@ -54,9 +72,30 @@ class EditSpec(BaseModel):
 def clip_cues(cues: list[Cue], start: float, end: float) -> list[Cue]:
     """Intersect source cues with clip bounds and rebase onto output timeline."""
     return [
-        Cue(start=max(c.start, start) - start, end=min(c.end, end) - start, text=c.text)
+        Cue(
+            start=max(c.start, start) - start,
+            end=min(c.end, end) - start,
+            text=c.text,
+            words=_clip_words(c.words, start, end),
+        )
         for c in sorted(cues, key=lambda c: c.start)
         if c.end > start and c.start < end
+    ]
+
+
+def _clip_words(words: list[Word] | None, start: float, end: float) -> list[Word] | None:
+    """단어 시각을 구간에 맞춰 옮깁니다. 구간 밖 단어가 있으면 글자와 맞지 않으므로 비웁니다."""
+    if not words:
+        return None
+    if any(w.end < start or w.start > end for w in words):
+        return None
+    return [
+        Word(
+            start=max(0.0, w.start - start),
+            end=max(0.0, min(w.end, end) - start),
+            text=w.text,
+        )
+        for w in words
     ]
 
 

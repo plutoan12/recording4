@@ -45,7 +45,7 @@ from typing import Literal
 import pysubs2
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from pipeline.editing import Cue
+from pipeline.editing import Cue, Word
 from pipeline.subtitle_emoji import color_emoji_map, expand_color_emoji
 from pipeline.subtitle_files import plain_ass
 from pipeline.subtitle_fonts import COLOR_EMOJI_FONT, EMOJI_FONT, FONT_FAMILIES
@@ -405,7 +405,12 @@ class SubtitleTemplate(BaseModel):
         )
 
     def _animate(
-        self, body: str, duration_ms: int | None, prefix: str, base_color: str | None = None
+        self,
+        body: str,
+        duration_ms: int | None,
+        prefix: str,
+        base_color: str | None = None,
+        word_times: list[tuple[int, int]] | None = None,
     ) -> str:
         """조각별 움직임(타자기·단어별·노래방)을 본문에 넣습니다."""
         if not duration_ms or self.animation not in PER_RUN:
@@ -420,7 +425,21 @@ class SubtitleTemplate(BaseModel):
             hollow=self.hollow,
             accent=self._ass_color_tag(self.accent_color or KARAOKE_ACCENT),
             base=self._ass_color_tag(base),
+            word_times=self._decorated_word_times(word_times),
         )
+
+    def _decorated_word_times(
+        self, word_times: list[tuple[int, int]] | None
+    ) -> list[tuple[int, int]] | None:
+        """장식(prefix·suffix)은 단어로 세어지므로 첫·끝 단어의 시각을 나눠 갖게 합니다."""
+        if not word_times:
+            return None
+        out = list(word_times)
+        if self.prefix:
+            out.insert(0, out[0])
+        if self.suffix:
+            out.append(out[-1])
+        return out
 
     def _ass_color_tag(self, color: str) -> str:
         c = parse_color(color)
@@ -586,6 +605,7 @@ class SubtitleTemplate(BaseModel):
         anchor: tuple[float, float] | None = None,
         block: TextBlock | None = None,
         play_size: tuple[int, int] = (1080, 1920),
+        word_times: list[tuple[int, int]] | None = None,
     ) -> list[tuple[int, str, str]]:
         """(layer, 이벤트 글자, 스타일 접미사) 목록. 뒤 층이 먼저 옵니다.
 
@@ -594,6 +614,7 @@ class SubtitleTemplate(BaseModel):
         주면 움직임 명령을 모든 층에 같게 붙이고, 없으면 정지 화면입니다. `anchor`는
         글자가 정렬되는 점으로 이동하는 움직임의 목적지입니다. 그라데이션은 `block`
         (글자가 차지하는 사각형)이 있어야 띠로 나눌 수 있고, 없으면 시작 색 단색입니다.
+        `word_times`는 단어별 (시작, 끝) ms로 노래방·단어별 등장이 씁니다.
         """
         lead = self.motion_tags(duration_ms, anchor)
         lead = "{" + lead + "}" if lead else ""
@@ -606,11 +627,11 @@ class SubtitleTemplate(BaseModel):
             plain = self.body_text(text, accent=False)
             for depth in range(self.extrude, 0, -1):
                 inner = f"\\shad0\\xshad{depth}\\yshad{depth}"
-                body = self._animate(plain, duration_ms, inner)
+                body = self._animate(plain, duration_ms, inner, word_times=word_times)
                 layers.append((layer, lead + "{" + inner + "}" + body, "-Extrude"))
                 layer += 1
             if self.has_back_layer:
-                body = self._animate(plain, duration_ms, blur)
+                body = self._animate(plain, duration_ms, blur, word_times=word_times)
                 layers.append((layer, lead + self.override_tags() + body, "-Back"))
                 layer += 1
             front_tags = ""
@@ -628,11 +649,15 @@ class SubtitleTemplate(BaseModel):
                 tag = strip[strip.rindex("\\") :]
                 color = self._color_from_tag(tag)
                 front = self.body_text(text, accent=accent, base_color=color)
-                body = self._animate(front, duration_ms, blur if not self.layered else "", color)
+                body = self._animate(
+                    front, duration_ms, blur if not self.layered else "", color, word_times
+                )
                 layers.append((layer, lead + "{" + fixed + strip + "}" + front_tags + body, ""))
             return layers
         front = self.body_text(text, accent=accent)
-        body = self._animate(front, duration_ms, blur if not self.layered else "")
+        body = self._animate(
+            front, duration_ms, blur if not self.layered else "", word_times=word_times
+        )
         layers.append((layer, lead + front_tags + body, ""))
         return layers
 
@@ -2074,6 +2099,7 @@ def styled_document(
             text=cue.text,
             width=width,
             height=height,
+            words=cue.words,
         )
     if title:
         add_styles(subs, "Title", template, template.title_style(height, font_size=font_size))
@@ -2142,14 +2168,21 @@ def append_cue(
     width: int,
     height: int,
     base_layer: int = 0,
+    words: list[Word] | None = None,
 ) -> None:
     """자막 하나를 층별 이벤트로 넣습니다(둥근 상자 → 돌출 → 뒤 층 → 앞 층).
 
     스타일 `name`(과 `-Box`, `-Extrude`, `-Back`)은 `add_styles`로 미리 넣어 둡니다.
-    움직임은 자막 길이에 맞춰 모든 층에 같게 붙습니다.
+    움직임은 자막 길이에 맞춰 모든 층에 같게 붙습니다. `words`(원본 시각 기준 초)는
+    이벤트 시작 기준 ms로 바꿔 노래방·단어별 등장에 넘깁니다.
     """
     anchor = _anchor_for(style, template, width, height)
     duration = max(0, end_ms - start_ms)
+    word_times = (
+        [(round(w.start * 1000) - start_ms, round(w.end * 1000) - start_ms) for w in words]
+        if words
+        else None
+    )
     layer = base_layer
     if template.rounded_box:
         subs.append(
@@ -2179,7 +2212,12 @@ def append_cue(
         horizontal=template.horizontal,
     )
     for offset, body, suffix in template.event_text_layers(
-        text, duration_ms=duration, anchor=anchor, block=block, play_size=(width, height)
+        text,
+        duration_ms=duration,
+        anchor=anchor,
+        block=block,
+        play_size=(width, height),
+        word_times=word_times,
     ):
         subs.append(
             pysubs2.SSAEvent(

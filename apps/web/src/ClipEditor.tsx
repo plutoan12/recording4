@@ -3,7 +3,9 @@ import { downloadFile, importSubtitles, request, type EncodingChoice, type Impor
 import { PublicationForm } from './PublicationForm'
 import type { WorkflowDraft } from './WorkflowPanel'
 
-type Cue = { start: number; end: number; text: string }
+type Word = { start: number; end: number; text: string }
+// words는 정렬기가 준 단어 시각입니다. 글자를 고치면 맞지 않으므로 비웁니다.
+type Cue = { start: number; end: number; text: string; words?: Word[] | null }
 type Suggestion = { start: number; end: number; title: string; reason: string }
 type Violation = { index: number; kind: string; detail: string }
 type Template = { name: string; label: string; description: string; category: string; category_label: string; sample: string;
@@ -194,7 +196,7 @@ export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWo
     })
   }
   function updateCue(index: number, patch: Partial<Cue>) {
-    setCaptions(current => current.map((cue, i) => i === index ? {...cue, ...patch} : cue))
+    setCaptions(current => current.map((cue, i) => i === index ? {...cue, ...patch, ...(patch.text !== undefined && patch.text !== cue.text ? {words: null} : {})} : cue))
   }
   return <section className="clip-editor">
     <h2>롱폼 → 숏폼 편집</h2>

@@ -48,7 +48,10 @@ def latest_transcript(session, task_uuid) -> list[Cue]:  # noqa: ANN001
         )
         .order_by(TranscriptSegment.start_seconds)
     )
-    return [Cue(start=float(r.start_seconds), end=float(r.end_seconds), text=r.text) for r in rows]
+    return [
+        Cue(start=float(r.start_seconds), end=float(r.end_seconds), text=r.text, words=r.words)
+        for r in rows
+    ]
 
 
 @celery_app.task(name="worker.media_tasks.run_media", soft_time_limit=3500, time_limit=3600)
@@ -203,6 +206,7 @@ def run_media(task_id: str) -> dict:
                                     end_seconds=row.end_seconds,
                                     text=row.text,
                                     speaker=label,
+                                    words=row.words,
                                 )
                             )
                         result["transcript_version"] = version + 1
@@ -230,6 +234,7 @@ def run_media(task_id: str) -> dict:
                                 start_seconds=cue.start,
                                 end_seconds=cue.end,
                                 text=cue.text,
+                                words=[w.model_dump() for w in cue.words] if cue.words else None,
                             )
                         )
                     result = {**result, "transcript_version": version, "count": len(cues)}

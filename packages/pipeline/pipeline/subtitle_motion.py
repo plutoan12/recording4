@@ -267,12 +267,14 @@ def animate_runs(
     hollow: bool = False,
     accent: str = "",
     base: str = "",
+    word_times: list[tuple[int, int]] | None = None,
 ) -> str:
     """글자·단어마다 명령을 넣습니다. `kind`가 조각별 움직임이 아니면 그대로 돌려줍니다.
 
     `prefix`는 이 이벤트(층)에 이미 붙어 있는 명령(중괄호 없이)으로, `\\r` 뒤에 다시
     적어 층의 모양을 지킵니다. 노래방은 `accent`(강조 색 명령)와 `base`(원래 색 명령)가
-    필요합니다.
+    필요합니다. `word_times`는 단어마다 (시작, 끝) ms(이벤트 시작 기준)이며, 글자의
+    단어 수와 같을 때만 씁니다. 다르거나 없으면 자막 길이를 고르게 나눕니다.
     """
     if kind not in PER_RUN or duration_ms <= 0:
         return ass_text
@@ -282,9 +284,29 @@ def animate_runs(
     words = _words(items)
     if not words:
         return ass_text
+    times = _word_schedule(len(words), duration_ms, word_times)
     if kind == "word-pop":
-        return _word_pop(items, words, _ms(ms), duration_ms, prefix, hollow)
-    return _karaoke(items, words, duration_ms, prefix, accent, base)
+        return _word_pop(items, words, _ms(ms), duration_ms, prefix, hollow, times)
+    if times is None:
+        step = duration_ms / len(words)
+        times = [(_ms(n * step), _ms((n + 1) * step)) for n in range(len(words))]
+    return _karaoke(items, words, prefix, accent, base, times)
+
+
+def _word_schedule(
+    count: int, duration_ms: int, word_times: list[tuple[int, int]] | None
+) -> list[tuple[int, int]] | None:
+    """단어별 (시작, 끝) ms. 실제 단어 시각이 맞으면 그것을, 아니면 None(고른 나눔)."""
+    if not word_times or len(word_times) != count:
+        return None
+    out: list[tuple[int, int]] = []
+    last = 0
+    for start, end in word_times:
+        start = min(max(_ms(start), last), duration_ms)
+        end = min(max(_ms(end), start), duration_ms)
+        out.append((start, end))
+        last = start
+    return out
 
 
 def _state_before(items: list[str], index: int, prefix: str) -> str:
@@ -325,13 +347,14 @@ def _word_pop(
     duration_ms: int,
     prefix: str,
     hollow: bool,
+    times: list[tuple[int, int]] | None = None,
 ) -> str:
     step = max(1, min(ms, int(duration_ms * 0.6 / len(words))))
     settle = max(60, min(ms, 220))
     lead: dict[int, str] = {}
     for n, word in enumerate(words):
         first = next(i for i in word if not _is_override(items[i]))
-        at = n * step
+        at = times[n][0] if times else n * step
         lead[first] = (
             "{"
             + _state_before(items, first, prefix)
@@ -346,21 +369,21 @@ def _word_pop(
 def _karaoke(
     items: list[str],
     words: list[list[int]],
-    duration_ms: int,
     prefix: str,
     accent: str,
     base: str,
+    times: list[tuple[int, int]],
 ) -> str:
+    """단어마다 제 시각에 강조 색이 됐다가 다음 단어 시각에 원래 색으로 돌아갑니다."""
     if not accent or not base:
         raise ValueError("노래방 강조에는 강조 색과 원래 색 명령이 필요합니다.")
-    step = duration_ms / len(words)
     lead: dict[int, str] = {}
     for n, word in enumerate(words):
         first = next(i for i in word if not _is_override(items[i]))
-        start = _ms(n * step)
+        start = times[n][0]
         tags = _state_before(items, first, prefix) + f"\\t({start},{start + 1},{accent})"
         if n + 1 < len(words):
-            end = _ms((n + 1) * step)
+            end = times[n + 1][0]
             tags += f"\\t({end},{end + 1},{base})"
         lead[first] = "{" + tags + "}"
     return "".join(lead.get(i, "") + token for i, token in enumerate(items))

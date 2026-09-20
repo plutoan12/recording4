@@ -114,7 +114,14 @@ class TranscriptRequest(BaseModel):
 def get_transcript(asset_id: uuid.UUID, user: CurrentUser, session: SessionDep):
     asset_for_edit(session, asset_id)
     return [
-        {"start": float(s.start_seconds), "end": float(s.end_seconds), "text": s.text}
+        {
+            "start": float(s.start_seconds),
+            "end": float(s.end_seconds),
+            "text": s.text,
+            # 단어 시각은 있을 때만 붙입니다. 편집기는 이를 그대로 돌려보내고 글자를
+            # 고친 자막에서는 비웁니다.
+            **({"words": s.words} if s.words else {}),
+        }
         for s in transcript(session, asset_id)
     ]
 
@@ -133,6 +140,7 @@ def save_transcript(session, asset, cues: list[Cue]) -> dict:  # noqa: ANN001
                 end_seconds=c.end,
                 text=c.text,
                 transcript_version=version,
+                words=[w.model_dump() for w in c.words] if c.words else None,
             )
             for c in cues
         ]

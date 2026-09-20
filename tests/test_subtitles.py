@@ -235,3 +235,22 @@ def test_protect_numeric_units_and_japanese_endings():
 def test_time_expression_survives_cue_splitting():
     parts = split_text("The price will change tomorrow at 2 AM and remain unchanged afterwards", 3)
     assert "2 AM" in "\n".join(parts)
+
+
+def test_splitting_a_cue_splits_its_word_times_too():
+    from pipeline.editing import Word
+    from pipeline.subtitles import words_for_chunks
+
+    words = [
+        Word(start=i, end=i + 0.5, text=t) for i, t in enumerate(["가나다", "라마바", "사아자"])
+    ]
+    assert words_for_chunks(words, ["가나다 라마바", "사아자"]) == [words[:2], words[2:]]
+    # 단어가 조각 경계를 넘거나 글자가 다르면 모두 비웁니다.
+    assert words_for_chunks(words, ["가나다 라", "마바 사아자"]) == [None, None]
+    assert words_for_chunks(words, ["가나다 라마바", "사아차"]) == [None, None]
+    assert words_for_chunks(None, ["가"]) == [None]
+    cue = Cue(start=0, end=6, text="가나다 라마바 사아자", words=words)
+    shaped = apply_rules([cue], NARROW)
+    if len(shaped) > 1:
+        assert all(part.words for part in shaped)
+        assert [w.text for part in shaped for w in part.words] == ["가나다", "라마바", "사아자"]

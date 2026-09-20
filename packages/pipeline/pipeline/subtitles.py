@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from functools import lru_cache
 from typing import Literal
 
-from pipeline.editing import Cue
+from pipeline.editing import Cue, Word
 
 _SENTENCE_END = re.compile(r"(?<=[.!?…。！？])\s+")
 _WHITESPACE = re.compile(r"\s+")
@@ -260,10 +260,36 @@ def _shape(cue: Cue, rules: SubtitleRules) -> list[Cue]:
         return [cue.model_copy(update={"text": "\n".join(wrap_text(text, rules))})]
 
     spans = _allocate(cue.start, duration, chunks, rules)
+    words = words_for_chunks(cue.words, chunks)
     return [
-        Cue(start=start, end=end, text="\n".join(wrap_text(chunk, rules)))
-        for chunk, (start, end) in zip(chunks, spans, strict=True)
+        Cue(start=start, end=end, text="\n".join(wrap_text(chunk, rules)), words=chunk_words)
+        for chunk, (start, end), chunk_words in zip(chunks, spans, words, strict=True)
     ]
+
+
+def words_for_chunks(words: list[Word] | None, chunks: list[str]) -> list[list[Word] | None]:
+    """자막을 나눌 때 단어 시각도 조각별로 나눕니다. 글자가 맞지 않으면 모두 None입니다.
+
+    공백을 뺀 글자 수로 단어를 차례로 배정합니다(정렬기의 줄 묶기와 같은 규칙). 단어
+    하나가 조각 경계를 넘거나 글자가 다르면 어림 시각을 쓰는 편이 나으므로 비웁니다.
+    """
+    nothing: list[list[Word] | None] = [None] * len(chunks)
+    if not words:
+        return nothing
+    squeeze = _WHITESPACE.sub
+    if squeeze("", "".join(chunks)) != squeeze("", "".join(w.text for w in words)):
+        return nothing
+    out: list[list[Word] | None] = []
+    index = 0
+    for chunk in chunks:
+        need, got, first = len(squeeze("", chunk)), 0, index
+        while index < len(words) and got < need:
+            got += len(squeeze("", words[index].text))
+            index += 1
+        if got != need or first == index:
+            return nothing
+        out.append(words[first:index])
+    return out if index == len(words) else nothing
 
 
 def _allocate(

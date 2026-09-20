@@ -632,3 +632,20 @@ def test_measure_line_uses_the_emoji_font_for_emoji_runs(monkeypatch):
         20,
         2 * 76.8,
     )
+
+
+def test_cue_word_times_reach_the_karaoke_tags():
+    from pipeline.editing import Word
+
+    template = get_template("karaoke-yellow").model_copy(update={"prefix": "★"})
+    words = [Word(start=10.2, end=10.6, text="말하는"), Word(start=10.9, end=11.4, text="단어")]
+    cue = Cue(start=10, end=12, text="말하는 단어", words=words)
+    document = styled_document([cue], template, width=1080, height=1920, duration=12)
+    text = document.events[0].text
+    # 장식 ★은 첫 단어의 시각을 나눠 갖고, 단어는 원본 시각에서 자막 시작을 뺀 ms에 켜집니다.
+    assert "\\t(200,201,\\1c&H4DE1FF&)" in text and "\\t(900,901,\\1c&H4DE1FF&)" in text
+    # 단어 시각이 없으면 예전처럼 고르게 나눕니다.
+    plain = styled_document(
+        [Cue(start=10, end=12, text="말하는 단어")], template, width=1080, height=1920, duration=12
+    )
+    assert "\\t(667,668,\\1c&H4DE1FF&)" in plain.events[0].text

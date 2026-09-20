@@ -12,6 +12,7 @@ from pathlib import Path
 
 from pipeline.alignment import (
     WordTiming,
+    cue_words,
     cues_for_lines,
     merge_spans,
     snap_starts,
@@ -47,10 +48,21 @@ def transcribe(
         str(source), language=language, vad_filter=True, word_timestamps=True
     )
     return [
-        Cue(start=s.start, end=s.end, text=s.text.strip())
+        Cue(start=s.start, end=s.end, text=s.text.strip(), words=segment_words(s))
         for s in segments
         if s.text.strip() and s.end > s.start
     ]
+
+
+def segment_words(segment) -> list | None:  # noqa: ANN001
+    """전사·정렬 구간 하나의 단어 시각을 자막 `words`로. 단어가 없으면 None입니다."""
+    found = []
+    for word in getattr(segment, "words", None) or []:
+        text = getattr(word, "word", "") or ""
+        start, end = getattr(word, "start", None), getattr(word, "end", None)
+        if text.strip() and start is not None and end is not None:
+            found.append(WordTiming(start=float(start), end=float(end), text=text))
+    return cue_words(found)
 
 
 def align_text(
@@ -84,7 +96,7 @@ def align_text(
     )
     result = engine.align(str(source), text, language=language)
     cues = cues_for_lines(text.splitlines(), word_timings(result)) or [
-        Cue(start=s.start, end=s.end, text=s.text.strip())
+        Cue(start=s.start, end=s.end, text=s.text.strip(), words=segment_words(s))
         for s in result.segments
         if s.text.strip() and s.end > s.start
     ]

@@ -123,6 +123,8 @@ class TranscriptSegment(Base, TimestampMixin):
     end_seconds: Mapped[Decimal] = mapped_column(Numeric(12, 3))
     text: Mapped[str] = mapped_column(Text)
     transcript_version: Mapped[int] = mapped_column(Integer, default=1)
+    # 단어 시각 [{start, end, text}]. 정렬·전사 결과에만 있고 사람이 글자를 고치면 비웁니다.
+    words: Mapped[list | None] = mapped_column(JSON, nullable=True, default=None)
 
     __table_args__ = (
         Index("ix_transcript_segments_asset_start", "source_asset_id", "start_seconds"),

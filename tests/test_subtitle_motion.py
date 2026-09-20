@@ -116,3 +116,31 @@ def test_word_pop_and_karaoke_work_per_word_across_line_breaks():
     assert animate_runs("pop", "가 나", 300, duration_ms=1000) == "가 나"
     assert animate_runs("word-pop", "가 나", 300, duration_ms=0) == "가 나"
     assert animate_runs("word-pop", "   ", 300, duration_ms=1000) == "   "
+
+
+def test_word_times_drive_karaoke_and_word_pop_when_they_match_the_words():
+    times = [(100, 400), (500, 900), (1200, 1500)]
+    sung = animate_runs(
+        "karaoke",
+        "말하는 단어가 빛나요",
+        0,
+        duration_ms=2000,
+        accent="\\1c&H4DE1FF&",
+        base="\\1c&HFFFFFF&",
+        word_times=times,
+    )
+    words = sung.split(" ")
+    # 강조는 제 시각에 켜지고 다음 단어 시각에 꺼집니다.
+    assert words[0].startswith("{\\r\\t(100,101,\\1c&H4DE1FF&)\\t(500,501,\\1c&HFFFFFF&)}")
+    assert words[2].startswith("{\\r\\t(1200,1201,\\1c&H4DE1FF&)}")
+    popped = animate_runs(
+        "word-pop", "말하는 단어가 빛나요", 200, duration_ms=2000, word_times=times
+    )
+    assert "\\t(100,101," in popped and "\\t(500,501," in popped and "\\t(1200,1201," in popped
+    # 단어 수가 다르면 고른 나눔으로 돌아갑니다. 자막 밖 시각은 안으로 당깁니다.
+    even = animate_runs("word-pop", "가 나", 200, duration_ms=2000, word_times=times)
+    assert "\\t(0,1," in even and "\\t(200,201," in even
+    late = animate_runs(
+        "word-pop", "가 나", 200, duration_ms=1000, word_times=[(-50, 10), (1500, 1600)]
+    )
+    assert "\\t(0,1," in late and "\\t(1000,1001," in late
