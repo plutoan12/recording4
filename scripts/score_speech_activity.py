@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Score speech-presence miss and false alarm on a fixed private audio interval."""
+"""Score speech presence only from a complete, audio-bound human reference."""
 
 import argparse
 import json
@@ -78,6 +78,8 @@ def score(audio, reference, prediction, evaluation_end, *, reference_sha256, pre
     if not math.isfinite(evaluation_end) or not 0 < evaluation_end <= duration:
         raise ValueError("Invalid evaluation end")
     audio_sha = sha256(audio)
+    if not isinstance(prediction, dict):
+        raise ValueError("Invalid prediction")
     if type(prediction.get("schema")) is not int or prediction["schema"] != 1:
         raise ValueError("Invalid prediction schema")
     if prediction.get("source_sha256") != audio_sha:
@@ -85,10 +87,33 @@ def score(audio, reference, prediction, evaluation_end, *, reference_sha256, pre
     revision = prediction.get("model_revision")
     if not isinstance(revision, str) or not revision.strip():
         raise ValueError("Missing model revision")
-    if not isinstance(reference, list) or not isinstance(prediction.get("timestamps"), list):
+    if not isinstance(reference, dict):
+        raise ValueError("Invalid reference")
+    if type(reference.get("schema")) is not int or reference["schema"] != 1:
+        raise ValueError("Invalid reference schema")
+    if reference.get("source_sha256") != audio_sha:
+        raise ValueError("Reference differs from audio")
+    if reference.get("speech_presence_complete") is not True:
+        raise ValueError("Reference does not cover all speech")
+    annotated_interval = reference.get("annotated_interval")
+    if (
+        not isinstance(annotated_interval, list)
+        or len(annotated_interval) != 2
+        or any(isinstance(value, bool) for value in annotated_interval)
+        or not all(isinstance(value, int | float) for value in annotated_interval)
+        or not all(math.isfinite(value) for value in annotated_interval)
+        or annotated_interval[0] != 0
+        or annotated_interval[1] != evaluation_end
+    ):
+        raise ValueError("Reference does not cover evaluation interval")
+    provenance = reference.get("provenance")
+    if not isinstance(provenance, str) or not provenance.strip():
+        raise ValueError("Missing reference provenance")
+    turns = reference.get("turns")
+    if not isinstance(turns, list) or not isinstance(prediction.get("timestamps"), list):
         raise ValueError("Invalid speech activity evidence")
     truth = []
-    for turn in reference:
+    for turn in turns:
         if (
             not isinstance(turn, dict)
             or not isinstance(turn.get("speaker"), str)
@@ -97,13 +122,16 @@ def score(audio, reference, prediction, evaluation_end, *, reference_sha256, pre
             raise ValueError("Invalid reference turn")
         truth.append([turn.get("start"), turn.get("end")])
     return dict(
-        schema=1,
+        schema=2,
         metric="speech_presence",
         model_revision=revision,
         evaluation_start=0,
         evaluation_end=evaluation_end,
         audio_sha256=audio_sha,
         reference_sha256=reference_sha256,
+        reference_speech_presence_complete=True,
+        reference_annotated_interval=annotated_interval,
+        reference_provenance=provenance.strip(),
         prediction_sha256=prediction_sha256,
         deploy_allowed=False,
         **score_activity(truth, prediction["timestamps"], 0, evaluation_end),
@@ -138,6 +166,6 @@ def main():
 if __name__ == "__main__":
     try:
         main()
-    except (ValueError, KeyError, TypeError, OSError, wave.Error, EOFError):
+    except (ValueError, KeyError, TypeError, OverflowError, OSError, wave.Error, EOFError):
         print("Invalid speech-activity inputs or output.", file=sys.stderr)
         raise SystemExit(1) from None

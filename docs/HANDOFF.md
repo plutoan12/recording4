@@ -1,3 +1,10 @@
+## 2026-09-20 한국어 음성활동 기준 자료 완전성 차단
+
+- KMSAV 한국어 실제 대화 120초 표본을 두 개 확인했다. 첫 표본은 14개 주석 합집합이 119.946초라 무음 오검출 분모로 쓸 수 없었다. 두 번째 표본은 24개 주석 합집합이 59.970초였지만, 독립 `faster-whisper small` 감사에서 223단어 중 **87단어·253자**가 주석 구간 밖 실제 대사로 확인됐다. 이 자료로 계산했던 FireRed/Silero false alarm 값은 폐기하고 공개 성능 수치로 쓰지 않는다.
+- Nexdata 공개 한국어 대화 샘플 commit `a57e4ad`도 확인했다. 1.449~6.891초 문장별 WAV 5개와 전사만 있고 전체 대화 시간축·겹말 정답이 없으며 라이선스는 commercial이다. 완전 VAD/DER 정답으로 사용하지 않는다.
+- `score_speech_activity.py`가 이제 정답의 음원 SHA, 전체 `[0, evaluation_end]`, 출처, `speech_presence_complete: true`를 필수로 검사한다. 일부 자막/ASD 주석을 전체 발화 정답으로 넣으면 채점 전에 실패한다. 출력 schema 2에 이 근거를 보존하고 큰 정수도 traceback 없이 거부한다. 관련 **23검사**, 기본 의존성 전체 Python **635통과/20skip**, Ruff가 통과했다. CI와 평가 전용 선택 의존성 검사는 새 HEAD에서 확인한다.
+- 정확도나 한국어 비회귀가 개선된 것은 아니다. 완전한 사람 음성 존재·화자 시각이 있는 한국어 실제 대화가 여전히 필요하며, 없으면 직접 전 구간을 사람 검수해 새 고정 정답을 만들어야 한다. [상세](quality/korean-vad-reference-2026-09-20/REPORT.md).
+
 ## 2026-09-20 다국어 FireRedVAD 독립 음성활동 실험
 
 - Apache-2.0 [FireRedVAD](https://github.com/FireRedTeam/FireRedVAD) 소스 c30ec49와 모델 revision7990aacc를 격리 실행했다. 앞선 영어 공통 오검출은 max0.025<기본0.4, 다음 짧은 실제 발화는0.463으로 분리했다.

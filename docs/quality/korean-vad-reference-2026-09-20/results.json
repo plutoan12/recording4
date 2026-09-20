@@ -1,0 +1,35 @@
+{
+  "schema": 1,
+  "kmsav": {
+    "first_sample": {
+      "evaluation_seconds": 120.0,
+      "annotation_count": 14,
+      "annotation_union_seconds": 119.946,
+      "usable_as_complete_speech_reference": false
+    },
+    "second_sample": {
+      "evaluation_seconds": 120.0,
+      "annotation_count": 24,
+      "annotation_union_seconds": 59.97,
+      "audio_sha256": "b3c9babb3133d68d5e052480d8a7249ed203d4aeb6203b0afb7777ca68800e0c",
+      "annotation_sha256": "639f90e2de26921068f6d8cce5ffdd37fb2e30d474bfd2aca0ce3d03ef2287de",
+      "independent_audit_words": 223,
+      "words_outside_annotation": 87,
+      "characters_outside_annotation": 253,
+      "usable_as_complete_speech_reference": false
+    }
+  },
+  "nexdata_public_samples": {
+    "source_commit": "a57e4adbaa43d6418b388f716106332e9562c349",
+    "sample_count": 5,
+    "durations_seconds": [1.449, 3.556, 6.891, 4.48, 6.611],
+    "complete_timeline_available": false,
+    "overlap_timing_available": false,
+    "license": "Commercial License",
+    "usable_as_complete_speech_reference": false
+  },
+  "discarded_partial_reference_false_alarm_scores": true,
+  "korean_regression_measured": false,
+  "four_language_improvement_proven": false,
+  "deployment_allowed": false
+}
