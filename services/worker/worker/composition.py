@@ -11,7 +11,7 @@ from types import SimpleNamespace
 
 from pipeline.editing import Cue, EditSpec
 from pipeline.subtitles import DEFAULT_RULES, SubtitleRules
-from worker.rendering import ffmpeg_binary, video_filter, write_subtitles
+from worker.rendering import ffmpeg_binary, subtitles_filter, video_filter, write_subtitles
 
 RATE = 48000
 
@@ -165,7 +165,7 @@ def render_final(
         filters = (
             video_filter(clip)
             if clip
-            else (f"scale={width}:{height},setsar=1,subtitles=captions.ass,format=yuv420p")
+            else (f"scale={width}:{height},setsar=1,{subtitles_filter()},format=yuv420p")
         )
         ffmpeg(
             [

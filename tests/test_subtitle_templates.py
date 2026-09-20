@@ -7,8 +7,10 @@ import pytest
 from pydantic import ValidationError
 
 from pipeline.editing import Cue, EditSpec
+from pipeline.subtitle_fonts import FONT_FAMILIES, FONT_SOURCES, GOOGLE_FONTS_CSS_FAMILIES
 from pipeline.subtitle_templates import (
     BUILTIN_TEMPLATES,
+    CATEGORY_LABELS,
     DEFAULT_TEMPLATE,
     SubtitleTemplate,
     alignment_for,
@@ -17,8 +19,10 @@ from pipeline.subtitle_templates import (
     load_template,
     parse_color,
     resolve_template,
+    sheet_document,
     styled_document,
     template_names,
+    templates_by_category,
 )
 
 
@@ -87,6 +91,9 @@ def test_alignment_follows_the_ass_numpad_layout():
         {"margin_vertical_ratio": 0.9},
         {"position": "left"},
         {"border_style": "shadow"},
+        {"box_color": "pink"},
+        {"category": "meme"},
+        {"prefix": "★★★★★★★★★"},
         {"font_name": "Noto, Sans"},
         {"font_name": "Noto{\\b1}"},
         {"unknown": 1},
@@ -97,10 +104,75 @@ def test_invalid_template_values_are_rejected(values):
         SubtitleTemplate.model_validate({"name": "ok", "label": "확인", **values})
 
 
-def test_box_template_uses_the_box_border_style_with_translucent_background():
+def test_box_template_puts_the_box_color_where_libass_reads_it():
+    """libass는 BorderStyle 3의 상자를 외곽선 색으로 채웁니다. 뒷색만 넣으면 검은 상자입니다."""
     style = get_template("box").style(1920)
     assert style.borderstyle == 3
-    assert style.backcolor.a == 255 - 0x99
+    assert style.outlinecolor == parse_color("#00000099")
+    assert style.backcolor == parse_color("#00000099")
+    # 상자+외곽선(BorderStyle 4)은 상자가 뒷색, 외곽선이 외곽선 색입니다.
+    card = get_template("pink-cabinet").style(1920)
+    assert card.borderstyle == 4
+    assert card.backcolor == parse_color("#FFD1E8") and card.outlinecolor == parse_color("#F06AA8")
+    # 외곽선 방식은 상자 색을 쓰지 않습니다.
+    plain = SubtitleTemplate(name="p", label="p", box_color="#FF0000", back_color="#00FF00")
+    assert plain.style(100).backcolor == parse_color("#00FF00")
+
+
+def test_every_builtin_uses_an_installed_font_and_a_known_category():
+    """글꼴 이름이 목록에 없으면 libass가 조용히 다른 글꼴로 바꿉니다. 여기서 먼저 잡습니다."""
+    for template in BUILTIN_TEMPLATES.values():
+        assert template.font_available, f"{template.name}: {template.font_name}"
+        assert template.category in CATEGORY_LABELS
+    grouped = templates_by_category()
+    assert list(grouped)[0] == "basic" and grouped["basic"][0].name == "default"
+    assert sum(len(v) for v in grouped.values()) == len(BUILTIN_TEMPLATES)
+    assert len(BUILTIN_TEMPLATES) >= 30
+
+
+def test_font_manifest_is_consistent():
+    families = [source.family for source in FONT_SOURCES]
+    assert len(set(families)) == len(families)
+    for source in FONT_SOURCES:
+        assert source.url.startswith("https://raw.githubusercontent.com/")
+        assert len(source.sha256) == 64 and source.license == "OFL-1.1"
+        assert source.family in FONT_FAMILIES
+    assert "Noto Sans CJK KR" in FONT_FAMILIES
+    # 화면 미리보기는 Google Fonts 이름을 씁니다. 파일 이름과 다른 것만 바꿉니다.
+    assert "Nanum Pen Script" in GOOGLE_FONTS_CSS_FAMILIES
+    assert not any(f.startswith("Galmuri") for f in GOOGLE_FONTS_CSS_FAMILIES)
+
+
+def test_decorations_and_glow_are_added_outside_the_user_text():
+    template = SubtitleTemplate(name="d", label="d", prefix="★", suffix="☆", glow=2.5)
+    assert template.decorate("안녕") == "★ 안녕 ☆"
+    assert template.override_tags() == "{\\blur2.5}"
+    # 사용자 글자의 중괄호는 여전히 막히고, 우리 명령만 앞에 붙습니다.
+    assert template.event_text("{\\b1}x") == "{\\blur2.5}" + "★ ｛＼b1｝x ☆"
+    assert SubtitleTemplate(name="p", label="p").event_text("x") == "x"
+    with pytest.raises(ValidationError):
+        SubtitleTemplate(name="p", label="p", prefix="a\nb")
+    with pytest.raises(ValidationError):
+        SubtitleTemplate(name="p", label="p", glow=99)
+
+
+def test_sheet_places_every_template_in_a_grid_with_its_own_style():
+    templates = list(BUILTIN_TEMPLATES.values())
+    document, height = sheet_document(templates, width=1080, columns=2)
+    assert height % 2 == 0 and height > 150 * (len(templates) // 2)
+    assert document.info["PlayResY"] == str(height)
+    events = [e for e in document.events if e.style != "Header"]
+    assert len(events) == len(templates)
+    assert all(e.text.startswith("{\\pos(") for e in events)
+    assert len({e.style for e in events}) == len(templates)
+    heart = next(e for e in events if "요래 됐습니다" in e.text)
+    assert "♡" in heart.text and document.styles[heart.style].fontname == "Galmuri11 Regular"
+    # 글자 크기는 칸에 맞춰 줄어들되 20 아래로는 내려가지 않습니다.
+    assert all(20 <= document.styles[e.style].fontsize <= 82 for e in events)
+    same_text, _ = sheet_document(templates[:3], text="공통 예문", columns=3)
+    assert sum("공통 예문" in e.text for e in same_text.events) == 3
+    with pytest.raises(ValueError):
+        sheet_document([])
 
 
 def test_font_size_argument_overrides_the_template_value():
@@ -160,6 +232,12 @@ def test_styled_document_keeps_text_safe_and_places_title_for_the_whole_duration
     assert (dialogue.start, dialogue.end) == (1000, 3000)
     assert "\\pos" not in dialogue.text and dialogue.text.endswith(r"줄1\N줄2")
     assert (title.start, title.end, title.style) == (0, 10000, "Title")
+    decorated = styled_document(
+        cues, get_template("bubble-white"), width=1080, height=1920, duration=10, title="제목"
+    )
+    body, heading = decorated.events
+    assert body.text.startswith("★ ") and body.text.endswith(" ☆")
+    assert heading.text == "제목"  # 제목에는 장식을 붙이지 않습니다.
     untitled = styled_document(cues, DEFAULT_TEMPLATE, width=2, height=2, duration=1)
     assert "Title" not in untitled.styles
 

@@ -13,9 +13,15 @@ DB·큐·유료 API 없이 파일만 다룹니다. 서버의 편집기와 같은
 - shape     줄바꿈·분할 규칙을 적용해 저장
 - shift     시각을 앞뒤로 옮김
 - cut       구간만 남기고 구간 시작을 0초로
-- templates 내장 템플릿 목록·내용·JSON 내보내기
+- templates 내장 템플릿 목록·내용·JSON 내보내기·글꼴 확인
 - style     템플릿 모양의 ASS 파일 만들기
 - burn      FFmpeg로 영상에 자막 굽기(FFmpeg 필요)
+- preview   템플릿 하나를 PNG 한 장으로(FFmpeg 필요)
+- sheet     내장 템플릿 전부를 한 장의 PNG 시트로(FFmpeg 필요)
+
+글꼴: 템플릿 글꼴은 워커 이미지에 설치돼 있습니다. 로컬에서는
+`scripts/fetch_fonts.py --out .fonts`로 받고 `--fonts-dir .fonts` 또는 `R4_FONTS_DIR`로
+알려 줍니다. 없으면 libass가 다른 글꼴로 대체해 모양이 달라집니다.
 
 종료 코드: 0 성공, 1 check에서 위반 발견, 2 입력·환경 오류.
 """
@@ -26,6 +32,7 @@ import argparse
 import dataclasses
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -43,11 +50,15 @@ from pipeline.subtitle_files import (
     dump_subtitles,
     parse_subtitles,
 )
+from pipeline.subtitle_fonts import FONT_FAMILIES
 from pipeline.subtitle_templates import (
     BUILTIN_TEMPLATES,
+    CATEGORY_LABELS,
     SubtitleTemplate,
     resolve_template,
+    sheet_document,
     styled_document,
+    templates_by_category,
 )
 from pipeline.subtitles import DEFAULT_RULES, SubtitleRules, apply_rules, check, rules_for
 
@@ -88,6 +99,33 @@ def _add_rules(parser: argparse.ArgumentParser) -> None:
     group.add_argument("--max-cps", type=float, help="초당 최대 글자 폭")
     group.add_argument("--min-duration", type=float, help="자막 최소 표시 시간(초)")
     group.add_argument("--max-duration", type=float, help="자막 최대 표시 시간(초)")
+
+
+def _add_fonts_dir(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--fonts-dir",
+        type=Path,
+        default=None,
+        help="템플릿 글꼴 디렉터리. 비우면 R4_FONTS_DIR, 그것도 없으면 시스템 글꼴만 씁니다.",
+    )
+
+
+def fonts_dir_from(args: argparse.Namespace) -> Path | None:
+    chosen = getattr(args, "fonts_dir", None)
+    if chosen is None:
+        value = os.environ.get("R4_FONTS_DIR", "").strip()
+        chosen = Path(value) if value else None
+    if chosen is not None and not chosen.is_dir():
+        raise ToolError(f"글꼴 디렉터리가 없습니다: {chosen}")
+    return chosen
+
+
+def subtitles_filter(filename: str, fonts: Path | None) -> str:
+    """FFmpeg subtitles 필터. 글꼴 디렉터리는 콜론·따옴표를 이스케이프해 넘깁니다."""
+    if fonts is None:
+        return f"subtitles={filename}"
+    escaped = str(fonts.resolve()).replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'")
+    return f"subtitles={filename}:fontsdir='{escaped}'"
 
 
 def _add_template(parser: argparse.ArgumentParser) -> None:
@@ -293,12 +331,58 @@ def cmd_cut(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+def _fontconfig_for(fonts: Path) -> str:
+    """fc-match가 --fonts-dir도 보게 하는 임시 fontconfig 설정 파일 경로."""
+    config = Path(tempfile.gettempdir()) / "r4-fontconfig.xml"
+    config.write_text(
+        "<?xml version='1.0'?><!DOCTYPE fontconfig SYSTEM 'fonts.dtd'><fontconfig>"
+        "<include ignore_missing='yes'>/etc/fonts/fonts.conf</include>"
+        f"<dir>{fonts.resolve()}</dir></fontconfig>",
+        encoding="utf-8",
+    )
+    return str(config)
+
+
+def font_matches(family: str) -> str | None:
+    """fc-match가 이 이름에 고른 글꼴의 family. fontconfig가 없으면 None."""
+    binary = shutil.which("fc-match")
+    if not binary:
+        return None
+    completed = subprocess.run(
+        [binary, "--format", "%{family}", family], capture_output=True, text=True
+    )
+    if completed.returncode:
+        return None
+    return completed.stdout.strip()
+
+
 def cmd_templates(args: argparse.Namespace) -> int:
     if args.action == "list":
         width = max(len(name) for name in BUILTIN_TEMPLATES)
-        for template in BUILTIN_TEMPLATES.values():
-            print(f"{template.name:<{width}}  {template.label:<8} {template.description}")
+        for category, templates in templates_by_category().items():
+            print(f"[{CATEGORY_LABELS[category]}]")
+            for template in templates:
+                print(f"  {template.name:<{width}}  {template.label:<10} {template.description}")
         return EXIT_OK
+    if args.action == "check":
+        # 내장 템플릿의 글꼴이 이 컴퓨터(또는 --fonts-dir)에서 실제로 찾아지는지 봅니다.
+        # libass는 못 찾으면 조용히 대체하므로 여기서 먼저 잡습니다.
+        fonts = fonts_dir_from(args)
+        if fonts is not None:
+            os.environ["FONTCONFIG_FILE"] = _fontconfig_for(fonts)
+        problems = 0
+        for family in sorted({t.font_name for t in BUILTIN_TEMPLATES.values()}):
+            listed = family in FONT_FAMILIES
+            matched = font_matches(family)
+            # fc-match는 family 이름을 쉼표로 여러 개 줍니다(영문·한글·전체 이름).
+            names = [] if matched is None else [n.strip() for n in matched.split(",")]
+            ok = listed and (matched is None or family in names)
+            problems += not ok
+            state = "확인 불가(fontconfig 없음)" if matched is None else (names or ["?"])[0]
+            note = "" if listed else " (목록에 없음)"
+            print(f"{'OK ' if ok else 'NG '} {family:<22} → {state}{note}")
+        print(f"글꼴 문제 {problems}건")
+        return EXIT_VIOLATIONS if problems else EXIT_OK
     try:
         template = resolve_template(args.name)
     except ValueError as exc:
@@ -417,6 +501,7 @@ def cmd_burn(args: argparse.Namespace) -> int:
     if args.video.resolve() == args.output.resolve():
         raise ToolError("출력 경로는 입력 영상과 달라야 합니다.")
     ffmpeg = _binary("ffmpeg", "R4_FFMPEG_BINARY")
+    fonts = fonts_dir_from(args)
     cues, notes, decoded = read_cues(args.subtitles, args.encoding)
     _report_read(args.subtitles, notes, decoded, cues)
     width, height, duration = args.width, args.height, None
@@ -447,7 +532,8 @@ def cmd_burn(args: argparse.Namespace) -> int:
             "-i",
             str(args.video.resolve()),
             "-vf",
-            f"scale={width}:{height},setsar=1,subtitles=captions.ass,format=yuv420p",
+            f"scale={width}:{height},setsar=1,"
+            f"{subtitles_filter('captions.ass', fonts)},format=yuv420p",
             "-c:v",
             "libx264",
             "-preset",
@@ -473,6 +559,113 @@ def cmd_burn(args: argparse.Namespace) -> int:
         f"{args.output}: 템플릿 {template.name}({template.label})로 "
         f"{width}x{height} 영상에 구웠습니다."
     )
+    return EXIT_OK
+
+
+def render_frame(
+    ass_text: str, output: Path, *, width: int, height: int, fonts: Path | None, background: str
+) -> None:
+    """ASS 글자 하나를 단색 배경 위 PNG 한 장으로 그립니다. FFmpeg(libass)가 필요합니다."""
+    ffmpeg = _binary("ffmpeg", "R4_FFMPEG_BINARY")
+    output.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="r4-preview-") as directory:
+        temp = Path(directory)
+        (temp / "sheet.ass").write_text(ass_text, encoding="utf-8")
+        command = [
+            ffmpeg,
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-nostdin",
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            f"color=c={background}:s={width}x{height}",
+            "-vf",
+            subtitles_filter("sheet.ass", fonts),
+            "-frames:v",
+            "1",
+            "-update",
+            "1",
+            str(temp / "frame.png"),
+        ]
+        try:
+            completed = subprocess.run(command, cwd=temp, capture_output=True, timeout=300)
+        except subprocess.TimeoutExpired:
+            raise ToolError("미리보기 렌더가 5분 제한을 넘었습니다.") from None
+        if completed.returncode:
+            raise ToolError("FFmpeg 렌더 실패: libass(subtitles 필터)와 글꼴을 확인하세요.")
+        shutil.copyfile(temp / "frame.png", output)
+
+
+def _background(value: str) -> str:
+    if not re.fullmatch(r"#[0-9A-Fa-f]{6}", value):
+        raise ToolError("배경색은 #RRGGBB 형식이어야 합니다.")
+    return value
+
+
+def cmd_preview(args: argparse.Namespace) -> int:
+    template = _template_from(args)
+    fonts = fonts_dir_from(args)
+    text = args.text or template.sample or template.label
+    cues = [Cue(start=0, end=1, text=text)]
+    ass_text = build_document(
+        cues,
+        template,
+        width=args.width,
+        height=args.height,
+        duration=1,
+        title=args.title,
+        font_size=args.font_size,
+        rules=None if args.no_rules else rules_from(args),
+    )
+    render_frame(
+        ass_text,
+        args.output,
+        width=args.width,
+        height=args.height,
+        fonts=fonts,
+        background=_background(args.background),
+    )
+    print(f"{args.output}: 템플릿 {template.name}({template.label}) 미리보기를 썼습니다.")
+    return EXIT_OK
+
+
+def cmd_sheet(args: argparse.Namespace) -> int:
+    fonts = fonts_dir_from(args)
+    if args.templates:
+        try:
+            chosen = [resolve_template(name) for name in args.templates]
+        except ValueError as exc:
+            raise ToolError(str(exc)) from None
+    elif args.category:
+        grouped = templates_by_category()
+        unknown = [c for c in args.category if c not in grouped]
+        if unknown:
+            raise ToolError(
+                f"모르는 카테고리입니다: {', '.join(unknown)}. 쓸 수 있는 것: {', '.join(grouped)}"
+            )
+        chosen = [t for c in args.category for t in grouped[c]]
+    else:
+        chosen = [t for templates in templates_by_category().values() for t in templates]
+    try:
+        document, height = sheet_document(
+            chosen, width=args.width, columns=args.columns, text=args.text, title=args.title
+        )
+    except ValueError as exc:
+        raise ToolError(str(exc)) from None
+    if args.ass:
+        _write_text(args.ass, document.to_string("ass"))
+    render_frame(
+        document.to_string("ass"),
+        args.output,
+        width=args.width,
+        height=height,
+        fonts=fonts,
+        background=_background(args.background),
+    )
+    print(f"{args.output}: 템플릿 {len(chosen)}종을 {args.width}x{height} 시트로 썼습니다.")
     return EXIT_OK
 
 
@@ -531,9 +724,11 @@ def build_parser() -> argparse.ArgumentParser:
     _add_output_format(cut)
     cut.set_defaults(run=cmd_cut)
 
-    templates = sub.add_parser("templates", help="내장 템플릿 목록·내용·JSON 내보내기")
+    templates = sub.add_parser("templates", help="내장 템플릿 목록·내용·JSON 내보내기·글꼴 확인")
     action = templates.add_subparsers(dest="action", required=True)
-    action.add_parser("list", help="내장 템플릿 목록")
+    action.add_parser("list", help="내장 템플릿 목록(카테고리별)")
+    check_fonts = action.add_parser("check", help="내장 템플릿의 글꼴이 실제로 찾아지는지 확인")
+    _add_fonts_dir(check_fonts)
     show = action.add_parser("show", help="템플릿 내용을 JSON으로 출력")
     show.add_argument("name", help="내장 이름 또는 JSON 파일")
     export = action.add_parser(
@@ -563,9 +758,36 @@ def build_parser() -> argparse.ArgumentParser:
     burn.add_argument("--width", type=int, help="비우면 ffprobe로 영상에서 읽습니다.")
     burn.add_argument("--height", type=int, help="비우면 ffprobe로 영상에서 읽습니다.")
     _add_template(burn)
+    _add_fonts_dir(burn)
     _add_encoding(burn)
     _add_rules(burn)
     burn.set_defaults(run=cmd_burn)
+
+    preview = sub.add_parser("preview", help="템플릿 하나를 PNG 한 장으로 (FFmpeg 필요)")
+    preview.add_argument("output", type=Path)
+    preview.add_argument("--text", help="예문. 비우면 템플릿의 예문")
+    preview.add_argument("--width", type=int, default=DEFAULT_WIDTH)
+    preview.add_argument("--height", type=int, default=DEFAULT_HEIGHT)
+    preview.add_argument("--background", default="#141414", help="배경색 #RRGGBB")
+    _add_template(preview)
+    _add_fonts_dir(preview)
+    _add_rules(preview)
+    preview.set_defaults(run=cmd_preview)
+
+    sheet = sub.add_parser("sheet", help="내장 템플릿 전부를 한 장의 PNG 시트로 (FFmpeg 필요)")
+    sheet.add_argument("output", type=Path)
+    sheet.add_argument(
+        "--templates", nargs="*", help="넣을 템플릿 이름 또는 JSON 파일. 비우면 전부"
+    )
+    sheet.add_argument("--category", nargs="*", help="넣을 카테고리. 비우면 전부")
+    sheet.add_argument("--text", help="모든 템플릿에 같은 예문을 씁니다. 비우면 템플릿별 예문")
+    sheet.add_argument("--title", default="자막 템플릿", help="시트 제목")
+    sheet.add_argument("--width", type=int, default=DEFAULT_WIDTH)
+    sheet.add_argument("--columns", type=int, default=2)
+    sheet.add_argument("--background", default="#141414", help="배경색 #RRGGBB")
+    sheet.add_argument("--ass", type=Path, help="시트 ASS 파일도 함께 저장")
+    _add_fonts_dir(sheet)
+    sheet.set_defaults(run=cmd_sheet)
     return parser
 
 
@@ -576,6 +798,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     except ToolError as exc:
         print(f"오류: {exc}", file=sys.stderr)
         return EXIT_ERROR
+    except BrokenPipeError:
+        # `r4-subtitles templates list | head`처럼 읽는 쪽이 먼저 닫은 경우. 오류가 아닙니다.
+        return EXIT_OK
 
 
 if __name__ == "__main__":

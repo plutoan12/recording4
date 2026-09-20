@@ -410,7 +410,11 @@ def test_subtitle_templates_are_listed_and_a_clip_remembers_its_template(
     assert listed.status_code == 200
     names = [t["name"] for t in listed.json()]
     assert names[0] == "default" and "yellow" in names
-    assert all({"label", "font_size", "primary_color"} <= set(t) for t in listed.json())
+    assert all(
+        {"label", "font_size", "primary_color", "category_label", "sample"} <= set(t)
+        for t in listed.json()
+    )
+    assert listed.json()[0]["category_label"] == "기본"
 
     data = {"source_asset_id": str(asset.id), "start": 10, "end": 40, "subtitle_template": "yellow"}
     created = client.post("/clips", headers=auth_headers, json=data)

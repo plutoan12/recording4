@@ -1,6 +1,8 @@
 """자막 파일·템플릿 명령줄 도구. 파일만 다루며 FFmpeg 없이 도는 부분을 확인합니다."""
 
 import json
+import os
+import shutil
 from pathlib import Path
 
 import pysubs2
@@ -122,7 +124,8 @@ def test_cut_keeps_the_range_and_rebases_to_zero(srt, tmp_path, capsys):
 def test_templates_list_show_and_export(tmp_path, capsys):
     assert main(["templates", "list"]) == EXIT_OK
     out = capsys.readouterr().out
-    assert out.startswith("default") and "yellow" in out and "예능 노랑" in out
+    assert out.startswith("[기본]") and "  default" in out and "예능 노랑" in out
+    assert "[픽셀]" in out and "pixel-heart" in out
     assert main(["templates", "show", "box"]) == EXIT_OK
     shown = json.loads(capsys.readouterr().out)
     assert shown["name"] == "box" and shown["border_style"] == "box"
@@ -199,3 +202,46 @@ def test_output_format_detection():
     assert output_format(Path("a.txt"), "vtt") == "vtt"
     with pytest.raises(ToolError):
         output_format(Path("a.txt"), None)
+
+
+def ffmpeg_available() -> bool:
+    return bool(os.environ.get("R4_FFMPEG_BINARY") or shutil.which("ffmpeg"))
+
+
+def test_templates_check_reports_fonts_without_crashing(tmp_path, capsys):
+    """fontconfig가 없으면 확인 불가, 있으면 이 컴퓨터의 글꼴로 판정합니다. 종료 코드만 봅니다."""
+    code = main(["templates", "check"])
+    out = capsys.readouterr().out
+    assert code in (EXIT_OK, EXIT_VIOLATIONS)
+    assert "Noto Sans CJK KR" in out and "글꼴 문제" in out
+    assert main(["templates", "check", "--fonts-dir", str(tmp_path / "none")]) == EXIT_ERROR
+
+
+def test_sheet_and_preview_render_a_png_when_ffmpeg_exists(tmp_path, capsys):
+    if not ffmpeg_available():
+        pytest.skip("FFmpeg required; CI installs it")
+    out = tmp_path / "sheet.png"
+    ass = tmp_path / "sheet.ass"
+    assert main(["sheet", str(out), "--category", "pixel", "neon", "--ass", str(ass)]) == EXIT_OK
+    assert out.read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"
+    text = ass.read_text(encoding="utf-8")
+    assert "Galmuri11 Regular" in text and "\\blur" in text
+    assert "7종" in capsys.readouterr().out
+    single = tmp_path / "one.png"
+    assert (
+        main(["preview", str(single), "--template", "yellow", "--text", "예문", "--height", "320"])
+        == EXIT_OK
+    )
+    assert single.read_bytes()[:4] == b"\x89PNG"
+    assert main(["sheet", str(out), "--category", "nope"]) == EXIT_ERROR
+    assert main(["sheet", str(out), "--templates", "nope"]) == EXIT_ERROR
+    assert main(["preview", str(single), "--background", "red"]) == EXIT_ERROR
+
+
+def test_sheet_arguments_are_validated_before_ffmpeg_runs(tmp_path, monkeypatch):
+    monkeypatch.setenv("R4_FFMPEG_BINARY", "")
+    monkeypatch.setattr("shutil.which", lambda name: None)
+    # 인자 오류는 FFmpeg가 없어도 먼저 잡힙니다.
+    assert main(["sheet", str(tmp_path / "s.png"), "--category", "nope"]) == EXIT_ERROR
+    # 인자가 맞으면 FFmpeg 부재가 오류입니다.
+    assert main(["sheet", str(tmp_path / "s.png"), "--category", "pixel"]) == EXIT_ERROR

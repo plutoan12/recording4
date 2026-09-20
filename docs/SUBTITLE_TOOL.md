@@ -10,7 +10,7 @@ r4-subtitles --help
 python -m pipeline.subtitle_tool --help   # 같은 도구
 ```
 
-`burn`만 FFmpeg(`ffmpeg`, `ffprobe`)와 한국어 글꼴이 필요합니다. 워커 Docker 이미지에는 들어 있습니다. 경로는 `R4_FFMPEG_BINARY`, `R4_FFPROBE_BINARY`로 줄 수 있습니다.
+`burn`·`preview`·`sheet`는 FFmpeg(`ffmpeg`, `ffprobe`)와 글꼴이 필요합니다. 워커 Docker 이미지에는 들어 있습니다. 경로는 `R4_FFMPEG_BINARY`, `R4_FFPROBE_BINARY`, 글꼴 디렉터리는 `R4_FONTS_DIR`로 줄 수 있습니다(아래 글꼴 절).
 
 ## 명령
 
@@ -22,7 +22,9 @@ python -m pipeline.subtitle_tool --help   # 같은 도구
 | `shape IN OUT` | 줄바꿈·분할 규칙을 적용해 저장. 서버가 굽는 자막과 같은 결과 | 0 |
 | `shift IN OUT --offset 초` | 시각 이동. 0초 앞으로 나간 자막은 자르고 다 나간 자막은 뺌 | 0 |
 | `cut IN OUT --start 초 --end 초` | 구간만 남기고 구간 시작을 0초로 | 0 |
-| `templates list` / `show 이름` / `export 이름 OUT.json` | 내장 템플릿 목록·내용·JSON 저장 | 0 |
+| `templates list` / `show 이름` / `export 이름 OUT.json` / `check` | 내장 템플릿 목록(카테고리별)·내용·JSON 저장·글꼴 확인 | check는 문제 있으면 1 |
+| `preview OUT.png --template 이름` | 템플릿 하나를 PNG 한 장으로 | 0 |
+| `sheet OUT.png [--category ...] [--templates ...]` | 내장 템플릿 전부(또는 일부)를 한 장의 PNG 시트로 | 0 |
 | `style IN OUT.ass --template 이름\|파일.json` | 템플릿 모양의 ASS 파일 생성 | 0 |
 | `burn VIDEO SUBS OUT.mp4 --template ...` | FFmpeg로 영상에 자막 굽기 | 0 |
 
@@ -46,22 +48,25 @@ python -m pipeline.subtitle_tool --help   # 같은 도구
 
 템플릿은 **영상에 굽는 자막의 모양**입니다. 어떤 자막을 언제 보일지(줄바꿈·분할·구간)는 표시 규칙이 정하고, SRT·VTT 파일에는 모양이 들어가지 않습니다.
 
-내장 템플릿:
+내장 템플릿은 카테고리별로 38종입니다. 인스타그램 브이로그 편집자들이 파는 "자막 템플릿 팩"의 흔한 모양(파스텔 상자, 네온 글로우, 픽셀, 통통한 외곽선, 손글씨, 영화 자막, 레트로)을 libass가 그릴 수 있는 값으로 옮긴 것입니다. 전체 목록은 `r4-subtitles templates list`, 실제 렌더 모양은 `r4-subtitles sheet`로 봅니다.
 
-| 이름 | 설명 |
-|---|---|
-| `default` | 흰 글자에 검은 외곽선. 템플릿 도입 전 렌더와 같은 값이라 기존 편집본의 모양이 바뀌지 않습니다 |
-| `shorts-bold` | 굵고 큰 글자(72)에 두꺼운 외곽선 |
-| `yellow` | 노란 굵은 글자에 검은 외곽선 |
-| `box` | 검은 반투명 상자 위에 흰 글자 |
-| `top` | 자막을 화면 위에. 화면 제목은 아래로 |
-| `minimal` | 작은 글자(56)에 얇은 외곽선, 그림자 없음 |
+| 카테고리 | 이름 | 모양 |
+|---|---|---|
+| 기본 | `default` | 흰 글자에 검은 외곽선. 템플릿 도입 전 렌더와 같은 값이라 기존 편집본의 모양이 바뀌지 않습니다 |
+| 기본 | `shorts-bold`, `yellow`, `top`, `minimal` | 굵은 강조, 예능 노랑, 상단 배치, 얇은 외곽선 |
+| 브이로그 제목 | `vlog-lime`, `vlog-pink`, `fire-red`, `spring-glow` | Black Han Sans 형광 연두·핑크 제목, 번지는 빨강, 봄 느낌 연두 글로우 |
+| 귀여운 외곽선 | `bubble-white`, `bubble-sky`, `bubble-pink`, `round-white`, `mint-pastel` | Bagel Fat One·Dongle·Jua 통통 글자에 두꺼운 외곽선과 ★☆♡ 장식 |
+| 네온·글로우 | `neon-pink`, `neon-blue`, `neon-purple`, `lavender-glow` | 밝은 글자 주변에 색이 번지는 네온사인 |
+| 픽셀 | `pixel-heart`, `pixel-mint`, `pixel-box` | Galmuri 도트 글꼴, 하트 장식, 연노랑 상자 |
+| 상자·카드 | `box`, `pink-cabinet`, `note-yellow`, `note-pink`, `note-blue`, `tmi-blue`, `white-card`, `black-tag`, `cyan-strip` | 파스텔 상자·테두리 카드·검은 태그. 소제목, 짧은 한마디, 제품 정보에 |
+| 손글씨 | `pen-white`, `melody-pink`, `gamja-yellow`, `brush-white` | 나눔손글씨 펜·하이멜로디·감자꽃·독도 붓글씨 |
+| 레트로·세리프 | `movie-serif`, `luxury-serif`, `retro-orange`, `retro-blue-pixel` | 고운바탕 영화 자막, 모이라이 레트로, 파란 도트 |
 
 값을 바꾸려면 내보내서 고칩니다.
 
 ```bash
-r4-subtitles templates export yellow mine.json
-# mine.json의 name, font_size, primary_color 등을 고친 뒤
+r4-subtitles templates export neon-pink mine.json
+# mine.json의 name, primary_color, glow, prefix 등을 고친 뒤
 r4-subtitles style captions.srt captions.ass --template mine.json --width 1080 --height 1920 --title "화면 제목"
 r4-subtitles burn source.mp4 captions.srt result.mp4 --template mine.json
 ```
@@ -72,26 +77,63 @@ r4-subtitles burn source.mp4 captions.srt result.mp4 --template mine.json
 |---|---|---|
 | `name` | 소문자·숫자·하이픈, 40자 이하 | 필수 |
 | `label`, `description` | 화면 표시 이름·설명 | 필수 / 빈 값 |
-| `font_name` | 글꼴 이름. 쉼표·중괄호·역슬래시 불가(ASS 파일이 깨지거나 명령이 주입됨) | `Noto Sans CJK KR` |
-| `font_size` | 20~120 | 64 |
+| `category` | `basic` `vlog` `cute` `neon` `pixel` `box` `handwriting` `retro` | `basic` |
+| `sample` | 미리보기 예문. 비우면 `label` | 빈 값 |
+| `font_name` | 글꼴 이름. 아래 글꼴 목록에 있는 이름만 실제로 그려집니다. 쉼표·중괄호·역슬래시 불가 | `Noto Sans CJK KR` |
+| `font_size` | 20~120 (1080x1920 기준) | 64 |
 | `bold`, `italic` | 참/거짓 | 거짓 |
-| `primary_color`, `outline_color`, `back_color` | `#RRGGBB` 또는 `#RRGGBBAA`(AA는 불투명도, FF가 불투명) | 흰 / 검정 / 검정 |
-| `outline`, `shadow` | 0~20 | 3 / 1 |
-| `border_style` | `outline`(외곽선+그림자) 또는 `box`(상자, `back_color`가 상자 색, `outline`이 상자 여백) | `outline` |
+| `primary_color`, `outline_color` | `#RRGGBB` 또는 `#RRGGBBAA`(AA는 불투명도, FF가 불투명) | 흰 / 검정 |
+| `back_color` | 외곽선 방식의 그림자 색 | 검정 |
+| `box_color` | 상자 방식의 상자 색 | 검정 |
+| `outline`, `shadow` | 0~20. 상자 방식에서는 `outline`이 상자 여백 | 3 / 1 |
+| `glow` | 0~20. 글자 주변 번짐(ASS `\blur`). 외곽선 색이 번져 네온처럼 보입니다 | 0 |
+| `border_style` | `outline`(외곽선+그림자), `box`(상자), `box-outline`(상자+테두리) | `outline` |
 | `position`, `horizontal` | `bottom`/`middle`/`top`, `left`/`center`/`right` | `bottom` / `center` |
 | `margin_horizontal` | 좌우 여백 px | 50 |
 | `margin_vertical_ratio` | 화면 높이 대비 위·아래 여백 비율 | 0.13 |
 | `letter_spacing` | 자간 | 0 |
+| `prefix`, `suffix` | 자막 앞뒤 장식 기호(★ ☆ ♡ ✳ ♪ ✧ 등), 8자 이하. 글꼴에 있는 글자여야 그려지고 이모지는 안 됩니다 | 빈 값 |
 
-글자 크기는 `--font-size`(또는 편집본의 `font_size`)를 주면 템플릿 값보다 우선합니다. 화면 제목은 자막의 반대쪽 끝(자막이 아래면 위)에 같은 모양으로 놓입니다.
+글자 크기는 `--font-size`(또는 편집본의 `font_size`)를 주면 템플릿 값보다 우선합니다. 화면 제목은 자막의 반대쪽 끝(자막이 아래면 위)에 같은 모양으로 놓이되 장식은 붙지 않습니다.
+
+상자 색은 libass 동작에 맞춰 넣습니다. libass는 BorderStyle 3(상자)을 **외곽선 색**으로 채우고 BorderStyle 4(상자+테두리)는 뒷색으로 채웁니다. `box_color`를 두고 방식에 따라 알맞은 자리에 넣으므로 JSON에서는 신경 쓰지 않아도 됩니다.
+
+## 글꼴
+
+템플릿이 쓰는 글꼴은 모두 SIL Open Font License 1.1이라 영상에 구워 배포해도 됩니다. 목록·출처(커밋 해시 고정)·SHA-256·라이선스 링크는 `packages/pipeline/pipeline/subtitle_fonts.py`에 있고, 파일은 저장소에 넣지 않습니다.
+
+| 글꼴(ASS 이름) | 출처 | 쓰는 템플릿 |
+|---|---|---|
+| Noto Sans CJK KR | 워커 이미지 `fonts-noto-cjk` 패키지 | 기본 5종 |
+| Jua, Black Han Sans, Bagel Fat One, Gaegu, Do Hyeon, Gowun Batang, Nanum Pen, Gugi, Moirai One, Dongle, Single Day, Hi Melody, Gamja Flower, East Sea Dokdo | Google Fonts 저장소(`google/fonts` 커밋 고정) | 브이로그·귀여운·네온·상자·손글씨·레트로 |
+| Galmuri11 Regular, Galmuri9 Regular | `quiple/galmuri` 커밋 고정 | 픽셀 |
+
+Nanum Pen Script와 Galmuri는 파일 안의 family 이름이 Google Fonts 이름과 달라(`Nanum Pen`, `Galmuri11 Regular`) 템플릿은 파일 이름을 씁니다. libass는 이름이 다르면 오류 없이 다른 글꼴로 바꿔 그리므로, 내려받기 스크립트가 `fc-scan`으로 이름을 확인하고 `r4-subtitles templates check`가 설치된 컴퓨터에서 다시 확인합니다.
+
+- 워커 이미지: `infra/Dockerfile.worker`가 `scripts/fetch_fonts.py`로 `/usr/share/fonts/truetype/r4`에 설치합니다. 이미지를 다시 빌드해야 합니다.
+- 로컬: `python scripts/fetch_fonts.py --out .fonts` 후 `--fonts-dir .fonts` 또는 `R4_FONTS_DIR=.fonts`. 워커를 로컬에서 직접 돌릴 때도 `R4_FONTS_DIR`을 읽어 FFmpeg에 넘깁니다.
+
+## 미리보기
+
+```bash
+r4-subtitles templates check --fonts-dir .fonts                      # 글꼴이 실제로 찾아지는지
+r4-subtitles sheet templates.png --fonts-dir .fonts                  # 38종 전부 한 장 (1080x3000)
+r4-subtitles sheet neon.png --category neon pixel --columns 1 --width 720 --text "같은 예문"
+r4-subtitles preview one.png --template neon-pink --text "제발... 제발!!!!!" --height 400
+```
+
+`sheet`는 인스타그램 소개 이미지처럼 템플릿마다 예문 한 줄을 격자에 놓아 한 프레임으로 렌더합니다. 글자 크기는 칸에 맞춰 줄이므로 실제 영상보다 작게 보일 수 있습니다. CI의 `워커 이미지 빌드`가 실제 글꼴로 시트를 만들어 `subtitle-template-sheet` artifact로 올리고, `templates check`로 글꼴 누락을 잡습니다.
+
+관리화면의 템플릿 선택은 같은 글꼴을 Google Fonts CSS로 불러 **CSS로 흉내 낸** 미리보기를 보여 줍니다. 픽셀 글꼴은 Google Fonts에 없어 고정폭으로 대신하고, 글로우·상자는 `text-shadow`·배경으로 근사합니다. 정확한 모양은 시트나 실제 렌더로 확인합니다.
 
 ## 관리화면·API 연결
 
 - 편집기의 **자막 템플릿** 선택이 `POST /clips`의 `subtitle_template`로 저장되고 렌더가 그 모양으로 굽습니다. 선택 구간을 단계별 제작으로 보내면 `workflow.clip.subtitle_template`로 함께 갑니다.
 - `GET /subtitle-templates`가 내장 템플릿을 돌려줍니다. 모르는 이름은 저장 전에 422로 거절합니다.
+- `GET /subtitle-templates`는 카테고리 순서로 돌려주고 `category_label`을 붙입니다. 편집기는 카테고리별 선택과 CSS 미리보기 갤러리를 보여 줍니다.
 - 편집본 기록 `clip_edits.subtitle_style`에 `template`와 실제 글자 크기가 남습니다. 템플릿 이전 기록은 `font_size`만 있으며 `default`로 렌더됩니다.
 - 파일로 만든 사용자 템플릿(JSON)은 명령줄 전용입니다. 서버에는 내장 템플릿만 있고 업로드·저장 화면은 없습니다.
 
 ## 검증 범위
 
-`tests/test_subtitle_templates.py`, `tests/test_subtitle_tool.py`가 값 검증, 색·정렬 변환, 파일 읽기·쓰기, 규칙 적용, 렌더 연결을 확인합니다. `burn`의 실제 FFmpeg 합성과 글꼴 표시는 이 저장소의 CI 환경(FFmpeg 설치)이나 워커 이미지에서 따로 확인해야 하며, 템플릿별 화면 안 배치 실측(`scripts/measure_subtitles.py`)은 `default` 값으로만 되어 있습니다.
+`tests/test_subtitle_templates.py`, `tests/test_subtitle_tool.py`, `tests/test_fetch_fonts.py`가 값 검증, 색·정렬·상자 색 변환, 장식·글로우, 시트 배치, 파일 읽기·쓰기, 규칙 적용, 렌더 연결, 글꼴 체크섬·이름 검사를 확인합니다. FFmpeg가 있으면 시트·미리보기 PNG를 실제로 렌더합니다. 템플릿별 화면 안 배치 실측(`scripts/measure_subtitles.py`)은 `default` 값으로만 되어 있으며, 큰 글꼴(`vlog-lime` 96, `round-white` 110)은 한 줄 글자 수가 기본 규칙(16자)보다 적게 들어갈 수 있습니다.

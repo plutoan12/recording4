@@ -118,6 +118,7 @@ ffsubsync는 **chardet(LGPL)** 과 **webrtcvad**를 의존성으로 끌어옵니
 - `/source-assets/{id}/transcript/sync`: 들인 자막이 원본과 어긋날 때 ffsubsync로 시각을 통째로 옮긴 새 대본 버전을 만듭니다. 글자는 건드리지 않고, 얼마나 옮겼는지(`offset_seconds`)를 작업 결과에 남깁니다.
 - `/source-assets/{id}/transcript/import`: 밖에서 만든 SRT·WebVTT·ASS 파일을 대본 새 버전으로 들입니다. 형식은 pysubs2가 글자를 보고 판별하고, 꾸밈 표기는 벗깁니다. 시각은 파일에 적힌 그대로 씁니다. 인코딩은 BOM → UTF-8 → charset-normalizer 순으로 정하고, 판별기가 고른 경우에는 무엇으로 읽었는지(`encoding`, `encoding_detected`)와 다른 후보를 함께 돌려주어 화면에서 되돌릴 수 있게 합니다. 판별기까지 실패하면 후보별 미리보기를 주어 사람이 고릅니다.
 - YouTube 자막 트랙: 게시할 때 같은 자막을 `captions.insert`로 올립니다(`R4_YOUTUBE_CAPTIONS_ENABLED`, 기본 꺼짐). 같은 언어 트랙이 이미 있으면 올리지 않고, 실패해도 게시를 막지 않습니다.
+- 자막 템플릿 글꼴: Google Fonts 저장소의 OFL 한국어 글꼴 14종과 Galmuri(OFL) 도트 글꼴 2종을 `scripts/fetch_fonts.py`가 커밋 해시 고정 URL에서 받아 체크섬을 확인하고 워커 이미지에 설치합니다. 목록·라이선스 링크는 `pipeline/subtitle_fonts.py`, 사용법은 [자막 파일·템플릿 도구](SUBTITLE_TOOL.md#글꼴)입니다.
 - `/subtitle-templates`, `/clips`의 `subtitle_template`: 영상에 굽는 자막 모양(글꼴·색·외곽선·위치)을 내장 템플릿 이름으로 고릅니다. 구현은 `pipeline/subtitle_templates.py`이며 pysubs2 스타일로 바꿔 렌더의 ASS에 넣습니다. 같은 템플릿을 파일에 적용하는 명령줄은 [자막 파일·템플릿 도구](SUBTITLE_TOOL.md)입니다.
 - `/clips/{id}/subtitles?format=srt|vtt`, `/jobs/{id}/subtitles?format=srt|vtt`: 숏폼 편집본과 번역·더빙 작업의 자막을 SRT·WebVTT 파일로 내려받습니다. 생성은 `pipeline/subtitle_files.py:subtitle_file()`이며 pysubs2가 형식을 씁니다. 저장하지 않고 요청할 때 만듭니다.
 

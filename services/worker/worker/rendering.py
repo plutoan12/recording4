@@ -13,7 +13,14 @@ from pipeline.subtitle_files import plain_ass
 from pipeline.subtitle_templates import SubtitleTemplate, resolve_template, styled_document
 from pipeline.subtitles import DEFAULT_RULES, SubtitleRules, apply_rules
 
-__all__ = ["RenderError", "ffmpeg_binary", "plain_ass", "render_clip", "write_subtitles"]
+__all__ = [
+    "RenderError",
+    "ffmpeg_binary",
+    "plain_ass",
+    "render_clip",
+    "subtitles_filter",
+    "write_subtitles",
+]
 
 
 class RenderError(RuntimeError):
@@ -59,6 +66,25 @@ def write_subtitles(
     document.save(str(path), encoding="utf-8")
 
 
+def fonts_dir() -> str | None:
+    """템플릿 글꼴이 든 디렉터리. 워커 이미지는 시스템 글꼴로 설치하므로 비어 있습니다.
+
+    로컬에서 `scripts/fetch_fonts.py --out .fonts`로 받았다면 `R4_FONTS_DIR`로 알려 줍니다.
+    """
+    value = os.environ.get("R4_FONTS_DIR", "").strip()
+    return value or None
+
+
+def subtitles_filter(filename: str = "captions.ass") -> str:
+    """FFmpeg subtitles 필터 문자열. 글꼴 디렉터리가 있으면 libass에 함께 넘깁니다."""
+    directory = fonts_dir()
+    if not directory:
+        return f"subtitles={filename}"
+    # 필터 인자에서 콜론·역슬래시·따옴표는 구분자라 이스케이프합니다.
+    escaped = directory.replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'")
+    return f"subtitles={filename}:fontsdir='{escaped}'"
+
+
 def video_filter(spec: EditSpec) -> str:
     w, h = spec.width, spec.height
     if spec.mode == "crop":
@@ -71,7 +97,7 @@ def video_filter(spec: EditSpec) -> str:
             f"scale={w}:{h}:force_original_aspect_ratio=decrease:force_divisible_by=2,"
             f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:color=black"
         )
-    return f"{frame},setsar=1,subtitles=captions.ass,format=yuv420p"
+    return f"{frame},setsar=1,{subtitles_filter()},format=yuv420p"
 
 
 def render_clip(

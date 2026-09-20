@@ -6,7 +6,46 @@ import type { WorkflowDraft } from './WorkflowPanel'
 type Cue = { start: number; end: number; text: string }
 type Suggestion = { start: number; end: number; title: string; reason: string }
 type Violation = { index: number; kind: string; detail: string }
-type Template = { name: string; label: string; description: string }
+type Template = { name: string; label: string; description: string; category: string; category_label: string; sample: string;
+  font_name: string; font_size: number; bold: boolean; italic: boolean; primary_color: string; outline_color: string; box_color: string;
+  outline: number; shadow: number; glow: number; border_style: 'outline' | 'box' | 'box-outline'; letter_spacing: number; prefix: string; suffix: string }
+
+// 워커가 libass로 굽는 모양을 CSS로 흉내 냅니다. 글꼴 이름은 Google Fonts 이름으로 바꾸고
+// 픽셀 글꼴은 고정폭으로 대신합니다. 정확한 모양은 미리보기 시트(r4-subtitles sheet)를 봅니다.
+const FONT_ALIASES: Record<string, string> = { 'Nanum Pen': 'Nanum Pen Script', 'Galmuri11 Regular': 'monospace', 'Galmuri9 Regular': 'monospace' }
+function cssColor(hex: string): string {
+  // #RRGGBBAA(AA=불투명도)는 CSS도 같은 뜻이라 그대로 씁니다.
+  return hex
+}
+function templatePreviewStyle(t: Template): React.CSSProperties {
+  const family = FONT_ALIASES[t.font_name] ?? t.font_name
+  const size = Math.max(14, Math.round(t.font_size / 3))
+  const stroke = Math.max(0, Math.round(t.outline / 2.5))
+  const shadows: string[] = []
+  if (t.border_style === 'outline' && stroke > 0) shadows.push(`0 0 0 ${stroke}px ${cssColor(t.outline_color)}`)
+  if (t.glow > 0) shadows.push(`0 0 ${Math.round(t.glow * 1.5)}px ${cssColor(t.outline_color)}`, `0 0 ${Math.round(t.glow * 3)}px ${cssColor(t.outline_color)}`)
+  if (t.shadow > 0 && t.border_style === 'outline') shadows.push(`${Math.round(t.shadow)}px ${Math.round(t.shadow)}px 0 rgba(0,0,0,.6)`)
+  const style: React.CSSProperties = {
+    fontFamily: `'${family}', 'Noto Sans KR', sans-serif`,
+    fontSize: `${size}px`,
+    fontWeight: t.bold ? 700 : 400,
+    fontStyle: t.italic ? 'italic' : 'normal',
+    color: cssColor(t.primary_color),
+    letterSpacing: `${t.letter_spacing / 3}px`,
+    WebkitTextStroke: t.border_style === 'outline' && stroke > 0 ? `${stroke}px ${cssColor(t.outline_color)}` : undefined,
+    paintOrder: 'stroke fill',
+    textShadow: shadows.length ? shadows.join(', ') : undefined,
+    padding: t.border_style !== 'outline' ? `${Math.round(t.outline / 2)}px ${Math.round(t.outline)}px` : '2px 4px',
+    background: t.border_style !== 'outline' ? cssColor(t.box_color) : undefined,
+    border: t.border_style === 'box-outline' ? `${Math.max(1, stroke)}px solid ${cssColor(t.outline_color)}` : undefined,
+    borderRadius: t.border_style !== 'outline' ? 4 : undefined,
+  }
+  return style
+}
+function TemplatePreview({ template }: { template: Template }) {
+  const text = `${template.prefix ? template.prefix + ' ' : ''}${template.sample || template.label}${template.suffix ? ' ' + template.suffix : ''}`
+  return <div className="template-preview"><span style={templatePreviewStyle(template)}>{text}</span></div>
+}
 type Task = { id: string; source_asset_id: string; clip_edit_id: string | null; kind: string; state: string; error: string | null;
   result: { artifact_id?: string; scenes?: {start: number; end: number}[]; sync?: {offset_seconds:number; framerate_scale:number; clamped:number} } }
 
@@ -173,9 +212,20 @@ export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWo
       <label>자막 표시<select value={burn?'burn':'track'} onChange={e=>setBurn(e.target.value==='burn')}><option value="burn">영상에 굽기 · 트랙 업로드 안 함</option><option value="track">YouTube 트랙만 · 영상에 굽지 않음</option></select></label>
       <label>자막 언어<input value={captionLanguage} onChange={e=>setCaptionLanguage(e.target.value)} pattern="[a-z]{2,3}" placeholder="ko, en, ja" /></label>
       <label>자막 템플릿<select value={template} disabled={!burn} onChange={e=>setTemplate(e.target.value)}>
-        {(templates.length ? templates : [{name:'default',label:'기본',description:''}]).map(t => <option key={t.name} value={t.name} title={t.description}>{t.label} ({t.name})</option>)}
+        {templates.length === 0 && <option value="default">기본 (default)</option>}
+        {Array.from(new Set(templates.map(t => t.category_label))).map(group => <optgroup key={group} label={group}>
+          {templates.filter(t => t.category_label === group).map(t => <option key={t.name} value={t.name} title={t.description}>{t.label} ({t.name})</option>)}
+        </optgroup>)}
       </select></label>
-      {burn && templates.find(t => t.name === template)?.description && <p>{templates.find(t => t.name === template)?.description} 영상에 굽는 자막의 모양이며 SRT·VTT 파일에는 영향이 없습니다.</p>}
+      {burn && (() => { const chosen = templates.find(t => t.name === template); return chosen ? <div className="template-chosen">
+        <TemplatePreview template={chosen} />
+        <p>{chosen.description} 영상에 굽는 자막의 모양이며 SRT·VTT 파일에는 영향이 없습니다. 화면의 미리보기는 CSS 근사이고 실제 렌더는 워커의 libass입니다.</p>
+      </div> : null })()}
+      {burn && templates.length > 0 && <details className="template-gallery"><summary>템플릿 전체 미리보기 ({templates.length}종)</summary>
+        <div className="template-grid">{templates.map(t => <button type="button" key={t.name} className={t.name === template ? 'selected' : ''} onClick={() => setTemplate(t.name)} title={t.description}>
+          <TemplatePreview template={t} /><small>{t.label}</small>
+        </button>)}</div>
+      </details>}
       {captions.map((cue, index) => <div className="caption-row" key={index}>
         <label>시작(초)<input type="number" min="0" step="0.01" value={cue.start} onChange={e => updateCue(index,{start:Number(e.target.value)})} /></label>
         <label>종료(초)<input type="number" min="0" step="0.01" value={cue.end} onChange={e => updateCue(index,{end:Number(e.target.value)})} /></label>

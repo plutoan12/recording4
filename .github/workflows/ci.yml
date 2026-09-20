@@ -334,6 +334,24 @@ jobs:
           docker run --rm -v "$PWD/scripts:/work:ro" --entrypoint python \
             recording4-worker:ci /work/measure_subtitles.py
 
+      # 내장 자막 템플릿 전부를 실제 글꼴·libass로 한 장에 그립니다. 글꼴이 빠졌거나
+      # 이름이 틀리면 여기서 다른 글꼴로 대체된 것이 보입니다. 결과는 artifact로 남깁니다.
+      - name: 자막 템플릿 시트
+        if: ${{ !cancelled() }}
+        run: |
+          mkdir -p /tmp/sheet
+          docker run --rm -v /tmp/sheet:/out --entrypoint python recording4-worker:ci \
+            -m pipeline.subtitle_tool sheet /out/subtitle-templates.png
+          docker run --rm -v /tmp/sheet:/out --entrypoint python recording4-worker:ci \
+            -m pipeline.subtitle_tool templates check
+      - name: 자막 템플릿 시트 업로드
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: subtitle-template-sheet
+          path: /tmp/sheet/subtitle-templates.png
+          if-no-files-found: error
+
       # 빌드 로그가 길어서 중간 출력은 찾기 어렵습니다. 잡 끝에서 한 번 더 모읍니다.
       - name: 이미지 요약
         if: ${{ !cancelled() }}

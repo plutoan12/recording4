@@ -33,6 +33,11 @@ RUN apt-get update \
     && apt-get purge -y --auto-remove build-essential \
     && rm -rf /var/lib/apt/lists/*
 
+# 자막 템플릿 글꼴(모두 OFL). 목록과 체크섬은 packages/pipeline/pipeline/subtitle_fonts.py에
+# 있고, 출처는 커밋 해시로 고정돼 있습니다. 시스템 글꼴 자리에 넣어 libass가 이름으로 찾습니다.
+COPY scripts/fetch_fonts.py ./scripts/fetch_fonts.py
+RUN python scripts/fetch_fonts.py --out /usr/share/fonts/truetype/r4 && fc-cache -f
+
 COPY services ./services
 
 RUN useradd --create-home --uid 10001 appuser \

@@ -38,7 +38,7 @@ from pipeline.subtitle_files import (
     encoding_choices,
     parse_subtitles,
 )
-from pipeline.subtitle_templates import BUILTIN_TEMPLATES, get_template
+from pipeline.subtitle_templates import CATEGORY_LABELS, get_template, templates_by_category
 from pipeline.subtitles import check
 from pipeline.time import as_utc
 
@@ -434,8 +434,16 @@ def create_clip(payload: ClipRequest, user: CurrentUser, session: SessionDep):
 
 @router.get("/subtitle-templates")
 def subtitle_templates(user: CurrentUser) -> list[dict]:
-    """편집기가 고를 수 있는 내장 자막 템플릿. 이름을 `subtitle_template`로 보냅니다."""
-    return [t.model_dump() for t in BUILTIN_TEMPLATES.values()]
+    """편집기가 고를 수 있는 내장 자막 템플릿. 이름을 `subtitle_template`로 보냅니다.
+
+    카테고리 순서대로 돌려주고 `category_label`을 붙입니다. 화면은 이 값으로 묶어
+    보여 주고, CSS로 모양을 흉내 낸 미리보기를 그립니다(실제 렌더는 libass).
+    """
+    return [
+        {**t.model_dump(), "category_label": CATEGORY_LABELS[t.category]}
+        for templates in templates_by_category().values()
+        for t in templates
+    ]
 
 
 @router.get("/clips/{clip_edit_id}/subtitles")
