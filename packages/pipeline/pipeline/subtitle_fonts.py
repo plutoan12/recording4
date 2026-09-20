@@ -130,6 +130,84 @@ FONT_SOURCES: tuple[FontSource, ...] = (
         "EastSeaDokdo-Regular.ttf",
         "8cebb39d375134fdbcedef9bf4ec4f6c3f02c39ed0aacd6e83f7a0f435e593b2",
     ),
+    _google(
+        "Gasoek One",
+        "gasoekone",
+        "GasoekOne-Regular.ttf",
+        "73a6b8e0d12a56f0a070f19b44a93ae050f98eb926da5d2a7c8d6db92bd8d9c3",
+    ),
+    _google(
+        "Kirang Haerang",
+        "kiranghaerang",
+        "KirangHaerang-Regular.ttf",
+        "d677d28d466989017c520f00a2a7794ea581ea3d9fa9a830fbb44f1015eac72d",
+    ),
+    _google(
+        "Yeon Sung",
+        "yeonsung",
+        "YeonSung-Regular.ttf",
+        "49ac2a11009f5f58307d377911eb45d210cf4c1d379d9eca38fb4cdad5491ef6",
+    ),
+    _google(
+        "Sunflower",
+        "sunflower",
+        "Sunflower-Bold.ttf",
+        "6b033627817f6619433afe82028013dc45a78ff82406b1dbe5b16e1bbc370e0a",
+    ),
+    _google(
+        "Cute Font",
+        "cutefont",
+        "CuteFont-Regular.ttf",
+        "c403227fe6288a8c1423ca48e93fd7efc81e3b81053f7d17adcf659bd95fa4c3",
+    ),
+    _google(
+        "Nanum Brush Script",
+        "nanumbrushscript",
+        "NanumBrushScript-Regular.ttf",
+        "27ceaf578c96f594cdf07fe0181b251790acbb746a164e45c1f6473f89911a31",
+    ),
+    _google(
+        "Song Myung",
+        "songmyung",
+        "SongMyung-Regular.ttf",
+        "7f90ab20250911560212cc5819c7b205f9c6644bb96b65095d89fcae096bbf58",
+    ),
+    _google(
+        "Orbit",
+        "orbit",
+        "Orbit-Regular.ttf",
+        "5d0206fb0a9e3eeac51aff8d4a6dbb7613d63fc435f1a51f96dc35cefb5f9f87",
+    ),
+    _google(
+        "Diphylleia",
+        "diphylleia",
+        "Diphylleia-Regular.ttf",
+        "a0f505e19758bbe69da3e1cdd89fac74e69e851aa82195a61c861bcee7a53293",
+    ),
+    _google(
+        "Dokdo",
+        "dokdo",
+        "Dokdo-Regular.ttf",
+        "5b3a3d8d28af31fa9adec3fc5da81a88b52e1ff39ed3930c1db787aa4e79c36d",
+    ),
+    _google(
+        "Gothic A1",
+        "gothica1",
+        "GothicA1-Black.ttf",
+        "6398ff5c6923c74cb453390892dcb982ec0a6c43b35da8590a8f32702d8c079d",
+    ),
+    _google(
+        "Poor Story",
+        "poorstory",
+        "PoorStory-Regular.ttf",
+        "831ab87f7b5463f9cd83ac249bf386816f3a478f1d226427c88cac907adb7ee2",
+    ),
+    _google(
+        "Grandiflora One",
+        "grandifloraone",
+        "GrandifloraOne-Regular.ttf",
+        "592da2454a6626ee68558e220df28808b95f7dd140cd1ceb8a0d72b777f157ad",
+    ),
     FontSource(
         family="Galmuri11 Regular",
         filename="Galmuri11.ttf",
@@ -158,3 +236,11 @@ GOOGLE_FONTS_CSS_FAMILIES: tuple[str, ...] = tuple(
     for source in FONT_SOURCES
     if not source.family.startswith("Galmuri")
 )
+
+# 굵기 하나만 받는 글꼴. Google Fonts CSS에서 같은 굵기를 요청해야 화면 미리보기가 같습니다.
+GOOGLE_FONTS_CSS_WEIGHTS: dict[str, int] = {
+    "Gaegu": 700,
+    "Dongle": 700,
+    "Sunflower": 700,
+    "Gothic A1": 900,
+}

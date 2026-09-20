@@ -15,6 +15,10 @@ ASS는 알파를 반대로(0이 불투명) 두므로 여기서 바꿔 줍니다.
 채우고, BorderStyle 4(상자+외곽선)는 뒷색으로 상자를 채우고 외곽선을 따로
 그립니다. 그래서 `box_color`를 두고 방식에 따라 알맞은 자리에 넣습니다.
 
+스티커처럼 보이는 이중 외곽선(안쪽 색선 + 바깥 테두리)은 ASS에 없어 이벤트를 두
+겹으로 냅니다. 뒤 층은 외곽선을 `outline + outline2`만큼 바깥 색으로, 앞 층은 원래
+외곽선으로 그립니다. 그림자와 글로우는 뒤 층에만 둡니다.
+
 글로우는 ASS `\\blur` 명령입니다. 스타일에는 없고 이벤트 글자 앞에 붙는 명령이라
 `styled_document`가 넣습니다. 사용자 글자는 `plain_ass`로 명령을 막지만 이 명령은
 우리가 만드는 것이라 그대로 둡니다.
@@ -23,7 +27,9 @@ ASS는 알파를 반대로(0이 불투명) 두므로 여기서 바꿔 줍니다.
 from __future__ import annotations
 
 import json
+import random
 import re
+import unicodedata
 from pathlib import Path
 from typing import Literal
 
@@ -33,6 +39,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from pipeline.editing import Cue
 from pipeline.subtitle_files import plain_ass
 from pipeline.subtitle_fonts import FONT_FAMILIES
+from pipeline.subtitles import text_width
 
 TEMPLATE_NAME = r"^[a-z0-9][a-z0-9-]{0,39}$"
 """템플릿 이름 규칙. 편집본 설정과 URL에 그대로 들어가므로 소문자·숫자·하이픈만 둡니다."""
@@ -110,7 +117,12 @@ class SubtitleTemplate(BaseModel):
     # 상자 방식(box, box-outline)의 상자 색입니다.
     box_color: str = "#000000"
     outline: float = Field(default=3, ge=0, le=20)
+    # 바깥 테두리(스티커 느낌). 0이면 없습니다. 외곽선 방식에서만 그립니다.
+    outline2: float = Field(default=0, ge=0, le=20)
+    outline2_color: str = "#FFFFFF"
     shadow: float = Field(default=1, ge=0, le=20)
+    # 살짝 기울인 글자(도). 양수가 반시계 방향입니다.
+    angle: float = Field(default=0, ge=-30, le=30)
     # 글자 주변을 번지게 하는 정도(ASS \blur). 외곽선 색이 번져 네온처럼 보입니다.
     glow: float = Field(default=0, ge=0, le=20)
     border_style: BorderStyle = "outline"
@@ -124,7 +136,7 @@ class SubtitleTemplate(BaseModel):
     prefix: str = Field(default="", max_length=8)
     suffix: str = Field(default="", max_length=8)
 
-    @field_validator("primary_color", "outline_color", "back_color", "box_color")
+    @field_validator("primary_color", "outline_color", "back_color", "box_color", "outline2_color")
     @classmethod
     def _valid_color(cls, value: str) -> str:
         parse_color(value)
@@ -179,7 +191,26 @@ class SubtitleTemplate(BaseModel):
             marginr=self.margin_horizontal,
             marginv=self.margin_vertical(height),
             spacing=self.letter_spacing,
+            angle=self.angle,
         )
+
+    @property
+    def layered(self) -> bool:
+        """두 겹으로 그려야 하는지(바깥 테두리가 있는 외곽선 방식)."""
+        return self.border_style == "outline" and self.outline2 > 0
+
+    def back_style(self, style: pysubs2.SSAStyle) -> pysubs2.SSAStyle:
+        """앞 층 스타일에서 뒤 층(바깥 테두리) 스타일을 만듭니다."""
+        back = style.copy()
+        back.outlinecolor = parse_color(self.outline2_color)
+        back.outline = style.outline + self.outline2
+        return back
+
+    def front_style(self, style: pysubs2.SSAStyle) -> pysubs2.SSAStyle:
+        """두 겹일 때 앞 층. 그림자는 뒤 층이 그리므로 뺍니다."""
+        front = style.copy()
+        front.shadow = 0
+        return front
 
     def title_style(self, height: int, *, font_size: int | None = None) -> pysubs2.SSAStyle:
         """화면 제목 스타일. 자막과 같은 모양이되 자막의 반대쪽 끝에 놓습니다.
@@ -195,6 +226,16 @@ class SubtitleTemplate(BaseModel):
     def override_tags(self) -> str:
         """이벤트 글자 앞에 붙는 ASS 명령. 지금은 글로우뿐입니다."""
         return f"{{\\blur{self.glow:g}}}" if self.glow else ""
+
+    def event_text_layers(self, text: str) -> list[tuple[int, str, bool]]:
+        """(layer, 이벤트 글자, 뒤 층인지) 목록. 두 겹이면 뒤 층이 먼저 옵니다.
+
+        글로우는 뒤 층(바깥 테두리)에만 붙여 앞 층 글자는 또렷하게 둡니다.
+        """
+        body = plain_ass(self.decorate(text))
+        if self.layered:
+            return [(0, self.override_tags() + body, True), (1, body, False)]
+        return [(0, self.override_tags() + body, False)]
 
     def decorate(self, text: str) -> str:
         """장식을 붙입니다. 여러 줄이면 첫 줄 앞과 마지막 줄 뒤에만 붙입니다."""
@@ -291,6 +332,8 @@ BUILTIN_TEMPLATES: dict[str, SubtitleTemplate] = {
             primary_color="#9DFF3C",
             outline_color="#0B3D00",
             outline=2,
+            outline2=4,
+            outline2_color="#FFFFFF",
             shadow=0,
         ),
         _builtin(
@@ -346,7 +389,9 @@ BUILTIN_TEMPLATES: dict[str, SubtitleTemplate] = {
             category="cute",
             font_name="Bagel Fat One",
             font_size=78,
-            outline=7,
+            outline=5,
+            outline2=4,
+            outline2_color="#FFFFFF",
             shadow=0,
             prefix="★",
             suffix="☆",
@@ -361,9 +406,10 @@ BUILTIN_TEMPLATES: dict[str, SubtitleTemplate] = {
             font_size=78,
             primary_color="#8ED8FF",
             outline_color="#FFFFFF",
-            outline=6,
+            outline=5,
+            outline2=2.5,
+            outline2_color="#3FA9E8",
             shadow=0,
-            glow=1.5,
             suffix="♡",
         ),
         _builtin(
@@ -376,7 +422,9 @@ BUILTIN_TEMPLATES: dict[str, SubtitleTemplate] = {
             font_size=78,
             primary_color="#FF9BD2",
             outline_color="#FFFFFF",
-            outline=6,
+            outline=5,
+            outline2=2.5,
+            outline2_color="#E84393",
             shadow=0,
         ),
         _builtin(
@@ -718,10 +766,12 @@ BUILTIN_TEMPLATES: dict[str, SubtitleTemplate] = {
             category="retro",
             font_name="Moirai One",
             font_size=84,
-            primary_color="#FFD966",
-            outline_color="#7A3E00",
-            outline=4,
-            shadow=3,
+            primary_color="#FFB74D",
+            outline_color="#5D2E00",
+            outline=3,
+            outline2=3,
+            outline2_color="#FFF3E0",
+            shadow=0,
             prefix="★",
             suffix="★",
         ),
@@ -739,6 +789,232 @@ BUILTIN_TEMPLATES: dict[str, SubtitleTemplate] = {
             shadow=0,
             prefix="♪",
             suffix="♪",
+        ),
+        # ---- 추가: 새 글꼴로 만든 것 ------------------------------------------
+        _builtin(
+            name="clean-white",
+            label="깔끔한 흰색",
+            description="선플라워 굵은 글자에 얇은 검은 외곽선. 담백한 기본 자막.",
+            sample="오늘의 브이로그 시작!",
+            category="basic",
+            font_name="Sunflower",
+            font_size=64,
+            bold=True,
+            outline=2,
+            shadow=0,
+        ),
+        _builtin(
+            name="title-sticker",
+            label="스티커 제목",
+            description="가속 굵은 제목에 검은 선과 흰 테두리. 썸네일용 스티커 느낌.",
+            sample="썸네일용으로 진짜 딱임!!",
+            category="vlog",
+            font_name="Gasoek One",
+            font_size=84,
+            outline_color="#111111",
+            outline=4,
+            outline2=5,
+            outline2_color="#FFFFFF",
+            shadow=0,
+        ),
+        _builtin(
+            name="pink-sticker",
+            label="핑크 스티커",
+            description="핑크 굵은 글자에 흰 선과 진핑크 테두리.",
+            sample="올영 세일템 추천",
+            category="vlog",
+            font_name="Gasoek One",
+            font_size=84,
+            primary_color="#FF6FB5",
+            outline_color="#FFFFFF",
+            outline=4,
+            outline2=3,
+            outline2_color="#C2185B",
+            shadow=0,
+            suffix="✦",
+        ),
+        _builtin(
+            name="solid-shadow",
+            label="입체 그림자",
+            description="노란 굵은 글자 뒤에 진갈색 그림자를 길게. 입체 스티커.",
+            sample="이건 꼭 사야만 함..",
+            category="vlog",
+            font_name="Gasoek One",
+            font_size=84,
+            primary_color="#FFD54F",
+            outline_color="#3E2723",
+            back_color="#3E2723",
+            outline=3,
+            shadow=7,
+            suffix="♡",
+        ),
+        _builtin(
+            name="playful-tilt",
+            label="장난스러운 기울임",
+            description="기랑해랑 글꼴을 살짝 기울여 노란 글자로. 장난스러운 강조.",
+            sample="이게 무슨 일이야...",
+            category="cute",
+            font_name="Kirang Haerang",
+            font_size=88,
+            primary_color="#FFF176",
+            outline_color="#000000",
+            outline=3,
+            shadow=0,
+            angle=-3,
+        ),
+        _builtin(
+            name="lilac-sticker",
+            label="라일락 스티커",
+            description="연성 글꼴에 연보라 글자, 흰 선과 보라 테두리.",
+            sample="너무 귀엽자나...",
+            category="cute",
+            font_name="Yeon Sung",
+            font_size=84,
+            primary_color="#E1BEE7",
+            outline_color="#FFFFFF",
+            outline=5,
+            outline2=2.5,
+            outline2_color="#8E24AA",
+            shadow=0,
+            suffix="♡",
+        ),
+        _builtin(
+            name="cute-lemon",
+            label="큐트 레몬",
+            description="가늘고 귀여운 글꼴에 연노랑 글자.",
+            sample="개 느좋 ☆",
+            category="cute",
+            font_name="Cute Font",
+            font_size=104,
+            primary_color="#FFF59D",
+            outline_color="#5D4037",
+            outline=2,
+            shadow=0,
+        ),
+        _builtin(
+            name="tilt-sticker",
+            label="기울인 스티커",
+            description="통통한 흰 글자에 핑크 선, 흰 테두리를 살짝 기울여서.",
+            sample="우왕 뽑았다!!!!!",
+            category="cute",
+            font_name="Bagel Fat One",
+            font_size=80,
+            outline_color="#FF4081",
+            outline=5,
+            outline2=4,
+            outline2_color="#FFFFFF",
+            shadow=0,
+            angle=4,
+        ),
+        _builtin(
+            name="cyber-cyan",
+            label="사이버 시안",
+            description="오르빗 글꼴에 시안 빛 번짐. 게임·테크 느낌.",
+            sample="파워 충전 완료",
+            category="neon",
+            font_name="Orbit",
+            font_size=72,
+            primary_color="#B2FFFF",
+            outline_color="#00BCD4",
+            outline=3,
+            shadow=0,
+            glow=5,
+        ),
+        _builtin(
+            name="news-bar",
+            label="뉴스 하단 바",
+            description="검정 고딕 흰 글자를 빨간 띠에. 속보·안내 느낌.",
+            sample="속보) 다 품절이라고요...?",
+            category="box",
+            font_name="Gothic A1",
+            font_size=48,
+            bold=True,
+            border_style="box",
+            box_color="#C62828",
+            outline=10,
+            shadow=0,
+            margin_vertical_ratio=0.08,
+        ),
+        _builtin(
+            name="brush-shadow",
+            label="붓 손글씨 핑크 그림자",
+            description="나눔붓 흰 글씨 뒤에 핑크 그림자.",
+            sample="여행은 오랜만이라서 떨리네요",
+            category="handwriting",
+            font_name="Nanum Brush Script",
+            font_size=104,
+            outline_color="#000000",
+            back_color="#FF4081",
+            outline=2,
+            shadow=4,
+        ),
+        _builtin(
+            name="diary",
+            label="일기장 손글씨",
+            description="서툰이야기 글꼴 흰 글씨에 얇은 선. 일기 쓰듯.",
+            sample="아무도 안 물어봤던 오늘의 TMI",
+            category="handwriting",
+            font_name="Poor Story",
+            font_size=88,
+            outline=2,
+            shadow=0,
+            prefix="✧",
+        ),
+        _builtin(
+            name="brush-red",
+            label="붓글씨 빨강",
+            description="독도 붓글씨에 빨간 글자와 그림자. 강한 한마디.",
+            sample="불타는 고구마;;;;",
+            category="handwriting",
+            font_name="Dokdo",
+            font_size=100,
+            primary_color="#FF5252",
+            outline_color="#000000",
+            outline=2,
+            shadow=3,
+        ),
+        _builtin(
+            name="songmyung-cream",
+            label="송명 레트로",
+            description="송명 세리프에 크림색 글자, 자간 살짝. 옛날 잡지 느낌.",
+            sample="완전 레트로 느낌이잖아",
+            category="retro",
+            font_name="Song Myung",
+            font_size=72,
+            primary_color="#FFF3E0",
+            outline_color="#4E342E",
+            outline=2,
+            shadow=0,
+            letter_spacing=2,
+            prefix="✦",
+            suffix="✦",
+        ),
+        _builtin(
+            name="elegant-serif",
+            label="우아한 세리프",
+            description="디필레이아 세리프 흰 글자에 넓은 자간.",
+            sample="제 친구 뻔뀐이에요",
+            category="retro",
+            font_name="Diphylleia",
+            font_size=60,
+            outline=1,
+            shadow=0,
+            letter_spacing=4,
+            suffix="♡",
+        ),
+        _builtin(
+            name="grandiflora-pink",
+            label="그랜디플로라 핑크",
+            description="꽃 같은 세리프에 연핑크 글자, 자주 외곽선.",
+            sample="고급스러운 느낌",
+            category="retro",
+            font_name="Grandiflora One",
+            font_size=68,
+            primary_color="#FCE4EC",
+            outline_color="#880E4F",
+            outline=2,
+            shadow=0,
+            suffix="✦",
         ),
     )
 }
@@ -815,37 +1091,114 @@ def styled_document(
     """
     subs = pysubs2.SSAFile()
     subs.info.update(PlayResX=str(width), PlayResY=str(height), WrapStyle="0")
-    subs.styles["Default"] = template.style(height, font_size=font_size)
+    add_styles(subs, "Default", template, template.style(height, font_size=font_size))
     for cue in cues:
-        subs.append(
-            pysubs2.SSAEvent(
-                start=round(cue.start * 1000),
-                end=round(cue.end * 1000),
-                text=template.event_text(cue.text),
+        for layer, text, back in template.event_text_layers(cue.text):
+            subs.append(
+                pysubs2.SSAEvent(
+                    start=round(cue.start * 1000),
+                    end=round(cue.end * 1000),
+                    layer=layer,
+                    style="Default-Back" if back else "Default",
+                    text=text,
+                )
             )
-        )
     if title:
-        subs.styles["Title"] = template.title_style(height, font_size=font_size)
+        add_styles(subs, "Title", template, template.title_style(height, font_size=font_size))
         # 제목은 영상 전체 동안 보입니다. 자막이 없어도 제목만 보일 수 있습니다.
         # 장식은 대사에만 붙입니다. 제목은 편집기에서 직접 적는 글자입니다.
-        subs.append(
-            pysubs2.SSAEvent(
-                start=0,
-                end=round(duration * 1000),
-                text=template.override_tags() + plain_ass(title),
-                style="Title",
-            )
+        body = plain_ass(title)
+        layers = (
+            [(0, template.override_tags() + body, True), (1, body, False)]
+            if template.layered
+            else [(0, template.override_tags() + body, False)]
         )
+        for layer, text, back in layers:
+            subs.append(
+                pysubs2.SSAEvent(
+                    start=0,
+                    end=round(duration * 1000),
+                    layer=layer,
+                    style="Title-Back" if back else "Title",
+                    text=text,
+                )
+            )
     return subs
+
+
+def add_styles(
+    subs: pysubs2.SSAFile, name: str, template: SubtitleTemplate, style: pysubs2.SSAStyle
+) -> None:
+    """스타일을 등록합니다. 두 겹이면 `<name>-Back`도 함께 넣습니다."""
+    if template.layered:
+        subs.styles[f"{name}-Back"] = template.back_style(style)
+        subs.styles[name] = template.front_style(style)
+    else:
+        subs.styles[name] = style
 
 
 # ---------------------------------------------------------------- 미리보기 시트
 
 SHEET_WIDTH = 1080
 SHEET_COLUMNS = 2
-SHEET_ROW_HEIGHT = 150
+SHEET_ROW_HEIGHT = 170
 SHEET_PADDING = 40
-SHEET_HEADER = 110
+SHEET_HEADER = 120
+SHEET_CATEGORY_HEIGHT = 80
+SHEET_BACKGROUND_STARS = 70
+
+
+# 글꼴마다 글자 폭이 다릅니다. 손글씨·가는 글꼴은 좁아서 같은 크기라도 작아 보이므로
+# 시트에서 더 크게 맞춥니다. 값은 한글 한 자의 폭을 em으로 어림한 것입니다.
+FONT_WIDTH_FACTORS: dict[str, float] = {
+    "Dongle": 0.6,
+    "Cute Font": 0.6,
+    "Nanum Pen": 0.82,
+    "Nanum Brush Script": 0.85,
+    "Poor Story": 0.85,
+    "Hi Melody": 0.85,
+    "Gaegu": 0.85,
+    "Gamja Flower": 0.8,
+    "East Sea Dokdo": 0.8,
+    "Dokdo": 0.85,
+    "Kirang Haerang": 0.9,
+    "Single Day": 0.9,
+    "Diphylleia": 0.95,
+    "Black Han Sans": 1.05,
+    "Gasoek One": 1.05,
+}
+
+
+def estimate_em_width(text: str, font_name: str = "") -> float:
+    """글자 폭을 em으로 어림합니다.
+
+    한글·기호 1em, 라틴 대문자·숫자 0.7em, 소문자 0.55em, 공백 0.35em에 글꼴 폭 계수를
+    곱합니다. 실제 렌더 폭은 재지 않습니다. 시트에서 칸을 넘치지 않게 하는 용도입니다.
+    """
+    total = 0.0
+    for char in text:
+        if char == " ":
+            total += 0.35
+        elif text_width(char) >= 1.0 or unicodedata.east_asian_width(char) == "A":
+            total += 1.0
+        elif char.isupper() or char.isdigit():
+            total += 0.7
+        else:
+            total += 0.55
+    return total * FONT_WIDTH_FACTORS.get(font_name, 1.0)
+
+
+def _fit_font_size(
+    template: SubtitleTemplate, shown: str, cell_width: float, row_height: int
+) -> int:
+    """칸에 들어가는 글자 크기. 자간과 외곽선 두께도 뺍니다."""
+    border = 2 * (template.outline + template.outline2) + 24
+    # 어림이므로 6%를 여유로 둡니다. 넘치면 옆 칸을 침범해 시트가 못 쓰게 됩니다.
+    usable = max(cell_width - border, 40) * 0.94
+    spacing = template.letter_spacing * max(len(shown) - 1, 0)
+    estimate = (usable - spacing) / max(estimate_em_width(shown, template.font_name), 1.0)
+    fit = int(min(template.font_size, estimate, row_height * 0.62))
+    return max(24, fit)
 
 
 def sheet_document(
@@ -856,64 +1209,133 @@ def sheet_document(
     row_height: int = SHEET_ROW_HEIGHT,
     text: str | None = None,
     title: str = "자막 템플릿",
+    grouped: bool = True,
+    stars: int = SHEET_BACKGROUND_STARS,
 ) -> tuple[pysubs2.SSAFile, int]:
     """템플릿마다 예문 한 줄을 격자에 놓은 ASS 문서와 필요한 화면 높이를 돌려줍니다.
 
     한 프레임으로 렌더하면 인스타그램 소개 이미지 같은 한 장짜리 시트가 됩니다.
-    템플릿마다 스타일을 하나씩 만들고 `\\pos`로 칸 가운데에 둡니다. 글자 크기는
-    칸에 맞춰 줄입니다(긴 예문이 옆 칸을 침범하지 않게).
+    템플릿마다 스타일을 만들고(두 겹이면 둘) `\\pos`로 칸 가운데에 둡니다. 글자
+    크기는 칸에 맞춰 줄입니다. `grouped`면 카테고리가 바뀔 때 구분 줄을 넣고,
+    `stars`만큼 흐린 별을 배경에 흩어 놓습니다(같은 자리에 늘 같게 나오도록 고정 씨앗).
     """
     if not templates:
         raise ValueError("시트에 넣을 템플릿이 없습니다.")
     if columns < 1 or width < 200:
         raise ValueError("열 수는 1 이상, 너비는 200 이상이어야 합니다.")
-    rows = -(-len(templates) // columns)
-    height = SHEET_HEADER + rows * row_height + SHEET_PADDING
-    height += height % 2
     cell_width = (width - 2 * SHEET_PADDING) / columns
+    if grouped:
+        # 카테고리 순서로 묶습니다(같은 카테고리 안에서는 받은 순서 유지).
+        order = list(CATEGORY_LABELS)
+        templates = sorted(templates, key=lambda t: order.index(t.category))
 
     subs = pysubs2.SSAFile()
-    subs.info.update(PlayResX=str(width), PlayResY=str(height), WrapStyle="2")
+    subs.info.update(PlayResX=str(width), WrapStyle="2")
     subs.styles["Header"] = pysubs2.SSAStyle(
         fontname="Noto Sans CJK KR",
-        fontsize=40,
+        fontsize=44,
         bold=True,
         primarycolor=pysubs2.Color(255, 255, 255, 0),
-        outlinecolor=pysubs2.Color(0, 0, 0, 0),
         outline=0,
         shadow=0,
         alignment=pysubs2.Alignment.MIDDLE_CENTER,
     )
-    subs.append(
+    subs.styles["Category"] = pysubs2.SSAStyle(
+        fontname="Noto Sans CJK KR",
+        fontsize=30,
+        bold=True,
+        primarycolor=pysubs2.Color(255, 141, 199, 0),
+        outlinecolor=pysubs2.Color(60, 20, 45, 0),
+        outline=0,
+        shadow=0,
+        spacing=2,
+        alignment=pysubs2.Alignment.MIDDLE_CENTER,
+    )
+    subs.styles["Star"] = pysubs2.SSAStyle(
+        fontname="Noto Sans CJK KR",
+        fontsize=34,
+        primarycolor=pysubs2.Color(70, 58, 66, 0),
+        outline=0,
+        shadow=0,
+        alignment=pysubs2.Alignment.MIDDLE_CENTER,
+    )
+    events: list[pysubs2.SSAEvent] = []
+    events.append(
         pysubs2.SSAEvent(
             start=0,
             end=1000,
+            layer=1,
             style="Header",
             text=f"{{\\pos({width / 2:.0f},{SHEET_HEADER / 2:.0f})}}"
             + plain_ass(f"{title} · {len(templates)}종"),
         )
     )
+    y = SHEET_HEADER
+    column = 0
+    current_category: str | None = None
     for index, template in enumerate(templates):
+        if grouped and template.category != current_category:
+            if column:
+                y += row_height
+                column = 0
+            current_category = template.category
+            label = CATEGORY_LABELS[template.category]
+            events.append(
+                pysubs2.SSAEvent(
+                    start=0,
+                    end=1000,
+                    layer=1,
+                    style="Category",
+                    text=f"{{\\pos({width / 2:.0f},{y + SHEET_CATEGORY_HEIGHT / 2:.0f})}}"
+                    + plain_ass(f"— {label} —"),
+                )
+            )
+            y += SHEET_CATEGORY_HEIGHT
         sample = text or template.sample or template.label
         shown = template.decorate(sample)
-        # 칸 너비에 맞춰 글자 크기를 줄입니다. 한글 1자 ≈ 글자 크기 1배 폭으로 어림합니다.
-        widest = max(len(shown), 1)
-        fit = int(min(template.font_size, (cell_width - 2 * template.outline - 40) / widest * 1.4))
-        fit = max(20, min(fit, int(row_height * 0.55)))
-        style = template.style(height, font_size=fit)
+        fit = _fit_font_size(template, shown, cell_width, row_height)
+        style = template.style(SHEET_ROW_HEIGHT, font_size=fit)
         style.alignment = pysubs2.Alignment.MIDDLE_CENTER
         style.marginl = style.marginr = style.marginv = 0
-        style_name = f"T{index}"
-        subs.styles[style_name] = style
-        column, row = index % columns, index // columns
+        name = f"T{index}"
+        add_styles(subs, name, template, style)
         x = SHEET_PADDING + cell_width * (column + 0.5)
-        y = SHEET_HEADER + row_height * (row + 0.5)
+        cy = y + row_height / 2
+        for layer, body, back in template.event_text_layers(sample):
+            events.append(
+                pysubs2.SSAEvent(
+                    start=0,
+                    end=1000,
+                    layer=layer + 1,
+                    style=f"{name}-Back" if back else name,
+                    text=f"{{\\pos({x:.0f},{cy:.0f})}}" + body,
+                )
+            )
+        column += 1
+        if column == columns:
+            column = 0
+            y += row_height
+    if column:
+        y += row_height
+    height = y + SHEET_PADDING
+    height += height % 2
+    subs.info["PlayResY"] = str(height)
+
+    # 배경 별. 글자 뒤(layer 0)에 두고 씨앗을 고정해 렌더마다 같은 자리에 나옵니다.
+    rng = random.Random(4)
+    for _ in range(max(0, stars)):
+        sx, sy = rng.uniform(10, width - 10), rng.uniform(SHEET_HEADER, height - 10)
+        glyph = rng.choice("★★☆✦")
+        size = rng.randint(22, 40)
         subs.append(
             pysubs2.SSAEvent(
                 start=0,
                 end=1000,
-                style=style_name,
-                text=f"{{\\pos({x:.0f},{y:.0f})}}" + template.override_tags() + plain_ass(shown),
+                layer=0,
+                style="Star",
+                text=f"{{\\pos({sx:.0f},{sy:.0f})\\fs{size}}}{glyph}",
             )
         )
+    for event in events:
+        subs.append(event)
     return subs, height

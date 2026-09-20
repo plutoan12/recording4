@@ -48,19 +48,19 @@ python -m pipeline.subtitle_tool --help   # 같은 도구
 
 템플릿은 **영상에 굽는 자막의 모양**입니다. 어떤 자막을 언제 보일지(줄바꿈·분할·구간)는 표시 규칙이 정하고, SRT·VTT 파일에는 모양이 들어가지 않습니다.
 
-내장 템플릿은 카테고리별로 38종입니다. 인스타그램 브이로그 편집자들이 파는 "자막 템플릿 팩"의 흔한 모양(파스텔 상자, 네온 글로우, 픽셀, 통통한 외곽선, 손글씨, 영화 자막, 레트로)을 libass가 그릴 수 있는 값으로 옮긴 것입니다. 전체 목록은 `r4-subtitles templates list`, 실제 렌더 모양은 `r4-subtitles sheet`로 봅니다.
+내장 템플릿은 카테고리별로 54종입니다. 인스타그램 브이로그 편집자들이 파는 "자막 템플릿 팩"의 흔한 모양(파스텔 상자, 네온 글로우, 픽셀, 통통한 외곽선, 손글씨, 영화 자막, 레트로)을 libass가 그릴 수 있는 값으로 옮긴 것입니다. 전체 목록은 `r4-subtitles templates list`, 실제 렌더 모양은 `r4-subtitles sheet`로 봅니다.
 
 | 카테고리 | 이름 | 모양 |
 |---|---|---|
 | 기본 | `default` | 흰 글자에 검은 외곽선. 템플릿 도입 전 렌더와 같은 값이라 기존 편집본의 모양이 바뀌지 않습니다 |
-| 기본 | `shorts-bold`, `yellow`, `top`, `minimal` | 굵은 강조, 예능 노랑, 상단 배치, 얇은 외곽선 |
-| 브이로그 제목 | `vlog-lime`, `vlog-pink`, `fire-red`, `spring-glow` | Black Han Sans 형광 연두·핑크 제목, 번지는 빨강, 봄 느낌 연두 글로우 |
-| 귀여운 외곽선 | `bubble-white`, `bubble-sky`, `bubble-pink`, `round-white`, `mint-pastel` | Bagel Fat One·Dongle·Jua 통통 글자에 두꺼운 외곽선과 ★☆♡ 장식 |
-| 네온·글로우 | `neon-pink`, `neon-blue`, `neon-purple`, `lavender-glow` | 밝은 글자 주변에 색이 번지는 네온사인 |
+| 기본 | `shorts-bold`, `yellow`, `top`, `minimal`, `clean-white` | 굵은 강조, 예능 노랑, 상단 배치, 얇은 외곽선, 선플라워 깔끔 |
+| 브이로그 제목 | `vlog-lime`, `vlog-pink`, `fire-red`, `spring-glow`, `title-sticker`, `pink-sticker`, `solid-shadow` | Black Han Sans·Gasoek One 굵은 제목, 스티커 이중 외곽선, 입체 그림자, 봄 느낌 글로우 |
+| 귀여운 외곽선 | `bubble-white`, `bubble-sky`, `bubble-pink`, `round-white`, `mint-pastel`, `playful-tilt`, `lilac-sticker`, `cute-lemon`, `tilt-sticker` | Bagel Fat One·Dongle·Yeon Sung·Kirang Haerang 통통 글자에 스티커 외곽선, 살짝 기울임, ★☆♡ 장식 |
+| 네온·글로우 | `neon-pink`, `neon-blue`, `neon-purple`, `lavender-glow`, `cyber-cyan` | 밝은 글자 주변에 색이 번지는 네온사인, 오르빗 사이버 |
 | 픽셀 | `pixel-heart`, `pixel-mint`, `pixel-box` | Galmuri 도트 글꼴, 하트 장식, 연노랑 상자 |
-| 상자·카드 | `box`, `pink-cabinet`, `note-yellow`, `note-pink`, `note-blue`, `tmi-blue`, `white-card`, `black-tag`, `cyan-strip` | 파스텔 상자·테두리 카드·검은 태그. 소제목, 짧은 한마디, 제품 정보에 |
-| 손글씨 | `pen-white`, `melody-pink`, `gamja-yellow`, `brush-white` | 나눔손글씨 펜·하이멜로디·감자꽃·독도 붓글씨 |
-| 레트로·세리프 | `movie-serif`, `luxury-serif`, `retro-orange`, `retro-blue-pixel` | 고운바탕 영화 자막, 모이라이 레트로, 파란 도트 |
+| 상자·카드 | `box`, `pink-cabinet`, `note-yellow`, `note-pink`, `note-blue`, `tmi-blue`, `white-card`, `black-tag`, `cyan-strip`, `news-bar` | 파스텔 상자·테두리 카드·검은 태그·빨간 뉴스 바. 소제목, 짧은 한마디, 제품 정보에 |
+| 손글씨 | `pen-white`, `melody-pink`, `gamja-yellow`, `brush-white`, `brush-shadow`, `diary`, `brush-red` | 나눔손글씨 펜·붓, 하이멜로디, 감자꽃, 서툰이야기, 독도 붓글씨 |
+| 레트로·세리프 | `movie-serif`, `luxury-serif`, `retro-orange`, `retro-blue-pixel`, `songmyung-cream`, `elegant-serif`, `grandiflora-pink` | 고운바탕 영화 자막, 모이라이 레트로, 송명·디필레이아·그랜디플로라 세리프, 파란 도트 |
 
 값을 바꾸려면 내보내서 고칩니다.
 
@@ -86,6 +86,8 @@ r4-subtitles burn source.mp4 captions.srt result.mp4 --template mine.json
 | `back_color` | 외곽선 방식의 그림자 색 | 검정 |
 | `box_color` | 상자 방식의 상자 색 | 검정 |
 | `outline`, `shadow` | 0~20. 상자 방식에서는 `outline`이 상자 여백 | 3 / 1 |
+| `outline2`, `outline2_color` | 바깥 테두리(스티커 느낌). 외곽선 방식에서만 그리며 이벤트를 두 겹으로 냅니다 | 0 / 흰색 |
+| `angle` | 글자 기울기(도, -30~30). 양수가 반시계 방향 | 0 |
 | `glow` | 0~20. 글자 주변 번짐(ASS `\blur`). 외곽선 색이 번져 네온처럼 보입니다 | 0 |
 | `border_style` | `outline`(외곽선+그림자), `box`(상자), `box-outline`(상자+테두리) | `outline` |
 | `position`, `horizontal` | `bottom`/`middle`/`top`, `left`/`center`/`right` | `bottom` / `center` |
@@ -105,7 +107,7 @@ r4-subtitles burn source.mp4 captions.srt result.mp4 --template mine.json
 | 글꼴(ASS 이름) | 출처 | 쓰는 템플릿 |
 |---|---|---|
 | Noto Sans CJK KR | 워커 이미지 `fonts-noto-cjk` 패키지 | 기본 5종 |
-| Jua, Black Han Sans, Bagel Fat One, Gaegu, Do Hyeon, Gowun Batang, Nanum Pen, Gugi, Moirai One, Dongle, Single Day, Hi Melody, Gamja Flower, East Sea Dokdo | Google Fonts 저장소(`google/fonts` 커밋 고정) | 브이로그·귀여운·네온·상자·손글씨·레트로 |
+| Jua, Black Han Sans, Bagel Fat One, Gaegu, Do Hyeon, Gowun Batang, Nanum Pen, Gugi, Moirai One, Dongle, Single Day, Hi Melody, Gamja Flower, East Sea Dokdo, Gasoek One, Kirang Haerang, Yeon Sung, Sunflower, Cute Font, Nanum Brush Script, Song Myung, Orbit, Diphylleia, Dokdo, Gothic A1, Poor Story, Grandiflora One | Google Fonts 저장소(`google/fonts` 커밋 고정) | 브이로그·귀여운·네온·상자·손글씨·레트로 |
 | Galmuri11 Regular, Galmuri9 Regular | `quiple/galmuri` 커밋 고정 | 픽셀 |
 
 Nanum Pen Script와 Galmuri는 파일 안의 family 이름이 Google Fonts 이름과 달라(`Nanum Pen`, `Galmuri11 Regular`) 템플릿은 파일 이름을 씁니다. libass는 이름이 다르면 오류 없이 다른 글꼴로 바꿔 그리므로, 내려받기 스크립트가 `fc-scan`으로 이름을 확인하고 `r4-subtitles templates check`가 설치된 컴퓨터에서 다시 확인합니다.
@@ -117,14 +119,14 @@ Nanum Pen Script와 Galmuri는 파일 안의 family 이름이 Google Fonts 이�
 
 ```bash
 r4-subtitles templates check --fonts-dir .fonts                      # 글꼴이 실제로 찾아지는지
-r4-subtitles sheet templates.png --fonts-dir .fonts                  # 38종 전부 한 장 (1080x3000)
+r4-subtitles sheet templates.png --fonts-dir .fonts                  # 54종 전부 한 장 (1080x약 5900)
 r4-subtitles sheet neon.png --category neon pixel --columns 1 --width 720 --text "같은 예문"
 r4-subtitles preview one.png --template neon-pink --text "제발... 제발!!!!!" --height 400
 ```
 
-`sheet`는 인스타그램 소개 이미지처럼 템플릿마다 예문 한 줄을 격자에 놓아 한 프레임으로 렌더합니다. 글자 크기는 칸에 맞춰 줄이므로 실제 영상보다 작게 보일 수 있습니다. CI의 `워커 이미지 빌드`가 실제 글꼴로 시트를 만들어 `subtitle-template-sheet` artifact로 올리고, `templates check`로 글꼴 누락을 잡습니다.
+`sheet`는 인스타그램 소개 이미지처럼 템플릿마다 예문 한 줄을 격자에 놓고 카테고리 구분 줄과 흐린 별 배경을 넣어 한 프레임으로 렌더합니다. 글자 크기는 칸에 맞춰 줄이므로(글꼴별 폭 계수로 어림) 실제 영상보다 작게 보일 수 있습니다. `--columns 1`로 크게 볼 수 있습니다. CI의 `워커 이미지 빌드`가 실제 글꼴로 시트를 만들어 `subtitle-template-sheet` artifact로 올리고, `templates check`로 글꼴 누락을 잡습니다.
 
-관리화면의 템플릿 선택은 같은 글꼴을 Google Fonts CSS로 불러 **CSS로 흉내 낸** 미리보기를 보여 줍니다. 픽셀 글꼴은 Google Fonts에 없어 고정폭으로 대신하고, 글로우·상자는 `text-shadow`·배경으로 근사합니다. 정확한 모양은 시트나 실제 렌더로 확인합니다.
+관리화면의 템플릿 선택은 같은 글꼴을 Google Fonts CSS로 불러 **CSS로 흉내 낸** 미리보기를 보여 줍니다. 픽셀 글꼴은 Google Fonts에 없어 고정폭으로 대신하고, 글로우·상자·바깥 테두리·기울임은 `text-shadow`·배경·`transform`으로 근사합니다. 정확한 모양은 시트나 실제 렌더로 확인합니다.
 
 ## 관리화면·API 연결
 

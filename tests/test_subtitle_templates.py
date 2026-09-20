@@ -127,7 +127,7 @@ def test_every_builtin_uses_an_installed_font_and_a_known_category():
     grouped = templates_by_category()
     assert list(grouped)[0] == "basic" and grouped["basic"][0].name == "default"
     assert sum(len(v) for v in grouped.values()) == len(BUILTIN_TEMPLATES)
-    assert len(BUILTIN_TEMPLATES) >= 30
+    assert len(BUILTIN_TEMPLATES) >= 50
 
 
 def test_font_manifest_is_consistent():
@@ -161,14 +161,23 @@ def test_sheet_places_every_template_in_a_grid_with_its_own_style():
     document, height = sheet_document(templates, width=1080, columns=2)
     assert height % 2 == 0 and height > 150 * (len(templates) // 2)
     assert document.info["PlayResY"] == str(height)
-    events = [e for e in document.events if e.style != "Header"]
+    # 앞 층 이벤트만 셉니다(두 겹 템플릿은 -Back 층이 하나 더 있고, 별·카테고리 줄도 있습니다).
+    events = [e for e in document.events if e.style.startswith("T") and "-Back" not in e.style]
     assert len(events) == len(templates)
     assert all(e.text.startswith("{\\pos(") for e in events)
     assert len({e.style for e in events}) == len(templates)
+    backs = [e for e in document.events if e.style.endswith("-Back")]
+    assert len(backs) == sum(t.layered for t in templates) and all(e.layer == 1 for e in backs)
+    # 받은 순서와 무관하게 카테고리별로 묶여 구분 줄은 카테고리 수만큼입니다.
+    categories = [e for e in document.events if e.style == "Category"]
+    assert len(categories) == len(templates_by_category())
+    assert sum(e.style == "Star" for e in document.events) == 70
     heart = next(e for e in events if "요래 됐습니다" in e.text)
     assert "♡" in heart.text and document.styles[heart.style].fontname == "Galmuri11 Regular"
-    # 글자 크기는 칸에 맞춰 줄어들되 20 아래로는 내려가지 않습니다.
-    assert all(20 <= document.styles[e.style].fontsize <= 82 for e in events)
+    # 글자 크기는 칸에 맞춰 줄어들되 24 아래로는 내려가지 않습니다.
+    assert all(24 <= document.styles[e.style].fontsize <= 106 for e in events)
+    plain, _ = sheet_document(templates[:2], grouped=False, stars=0)
+    assert not any(e.style in ("Category", "Star") for e in plain.events)
     same_text, _ = sheet_document(templates[:3], text="공통 예문", columns=3)
     assert sum("공통 예문" in e.text for e in same_text.events) == 3
     with pytest.raises(ValueError):
@@ -235,7 +244,9 @@ def test_styled_document_keeps_text_safe_and_places_title_for_the_whole_duration
     decorated = styled_document(
         cues, get_template("bubble-white"), width=1080, height=1920, duration=10, title="제목"
     )
-    body, heading = decorated.events
+    # bubble-white는 두 겹이라 이벤트가 넷입니다. 앞 층(layer 1)만 봅니다.
+    front = [e for e in decorated.events if e.layer == 1]
+    body, heading = front
     assert body.text.startswith("★ ") and body.text.endswith(" ☆")
     assert heading.text == "제목"  # 제목에는 장식을 붙이지 않습니다.
     untitled = styled_document(cues, DEFAULT_TEMPLATE, width=2, height=2, duration=1)
@@ -273,3 +284,57 @@ def test_edit_spec_accepts_only_template_names_and_defaults_to_default():
     assert EditSpec.model_validate({"start": 0, "end": 5, "font_size": 64}).font_size == 64
     with pytest.raises(ValidationError):
         EditSpec(start=0, end=5, subtitle_template="../etc")
+
+
+def test_sticker_outline_renders_two_layers_and_keeps_shadow_on_the_back():
+    """바깥 테두리는 ASS에 없어 두 겹으로 냅니다. 뒤 층이 굵은 바깥 색, 앞 층이 원래 선입니다."""
+    template = get_template("bubble-white")
+    assert template.layered and template.outline2 > 0
+    document = styled_document(
+        [Cue(start=0, end=1, text="유행")], template, width=1080, height=1920, duration=1, title="T"
+    )
+    assert [(e.layer, e.style) for e in document.events] == [
+        (0, "Default-Back"),
+        (1, "Default"),
+        (0, "Title-Back"),
+        (1, "Title"),
+    ]
+    back, front = document.styles["Default-Back"], document.styles["Default"]
+    assert back.outline == template.outline + template.outline2
+    assert back.outlinecolor == parse_color(template.outline2_color)
+    assert front.outline == template.outline and front.shadow == 0
+    # 글로우는 뒤 층에만 붙습니다.
+    glowing = template.model_copy(update={"glow": 3})
+    layers = glowing.event_text_layers("x")
+    assert layers[0][1].startswith("{\\blur3}") and not layers[1][1].startswith("{")
+    # 상자 방식이나 outline2=0이면 한 겹입니다.
+    assert not get_template("pink-cabinet").layered
+    assert len(get_template("default").event_text_layers("x")) == 1
+
+
+def test_angle_and_new_fields_reach_the_style():
+    tilted = get_template("playful-tilt")
+    assert tilted.style(1920).angle == -3
+    with pytest.raises(ValidationError):
+        SubtitleTemplate(name="a", label="a", angle=45)
+    with pytest.raises(ValidationError):
+        SubtitleTemplate(name="a", label="a", outline2_color="red")
+
+
+def test_sheet_fit_accounts_for_wide_latin_and_narrow_fonts():
+    from pipeline.subtitle_templates import estimate_em_width
+
+    assert estimate_em_width("TOKYO") > estimate_em_width("tokyo")
+    assert estimate_em_width("한글") == 2.0
+    assert estimate_em_width("한글", "Dongle") < estimate_em_width("한글", "Jua")
+    document, _ = sheet_document(
+        [get_template("vlog-lime"), get_template("round-white")], columns=2
+    )
+    sizes = {
+        e.style: document.styles[e.style].fontsize
+        for e in document.events
+        if e.style.startswith("T") and not e.style.endswith("-Back")
+    }
+    # 좁은 글꼴(Dongle)은 같은 칸에서 더 크게, 넓은 라틴 대문자는 더 작게 맞춥니다.
+    assert sizes["T1"] > sizes["T0"]
+    assert "T0-Back" in document.styles
