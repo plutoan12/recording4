@@ -70,16 +70,32 @@ def main():
     p.add_argument("--candidate", type=Path, required=True)
     p.add_argument("--output", type=Path, required=True)
     args = p.parse_args()
+    # Imported only by the CLI; evaluate() remains usable without script-path setup.
+    from prepare_conversation_evaluation import digest, load_json
+
+    def invalid(reason):
+        return dict(schema=1, verdict="invalid", deploy_allowed=False, reasons=[reason])
+
     try:
-        result = evaluate(
-            json.loads(args.baseline.read_text()), json.loads(args.candidate.read_text())
-        )
+        result = evaluate(load_json(args.baseline), load_json(args.candidate))
+        result["inputs"] = {
+            "baseline_sha256": digest(args.baseline),
+            "candidate_sha256": digest(args.candidate),
+        }
         code = 0 if result["verdict"] == "improved_on_this_corpus" else 2
-    except (ValueError, KeyError, TypeError) as exc:
-        result = dict(schema=1, verdict="invalid", deploy_allowed=False, reasons=[str(exc)])
-        code = 1
-    args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n")
+    except (ValueError, KeyError, TypeError, OSError):
+        # Do not copy filenames or untrusted report content into public logs.
+        result, code = invalid("invalid_input"), 1
+    try:
+        if args.output.exists():
+            if load_json(args.output) != result:
+                raise ValueError("Existing evidence differs")
+        else:
+            args.output.parent.mkdir(parents=True, exist_ok=True)
+            with args.output.open("x", encoding="utf-8") as stream:
+                stream.write(json.dumps(result, ensure_ascii=False, indent=2) + "\n")
+    except (ValueError, TypeError, OSError):
+        result, code = invalid("output_conflict_or_unavailable"), 1
     print(json.dumps(result, ensure_ascii=False))
     raise SystemExit(code)
 

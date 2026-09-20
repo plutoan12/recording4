@@ -134,3 +134,98 @@ def test_batch_rejects_unknown_case_instead_of_silent_empty_success(tmp_path, mo
 
     with pytest.raises(ValueError, match="Unknown evaluation case"):
         run([row()], [row()], tmp_path, [dict(id="missing-0")], [], tmp_path)
+
+
+def cli(tmp_path, baseline, candidate):
+    import subprocess
+    import sys
+
+    (tmp_path / "baseline.json").write_text(baseline, encoding="utf-8")
+    (tmp_path / "candidate.json").write_text(candidate, encoding="utf-8")
+    return subprocess.run(
+        [
+            sys.executable,
+            str(Path(module.__file__)),
+            "--baseline",
+            str(tmp_path / "baseline.json"),
+            "--candidate",
+            str(tmp_path / "candidate.json"),
+            "--output",
+            str(tmp_path / "result.json"),
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=False,
+    )
+
+
+def test_cli_utf8_idempotence_and_conflicting_output_preservation(tmp_path):
+    import json
+
+    baseline = json.dumps([row("한국어・日本語・中文")], ensure_ascii=False)
+    candidate = json.dumps(
+        [row("한국어・日本語・中文", correct=8, unresolved=1)], ensure_ascii=False
+    )
+    assert cli(tmp_path, baseline, candidate).returncode == 0
+    original = (tmp_path / "result.json").read_bytes()
+    assert "한국어" in original.decode("utf-8")
+    assert cli(tmp_path, baseline, candidate).returncode == 0
+    conflict = cli(tmp_path, baseline, baseline)
+    assert conflict.returncode == 1
+    assert json.loads(conflict.stdout)["reasons"] == ["output_conflict_or_unavailable"]
+    assert (tmp_path / "result.json").read_bytes() == original
+
+
+@pytest.mark.parametrize("candidate", ['[{"case":"private","case":"other"}]', "[NaN]", "[]"])
+def test_cli_invalid_input_has_fixed_safe_error(tmp_path, candidate):
+    import json
+
+    result = cli(tmp_path, json.dumps([row()]), candidate)
+    assert result.returncode == 1
+    assert json.loads(result.stdout)["reasons"] == ["invalid_input"]
+    assert "private" not in result.stdout and "Traceback" not in result.stderr
+
+
+def test_cli_missing_file_is_invalid_without_traceback(tmp_path):
+    import json
+    import subprocess
+    import sys
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(Path(module.__file__)),
+            "--baseline",
+            str(tmp_path / "private-missing"),
+            "--candidate",
+            str(tmp_path / "other"),
+            "--output",
+            str(tmp_path / "result.json"),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 1
+    assert json.loads(result.stdout)["verdict"] == "invalid"
+    assert "private-missing" not in result.stdout + result.stderr
+    assert "Traceback" not in result.stderr
+
+
+def test_cli_equal_deltas_from_changed_inputs_do_not_reuse_old_evidence(tmp_path):
+    import json
+
+    assert (
+        cli(tmp_path, json.dumps([row()]), json.dumps([row(correct=8, unresolved=1)])).returncode
+        == 0
+    )
+    original = (tmp_path / "result.json").read_bytes()
+    # Same +1 delta but a different baseline and candidate must create a new artifact.
+    result = cli(
+        tmp_path,
+        json.dumps([row(correct=6, unresolved=3)]),
+        json.dumps([row(correct=7, unresolved=2)]),
+    )
+    assert result.returncode == 1
+    assert (tmp_path / "result.json").read_bytes() == original
