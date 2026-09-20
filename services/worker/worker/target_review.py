@@ -5,8 +5,17 @@ Phrase agreement must never be treated as permission to reassign automatically.
 """
 
 import copy
+import math
 import unicodedata
+from datetime import datetime
 from difflib import SequenceMatcher
+
+VOICE_MATCH_MINIMUM = 0.6
+VOICE_MARGIN_MINIMUM = 0.15
+VISUAL_ACTIVE_SPEAKER_MINIMUM = 0.7
+TIMING_TOLERANCE_SECONDS = 0.02
+VOICE_METHODS = {"speaker_embedding", "human_voice_reference"}
+VISUAL_METHODS = {"active_speaker_detection", "human_visual_review"}
 
 
 def normalized(text):
@@ -59,4 +68,163 @@ def propose_target_reviews(reviews, predictions, *, minimum_phrase=12):
                 )
                 word["needs_review"] = True
                 cue["needs_review"] = True
+    return result
+
+
+def _finite_number(value, name):
+    if isinstance(value, bool) or not isinstance(value, int | float) or not math.isfinite(value):
+        raise ValueError(f"Invalid {name}")
+    return float(value)
+
+
+def _bounded_number(value, name, minimum, maximum):
+    number = _finite_number(value, name)
+    if not minimum <= number <= maximum:
+        raise ValueError(f"Invalid {name}")
+    return number
+
+
+def _evidence_provenance(value, name):
+    method = value.get("method")
+    if method.startswith("human_"):
+        reviewer = value.get("reviewer_id")
+        reviewed_at = value.get("reviewed_at")
+        if (
+            not isinstance(reviewer, str)
+            or not reviewer.strip()
+            or not isinstance(reviewed_at, str)
+        ):
+            raise ValueError(f"Invalid {name} provenance")
+        try:
+            timestamp = datetime.fromisoformat(reviewed_at.replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise ValueError(f"Invalid {name} provenance") from exc
+        if timestamp.tzinfo is None:
+            raise ValueError(f"Invalid {name} provenance")
+        return dict(method=method, reviewer_id=reviewer.strip(), reviewed_at=reviewed_at)
+    revision = value.get("model_revision")
+    if not isinstance(revision, str) or not revision.strip():
+        raise ValueError(f"Invalid {name} provenance")
+    return dict(method=method, model_revision=revision.strip())
+
+
+def qualify_target_reviews(reviews, evidence):
+    """Attach independent voice and visual support without changing assignments.
+
+    Target-ASR text is conditioned on diarization.  A singleton text candidate is
+    therefore only eligible for a later reassignment experiment when an acoustic
+    identity check and an active-speaker check independently name the same target.
+    This function records that eligibility; it never applies the candidate.
+    """
+    result = copy.deepcopy(reviews)
+    indexed = {}
+    for row in evidence:
+        if not isinstance(row, dict):
+            raise ValueError("Invalid independent evidence")
+        cue_index = row.get("cue_index")
+        word_index = row.get("word_index")
+        target = row.get("target")
+        if (
+            isinstance(cue_index, bool)
+            or not isinstance(cue_index, int)
+            or cue_index < 0
+            or isinstance(word_index, bool)
+            or not isinstance(word_index, int)
+            or word_index < 0
+            or not isinstance(target, str)
+            or not target
+        ):
+            raise ValueError("Invalid independent evidence location")
+        if cue_index >= len(result) or word_index >= len(result[cue_index].get("words", [])):
+            raise ValueError("Independent evidence location is outside the review")
+        word = result[cue_index]["words"][word_index]
+        start = _finite_number(row.get("start"), "evidence start")
+        end = _finite_number(row.get("end"), "evidence end")
+        if (
+            end <= start
+            or abs(start - _finite_number(word.get("start"), "word start"))
+            > TIMING_TOLERANCE_SECONDS
+            or abs(end - _finite_number(word.get("end"), "word end")) > TIMING_TOLERANCE_SECONDS
+            or normalized(row.get("text", "")) != normalized(word.get("text", ""))
+        ):
+            raise ValueError("Independent evidence does not match the reviewed word")
+        key = (cue_index, word_index, target)
+        if key in indexed:
+            raise ValueError("Duplicate independent evidence")
+        indexed[key] = row
+
+    consumed = set()
+    for cue_index, cue in enumerate(result):
+        for word_index, word in enumerate(cue.get("words", [])):
+            review = word.get("target_asr_review")
+            if not review:
+                continue
+            if review.get("applied") is True:
+                raise ValueError("Applied target review cannot be requalified")
+            consumed.update(key for key in indexed if key[:2] == (cue_index, word_index))
+            candidates = review.get("candidates", [])
+            review.pop("voice_provenance", None)
+            review.pop("visual_provenance", None)
+            review.update(
+                independent_voice_verified=False,
+                independent_visual_verified=False,
+                qualified_for_reassignment=False,
+                applied=False,
+            )
+            reasons = []
+            if len(candidates) != 1:
+                reasons.append("ambiguous_target_text")
+            else:
+                target = candidates[0]
+                row = indexed.get((cue_index, word_index, target))
+                conflicting = [
+                    key[2]
+                    for key in indexed
+                    if key[:2] == (cue_index, word_index) and key[2] != target
+                ]
+                if conflicting:
+                    reasons.append("independent_target_conflict")
+                if row is None:
+                    reasons.append("missing_independent_evidence")
+                else:
+                    voice = row.get("voice")
+                    visual = row.get("visual")
+                    if not isinstance(voice, dict) or voice.get("method") not in VOICE_METHODS:
+                        reasons.append("invalid_voice_provenance")
+                    else:
+                        review["voice_provenance"] = _evidence_provenance(voice, "voice")
+                        match = _bounded_number(voice.get("match"), "voice match", -1, 1)
+                        margin = _bounded_number(voice.get("margin"), "voice margin", 0, 2)
+                        if match < VOICE_MATCH_MINIMUM:
+                            reasons.append("voice_match_below_threshold")
+                        if margin < VOICE_MARGIN_MINIMUM:
+                            reasons.append("ambiguous_voice_identity")
+                        if match >= VOICE_MATCH_MINIMUM and margin >= VOICE_MARGIN_MINIMUM:
+                            review["independent_voice_verified"] = True
+                    if not isinstance(visual, dict) or visual.get("method") not in VISUAL_METHODS:
+                        reasons.append("invalid_visual_provenance")
+                    else:
+                        review["visual_provenance"] = _evidence_provenance(visual, "visual")
+                        active = _bounded_number(
+                            visual.get("active_speaker_score"), "active speaker score", 0, 1
+                        )
+                        if active < VISUAL_ACTIVE_SPEAKER_MINIMUM:
+                            reasons.append("visual_speaker_below_threshold")
+                        else:
+                            review["independent_visual_verified"] = True
+                    voice_provenance = review.get("voice_provenance", {})
+                    visual_provenance = review.get("visual_provenance", {})
+                    if (
+                        voice_provenance.get("method", "").startswith("human_")
+                        and visual_provenance.get("method", "").startswith("human_")
+                        and voice_provenance.get("reviewer_id")
+                        == visual_provenance.get("reviewer_id")
+                    ):
+                        reasons.append("human_evidence_not_independent")
+            review["qualification_reasons"] = reasons
+            review["qualified_for_reassignment"] = not reasons
+            word["needs_review"] = True
+            cue["needs_review"] = True
+    if set(indexed) != consumed:
+        raise ValueError("Independent evidence has no target-ASR proposal")
     return result

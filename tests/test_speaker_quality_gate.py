@@ -136,6 +136,196 @@ def test_batch_rejects_unknown_case_instead_of_silent_empty_success(tmp_path, mo
         run([row()], [row()], tmp_path, [dict(id="missing-0")], [], tmp_path)
 
 
+def test_batch_connects_independent_evidence_without_changing_assignments(tmp_path, monkeypatch):
+    import json
+
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[1] / "scripts"))
+    from automate_speaker_review import run
+
+    reviews = [
+        dict(
+            text="a sufficiently long phrase",
+            overlaps=[dict(start=0, end=1)],
+            needs_review=True,
+            words=[
+                dict(
+                    text="a sufficiently long phrase",
+                    start=0,
+                    end=1,
+                    speaker="A",
+                    timing_valid=True,
+                    needs_review=True,
+                )
+            ],
+        )
+    ]
+    (tmp_path / "clean-words.json").write_text(json.dumps(reviews), encoding="utf-8")
+    summary = run(
+        [row()],
+        [row(correct=8, unresolved=1)],
+        tmp_path,
+        [
+            dict(
+                id="clean-0",
+                sha256="a" * 64,
+                hypothesis=reviews[0]["text"],
+                generation_possibly_truncated=False,
+            )
+        ],
+        [dict(id="clean-0", target="B")],
+        tmp_path / "output",
+        [
+            dict(
+                case="clean",
+                source_sha256="a" * 64,
+                cue_index=0,
+                word_index=0,
+                target="B",
+                text=reviews[0]["text"],
+                start=0,
+                end=1,
+                voice=dict(
+                    method="speaker_embedding",
+                    model_revision="voice-v1",
+                    match=0.8,
+                    margin=0.2,
+                ),
+                visual=dict(
+                    method="human_visual_review",
+                    reviewer_id="reviewer-1",
+                    reviewed_at="2026-09-20T13:00:00+09:00",
+                    active_speaker_score=1,
+                ),
+            )
+        ],
+    )
+    assert summary["schema"] == 2
+    assert summary["independent_evidence_status"] == "evaluated"
+    assert summary["cases"][0]["independently_qualified_words"] == 1
+    assert summary["changed_assignments"] == 0
+    review = json.loads((tmp_path / "output" / "clean-review.json").read_text())
+    assert review[0]["words"][0]["speaker"] == "A"
+    assert review[0]["words"][0]["target_asr_review"]["qualified_for_reassignment"] is True
+
+
+def test_batch_marks_independent_evidence_as_absent(tmp_path, monkeypatch):
+    import json
+
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[1] / "scripts"))
+    from automate_speaker_review import run
+
+    reviews = [dict(text="short", overlaps=[], needs_review=False, words=[])]
+    (tmp_path / "clean-words.json").write_text(json.dumps(reviews), encoding="utf-8")
+    summary = run(
+        [row()],
+        [row()],
+        tmp_path,
+        [
+            dict(
+                id="clean-0",
+                sha256="a" * 64,
+                hypothesis="short",
+                generation_possibly_truncated=False,
+            )
+        ],
+        [dict(id="clean-0", target="A")],
+        tmp_path / "output",
+    )
+    assert summary["independent_evidence_status"] == "absent"
+    assert summary["cases"][0]["independently_qualified_words"] is None
+
+
+def test_batch_rejects_independent_evidence_for_changed_audio(tmp_path, monkeypatch):
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[1] / "scripts"))
+    from automate_speaker_review import run
+
+    with pytest.raises(ValueError, match="audio changed"):
+        run(
+            [row()],
+            [row()],
+            tmp_path,
+            [
+                dict(
+                    id="clean-0",
+                    sha256="a" * 64,
+                    hypothesis="text",
+                    generation_possibly_truncated=False,
+                )
+            ],
+            [dict(id="clean-0", target="A")],
+            tmp_path,
+            [dict(case="clean", source_sha256="b" * 64)],
+        )
+
+
+def test_batch_rejects_independent_evidence_without_target_asr_case(tmp_path, monkeypatch):
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[1] / "scripts"))
+    from automate_speaker_review import run
+
+    with pytest.raises(ValueError, match="no target-ASR case"):
+        run(
+            [row()],
+            [row()],
+            tmp_path,
+            [],
+            [],
+            tmp_path,
+            [dict(case="clean")],
+        )
+
+
+@pytest.mark.parametrize("evidence", [{}, False, "rows"])
+def test_batch_rejects_non_list_independent_evidence(tmp_path, monkeypatch, evidence):
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[1] / "scripts"))
+    from automate_speaker_review import run
+
+    with pytest.raises(ValueError, match="must be a list"):
+        run([row()], [row()], tmp_path, [], [], tmp_path, evidence)
+
+
+def test_cli_rejects_json_null_independent_evidence_as_invalid(tmp_path):
+    import json
+    import subprocess
+    import sys
+
+    names = ["baseline", "candidate", "predictions", "manifest"]
+    for name in names:
+        (tmp_path / f"{name}.json").write_text("[]", encoding="utf-8")
+    (tmp_path / "evidence.json").write_text("null", encoding="utf-8")
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(Path(__file__).resolve().parents[1] / "scripts/automate_speaker_review.py"),
+            "--baseline",
+            str(tmp_path / "baseline.json"),
+            "--candidate",
+            str(tmp_path / "candidate.json"),
+            "--reviews-dir",
+            str(tmp_path),
+            "--predictions",
+            str(tmp_path / "predictions.json"),
+            "--manifest",
+            str(tmp_path / "manifest.json"),
+            "--output",
+            str(tmp_path / "output"),
+            "--independent-evidence",
+            str(tmp_path / "evidence.json"),
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=False,
+        env={"PYTHONPATH": "services/worker:services/api:packages/pipeline"},
+        cwd=Path(__file__).resolve().parents[1],
+    )
+    assert result.returncode == 1
+    assert json.loads(result.stdout)["status"] == "invalid"
+    assert (
+        json.loads((tmp_path / "output" / "summary.json").read_text(encoding="utf-8"))["status"]
+        == "invalid"
+    )
+
+
 def cli(tmp_path, baseline, candidate):
     import subprocess
     import sys
