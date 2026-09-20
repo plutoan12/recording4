@@ -1,0 +1,356 @@
+{
+  "review_cases": [
+    {
+      "case": "clean",
+      "intervals": 9,
+      "seconds": 1.889312499999995,
+      "retry_windows": 0,
+      "new_review_words": 4,
+      "assignments_changed": 0
+    },
+    {
+      "case": "noise_20db_seed17",
+      "intervals": 10,
+      "seconds": 1.3168124999999975,
+      "retry_windows": 0,
+      "new_review_words": 2,
+      "assignments_changed": 0
+    },
+    {
+      "case": "noise_20db_seed29",
+      "intervals": 9,
+      "seconds": 1.1943749999999937,
+      "retry_windows": 0,
+      "new_review_words": 3,
+      "assignments_changed": 0
+    },
+    {
+      "case": "noise_10db_seed17",
+      "intervals": 9,
+      "seconds": 0.7823749999999858,
+      "retry_windows": 0,
+      "new_review_words": 6,
+      "assignments_changed": 0
+    },
+    {
+      "case": "noise_10db_seed29",
+      "intervals": 9,
+      "seconds": 1.0086874999999946,
+      "retry_windows": 0,
+      "new_review_words": 5,
+      "assignments_changed": 0
+    },
+    {
+      "case": "noise_0db_seed17",
+      "intervals": 11,
+      "seconds": 0.7475000000000018,
+      "retry_windows": 0,
+      "new_review_words": 7,
+      "assignments_changed": 0
+    },
+    {
+      "case": "noise_0db_seed29",
+      "intervals": 11,
+      "seconds": 0.9281249999999994,
+      "retry_windows": 0,
+      "new_review_words": 7,
+      "assignments_changed": 0
+    },
+    {
+      "case": "overlap_25pct",
+      "intervals": 9,
+      "seconds": 1.354374999999996,
+      "retry_windows": 4,
+      "new_review_words": 3,
+      "assignments_changed": 0
+    },
+    {
+      "case": "overlap_25pct_noise10db",
+      "intervals": 9,
+      "seconds": 0.983687499999996,
+      "retry_windows": 4,
+      "new_review_words": 4,
+      "assignments_changed": 0
+    },
+    {
+      "case": "overlap_50pct",
+      "intervals": 9,
+      "seconds": 4.897843749999998,
+      "retry_windows": 5,
+      "new_review_words": 17,
+      "assignments_changed": 0
+    },
+    {
+      "case": "overlap_50pct_noise10db",
+      "intervals": 11,
+      "seconds": 4.878750000000001,
+      "retry_windows": 5,
+      "new_review_words": 16,
+      "assignments_changed": 0
+    }
+  ],
+  "character_detection": [
+    {
+      "case": "clean",
+      "correct": 399,
+      "wrong": 0,
+      "unresolved": 0,
+      "flagged_correct": 14,
+      "flagged_wrong": 0,
+      "flagged_unresolved": 0
+    },
+    {
+      "case": "noise_20db_seed17",
+      "correct": 399,
+      "wrong": 0,
+      "unresolved": 0,
+      "flagged_correct": 8,
+      "flagged_wrong": 0,
+      "flagged_unresolved": 0
+    },
+    {
+      "case": "noise_20db_seed29",
+      "correct": 399,
+      "wrong": 0,
+      "unresolved": 0,
+      "flagged_correct": 13,
+      "flagged_wrong": 0,
+      "flagged_unresolved": 0
+    },
+    {
+      "case": "noise_10db_seed17",
+      "correct": 399,
+      "wrong": 0,
+      "unresolved": 0,
+      "flagged_correct": 26,
+      "flagged_wrong": 0,
+      "flagged_unresolved": 0
+    },
+    {
+      "case": "noise_10db_seed29",
+      "correct": 399,
+      "wrong": 0,
+      "unresolved": 0,
+      "flagged_correct": 23,
+      "flagged_wrong": 0,
+      "flagged_unresolved": 0
+    },
+    {
+      "case": "noise_0db_seed17",
+      "correct": 397,
+      "wrong": 0,
+      "unresolved": 2,
+      "flagged_correct": 31,
+      "flagged_wrong": 0,
+      "flagged_unresolved": 2
+    },
+    {
+      "case": "noise_0db_seed29",
+      "correct": 397,
+      "wrong": 0,
+      "unresolved": 2,
+      "flagged_correct": 31,
+      "flagged_wrong": 0,
+      "flagged_unresolved": 2
+    },
+    {
+      "case": "overlap_25pct",
+      "correct": 336,
+      "wrong": 0,
+      "unresolved": 63,
+      "flagged_correct": 17,
+      "flagged_wrong": 0,
+      "flagged_unresolved": 45
+    },
+    {
+      "case": "overlap_25pct_noise10db",
+      "correct": 336,
+      "wrong": 0,
+      "unresolved": 63,
+      "flagged_correct": 19,
+      "flagged_wrong": 0,
+      "flagged_unresolved": 49
+    },
+    {
+      "case": "overlap_50pct",
+      "correct": 153,
+      "wrong": 56,
+      "unresolved": 190,
+      "flagged_correct": 15,
+      "flagged_wrong": 56,
+      "flagged_unresolved": 34
+    },
+    {
+      "case": "overlap_50pct_noise10db",
+      "correct": 153,
+      "wrong": 53,
+      "unresolved": 193,
+      "flagged_correct": 15,
+      "flagged_wrong": 53,
+      "flagged_unresolved": 48
+    }
+  ],
+  "totals": {
+    "correct": 3767,
+    "wrong": 109,
+    "unresolved": 513,
+    "flagged_correct": 212,
+    "flagged_wrong": 109,
+    "flagged_unresolved": 180
+  },
+  "dicow": [
+    {
+      "model": "baseline",
+      "condition": "overlap_25pct",
+      "completed": 2,
+      "expected": 2,
+      "errors": 2,
+      "reference_characters": 399,
+      "cer": 0.005012531328320802,
+      "possibly_truncated": false
+    },
+    {
+      "model": "baseline",
+      "condition": "overlap_50pct",
+      "completed": 2,
+      "expected": 2,
+      "errors": 159,
+      "reference_characters": 399,
+      "cer": 0.39849624060150374,
+      "possibly_truncated": false
+    },
+    {
+      "model": "sortformer",
+      "condition": "overlap_25pct",
+      "completed": 2,
+      "expected": 2,
+      "errors": 3,
+      "reference_characters": 399,
+      "cer": 0.007518796992481203,
+      "possibly_truncated": false
+    },
+    {
+      "model": "sortformer",
+      "condition": "overlap_50pct",
+      "completed": 2,
+      "expected": 2,
+      "errors": 6,
+      "reference_characters": 399,
+      "cer": 0.015037593984962405,
+      "possibly_truncated": false
+    }
+  ],
+  "miss_diagnosis": {
+    "baseline": {
+      "groups": {
+        "all": {
+          "reference_speaker_seconds": 38.92,
+          "missed_speaker_seconds": 7.436531249999996,
+          "miss_rate": 0.19107223150051378
+        },
+        "single_speaker": {
+          "reference_speaker_seconds": 32.38000000000001,
+          "missed_speaker_seconds": 5.439437499999999,
+          "miss_rate": 0.16798756948733776
+        },
+        "all_active_turns_le_0.5s": {
+          "reference_speaker_seconds": 2.4000000000000075,
+          "missed_speaker_seconds": 1.3206875000000036,
+          "miss_rate": 0.5502864583333331
+        },
+        "mixture_below_minus40_dbfs": {
+          "reference_speaker_seconds": 32.71000000000003,
+          "missed_speaker_seconds": 6.397781250000021,
+          "miss_rate": 0.19559098899419183
+        },
+        "mixture_minus40_to_minus30_dbfs": {
+          "reference_speaker_seconds": 5.009999999999952,
+          "missed_speaker_seconds": 0.4987499999999727,
+          "miss_rate": 0.09955089820358833
+        },
+        "includes_longer_turn": {
+          "reference_speaker_seconds": 36.519999999999996,
+          "missed_speaker_seconds": 6.115843749999993,
+          "miss_rate": 0.16746560104052555
+        },
+        "mixture_at_least_minus30_dbfs": {
+          "reference_speaker_seconds": 1.2000000000000206,
+          "missed_speaker_seconds": 0.5400000000000027,
+          "miss_rate": 0.4499999999999945
+        },
+        "overlap": {
+          "reference_speaker_seconds": 6.539999999999992,
+          "missed_speaker_seconds": 1.9970937499999977,
+          "miss_rate": 0.3053660168195719
+        }
+      },
+      "acoustic_frame_seconds": 0.02,
+      "causal_conclusion": false,
+      "deploy_allowed": false
+    },
+    "v21": {
+      "groups": {
+        "all": {
+          "reference_speaker_seconds": 38.92,
+          "missed_speaker_seconds": 18.910000000000014,
+          "miss_rate": 0.48586844809866425
+        },
+        "single_speaker": {
+          "reference_speaker_seconds": 32.38000000000001,
+          "missed_speaker_seconds": 14.590000000000028,
+          "miss_rate": 0.4505867819641762
+        },
+        "all_active_turns_le_0.5s": {
+          "reference_speaker_seconds": 2.4000000000000075,
+          "missed_speaker_seconds": 0.7299999999999995,
+          "miss_rate": 0.30416666666666553
+        },
+        "mixture_below_minus40_dbfs": {
+          "reference_speaker_seconds": 32.71000000000003,
+          "missed_speaker_seconds": 16.480000000000043,
+          "miss_rate": 0.5038214613268123
+        },
+        "mixture_minus40_to_minus30_dbfs": {
+          "reference_speaker_seconds": 5.009999999999952,
+          "missed_speaker_seconds": 1.4499999999999709,
+          "miss_rate": 0.28942115768462773
+        },
+        "includes_longer_turn": {
+          "reference_speaker_seconds": 36.519999999999996,
+          "missed_speaker_seconds": 18.180000000000014,
+          "miss_rate": 0.4978094194961669
+        },
+        "mixture_at_least_minus30_dbfs": {
+          "reference_speaker_seconds": 1.2000000000000206,
+          "missed_speaker_seconds": 0.9800000000000004,
+          "miss_rate": 0.816666666666653
+        },
+        "overlap": {
+          "reference_speaker_seconds": 6.539999999999992,
+          "missed_speaker_seconds": 4.319999999999986,
+          "miss_rate": 0.660550458715595
+        }
+      },
+      "acoustic_frame_seconds": 0.02,
+      "causal_conclusion": false,
+      "deploy_allowed": false
+    }
+  },
+  "model_revision": "00a09c622bf58c34fdc76c3b5676f4da706f2a8e",
+  "inference": {
+    "device": "cpu",
+    "dtype": "float32",
+    "quantized": false,
+    "ctc_weight": 0,
+    "threads": 2,
+    "max_new_tokens": 200
+  },
+  "private_evidence_sha256": {
+    "mac-dicow-manifest.json": "560573e41e4bee99e7bcfe4a828cf4b5af89187f195556ff68a9ac48014420d1",
+    "mac-dicow-results.json": "5e8054df89c52f5662886cfc577ba1561d7b78f73c659ffb33c67151ec924420",
+    "character-detection.json": "a3405431d169dcac2cf858e36962f3655b30c4dfec36d288a5441657df01f049",
+    "summary.json": "78858eeb84bcf21b7d24292b9c2ec142dfddf0b265a419d7720dab55b9da64aa"
+  },
+  "automatic_reassignment": false,
+  "deploy_allowed": false
+}
