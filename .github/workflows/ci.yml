@@ -10,6 +10,19 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  der-evaluation:
+    name: DER 채점 검증
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: scripts/requirements-der-evaluation.txt
+      - run: pip install -r scripts/requirements-der-evaluation.txt
+      - run: python -m pytest --noconftest tests/test_conversation_der.py -q
+
   python:
     name: 파이썬 검사
     runs-on: ubuntu-latest

@@ -83,3 +83,23 @@ python scripts/compare_conversation_evaluation.py \
 이 도구는 이미 계산된 화자 배정 문자 점수를 검증합니다. 모델 추론·독립 화자 채점·DER/CER 생성기는 아직 연결하지 않았습니다. 잘못 계산하거나 꾸민 점수의 진위를 이 비교기로 보장할 수 없습니다. 기존 11조건 회귀 검사도 별도로 통과해야 하며 이 결과만으로 운영을 바꾸지 않습니다.
 
 기존 11조건용 `check_speaker_quality.py` 단독 CLI도 같은 엄격 JSON/UTF-8/덮어쓰기 방어를 적용합니다. 정상 출력의 `inputs`에는 기준·후보 파일 SHA가 있어 같은 변화량이더라도 다른 입력이면 새 출력 경로가 필요합니다. 기존 SHA 없는 결과는 보존하며 자동 덮어쓰지 않습니다. `invalid` 출력은 `schema/verdict/deploy_allowed/reasons`만 있으므로 종료 1 또는 invalid를 먼저 확인하고 delta/cases를 읽지 않아야 합니다.
+
+## 독립 DER 채점 연결
+
+`scripts/score_conversation_diarization.py`가 저장된 예측 화자 구간과 사람 정답을 [pyannote.metrics](https://pyannote.github.io/pyannote-metrics/reference.html#diarization)로 채점합니다. 새 모델 추론은 하지 않습니다. collar 0·겹말 포함, manifest 전체 구간의 명시적 UEM을 사용합니다. 다른 화자 이름은 최적 대응으로 비교하며 같은 화자의 중복 트랙은 합칩니다. 구간 밖/잘못된 시각을 잘라 숨기지 않고 거부합니다.
+
+평가 전용 별도 Python 3.12 환경에서 `pip install -r scripts/requirements-der-evaluation.txt`로 검증한 라이브러리 버전을 설치합니다. 운영/개발 환경과 NumPy 버전이 다르므로 같은 환경에 덮어 설치하지 않습니다. CI의 **DER 채점 검증** 작업도 별도 환경에서 10개 테스트를 실행합니다. 토큰·모델 다운로드·유료 API 없이 수행합니다.
+
+```bash
+python scripts/score_conversation_diarization.py \
+  --manifest /비공개/평가자료/manifest.json --root /비공개/평가자료 \
+  --lock /비공개/평가자료/cohort-lock.json \
+  --predictions /비공개/평가자료/diarization.json \
+  --output /비공개/평가자료/der.json
+```
+
+예측 파일은 `schema: 1`, `cohort_sha256`(비교 모듈의 fingerprint(lock)), 고정 `model_revision`, `cases`를 갖습니다. 각 case는 `id`, `audio_sha256`, `status`, `turns`이며 각 turn은 `start/end/speaker`입니다. status는 succeeded/failed/rejected이고 실패/거부의 turns는 빈 배열이어야 합니다. 모든 코호트 조건을 포함해야 합니다. 실패도 정답 발화 시간 분모를 보존하며 누락으로 채점하고 실패 개수를 함께 보고합니다.
+
+DER 결과는 전체·언어별 missed detection/false alarm/confusion/total 초와 시간 가중 DER, 조건별 수치, 평가 버전, 입력 지문을 기록합니다. 원문 대사와 화자 이름은 출력하지 않습니다. 기존 다른 결과는 덮어쓰지 않습니다. 정상 채점 종료 0, 실패/거부 포함 2, 무효 입력/출력/의존성 부재 1이며 배포 승인은 항상 false입니다.
+
+테스트 fixture에서 정답 화자 이름 변경은 DER 0, 겹말 누락 2초+무음 오검출 1초/정답 발화 4초는 DER 0.75, 예측 없음은 누락률 1.0을 확인했습니다. 이는 채점기 검증으로 실제 영상 품질 개선 실측이 아닙니다. 실제 네 언어 자료/모델 결과 연결은 남아 있습니다. DER을 기존 문자 화자 배정 정답/오배정 수치로 바꾸어 쓰지 않습니다. CER과 문자 화자 독립 채점도 별도 후속 과제입니다.
