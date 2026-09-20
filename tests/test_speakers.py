@@ -293,3 +293,29 @@ def test_partial_alignment_cannot_match_inside_another_word():
         [cue], [SpeakerTurn(0, 2, "A")], [[WordTiming(0, 1, "one"), WordTiming(1, 2, "speaks")]]
     )[0]
     assert [w["speaker"] for w in result["words"]] == [None, "A"]
+
+
+def test_word_coverage_experiment_preserves_default_and_denominator():
+    from pipeline.alignment import WordTiming
+    from pipeline.speakers import review_speakers
+
+    cue = Cue(start=0, end=1, text="hello")
+    words = [[WordTiming(0, 1, "hello")]]
+    turns = [SpeakerTurn(0, 0.1, "A")] * 10
+    assert review_speakers([cue], turns, words)[0]["words"][0]["speaker"] == "A"
+    candidate = review_speakers([cue], turns, words, minimum_word_coverage=0.8)[0]
+    assert candidate["words"][0]["speaker"] is None
+    assert candidate["words"][0]["text"] == "hello"
+    assert candidate["needs_review"]
+    supported = review_speakers(
+        [cue], [SpeakerTurn(0, 0.8, "A")], words, minimum_word_coverage=0.8
+    )[0]
+    assert supported["words"][0]["speaker"] == "A"
+
+
+def test_word_coverage_experiment_rejects_invalid_threshold():
+    from pipeline.speakers import review_speakers
+
+    for value in [True, -1, 1.1, float("nan"), float("inf"), "0.8"]:
+        with pytest.raises(ValueError):
+            review_speakers([], [], [], minimum_word_coverage=value)

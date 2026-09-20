@@ -14,10 +14,11 @@ from pipeline.editing import Cue
 from pipeline.speakers import MULTIPLE_SPEAKERS, SpeakerTurn, review_speakers
 
 
-def score(words, turns, duration=120):
+def score(words, turns, duration=120, *, minimum_word_coverage=0.0):
     from pyannote.core import Annotation, Segment, Timeline
     from pyannote.metrics.diarization import DiarizationErrorRate
 
+    review_speakers([], [], [], minimum_word_coverage=minimum_word_coverage)
     # Use the same strict fixed-window reference/prediction validation as DER.
     der = score_segments(words, turns, 0, duration)
 
@@ -47,7 +48,11 @@ def score(words, turns, duration=120):
             continue
         cue = Cue(start=w["start"], end=w["end"], text=text)
         review = review_speakers(
-            [cue], predictions, [[WordTiming(w["start"], w["end"], text)]], stage=2
+            [cue],
+            predictions,
+            [[WordTiming(w["start"], w["end"], text)]],
+            stage=2,
+            minimum_word_coverage=minimum_word_coverage,
         )[0]
         assigned = review["words"][0]["speaker"] if len(review["words"]) == 1 else None
         kind = (
@@ -75,6 +80,7 @@ def score(words, turns, duration=120):
                 weak_coverage[kind] += size
     return dict(
         **counts,
+        minimum_word_coverage=minimum_word_coverage,
         total_characters=sum(counts.values()),
         boundary_unresolved_characters=boundary,
         assigned_characters_below_80_percent_coverage=weak_coverage,
@@ -100,6 +106,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for key in ("reference", "prediction", "output"):
         parser.add_argument("--" + key, type=Path, required=True)
+    parser.add_argument("--minimum-word-coverage", type=float, default=0.0)
     args = parser.parse_args()
     reference, prediction = load_json(args.reference), load_json(args.prediction)
     validate_reference(reference)
@@ -107,7 +114,12 @@ def main():
         raise ValueError(
             "Different audio; analysis copies require a separate provenance comparison"
         )
-    result = score(reference["segments"], prediction["turns"], reference["evaluation_end"])
+    result = score(
+        reference["segments"],
+        prediction["turns"],
+        reference["evaluation_end"],
+        minimum_word_coverage=args.minimum_word_coverage,
+    )
     result["sha256"] = {k: sha256(getattr(args, k)) for k in ("reference", "prediction")}
     write_private_json(args.output, result)
     print(result)

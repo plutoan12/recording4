@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 from pipeline.editing import Cue
@@ -162,10 +163,17 @@ def turns_from_labels(
 MULTIPLE_SPEAKERS = "복수 화자"
 
 
-def review_speakers(cues, turns, words_by_cue, *, stage=2):
+def review_speakers(cues, turns, words_by_cue, *, stage=2, minimum_word_coverage=0.0):
     """단어마다 근거가 있는 단일 화자만 배정합니다. 불확실하면 검수합니다."""
     from pipeline.alignment import squeeze
 
+    if (
+        isinstance(minimum_word_coverage, bool)
+        or not isinstance(minimum_word_coverage, int | float)
+        or not math.isfinite(minimum_word_coverage)
+        or not 0 <= minimum_word_coverage <= 1
+    ):
+        raise ValueError("Invalid minimum word coverage")
     if len(cues) != len(words_by_cue):
         raise ValueError("대본과 단어 정렬 개수가 다릅니다.")
     reviewed = []
@@ -248,6 +256,19 @@ def review_speakers(cues, turns, words_by_cue, *, stage=2):
                     best = max(durations, key=durations.get)
                     if durations[best] / (word.end - word.start) >= 0.8:
                         label = best
+            # Opt-in experiment: a tiny intersection is insufficient for a whole word.
+            # Do not relabel from neighbouring text or count duplicate tracks twice.
+            if minimum_word_coverage and label not in (None, MULTIPLE_SPEAKERS):
+                edge, covered = word.start, 0.0
+                for left, right in sorted(
+                    (max(word.start, t.start), min(word.end, t.end))
+                    for t in relevant
+                    if t.speaker == label and _overlap(word.start, word.end, t) > 0
+                ):
+                    covered += max(0.0, right - max(edge, left))
+                    edge = max(edge, right)
+                if covered / (word.end - word.start) < minimum_word_coverage:
+                    label = None
             assignments.append(
                 dict(
                     start=word.start if valid_word else cue.start,

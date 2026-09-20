@@ -47,7 +47,10 @@ def main():
     parser.add_argument("--stage", type=int, choices=[1, 2, 3, 4], default=1)
     parser.add_argument("--cache", type=Path)
     parser.add_argument("--reconsider", action="store_true")
+    parser.add_argument("--minimum-word-coverage", type=float, default=0.0)
     args = parser.parse_args()
+    if args.minimum_word_coverage and args.stage != 2:
+        parser.error("--minimum-word-coverage requires --stage 2")
     if args.reconsider and args.stage != 4:
         parser.error("--reconsider requires --stage 4")
     pieces = []
@@ -93,7 +96,13 @@ def main():
                     )
                 )
         old = assign_speakers(cues, turns)
-        reviews = review_speakers(cues, turns, words, stage=min(args.stage, 2))
+        reviews = review_speakers(
+            cues,
+            turns,
+            words,
+            stage=min(args.stage, 2),
+            minimum_word_coverage=args.minimum_word_coverage,
+        )
         if args.stage >= 3:
             from worker.speaker_recovery import recover_speaker_reviews
 
@@ -161,6 +170,7 @@ def main():
         r = {
             "case": case["case"],
             "requested_stage": args.stage,
+            "minimum_word_coverage": args.minimum_word_coverage,
             "oracle_cue_text_and_boundaries": True,
             "recovery_rejections": [
                 reason for r in reviews for reason in r.get("recovery_rejections", [])
