@@ -339,7 +339,8 @@ jobs:
       - name: 자막 템플릿 시트
         if: ${{ !cancelled() }}
         run: |
-          mkdir -p /tmp/sheet
+          # 워커 컨테이너는 appuser(uid 10001)로 돌아 호스트 디렉터리에 쓰려면 권한이 필요합니다.
+          mkdir -p /tmp/sheet && chmod 777 /tmp/sheet
           docker run --rm -v /tmp/sheet:/out --entrypoint python recording4-worker:ci \
             -m pipeline.subtitle_tool sheet /out/subtitle-templates.png
           docker run --rm -v /tmp/sheet:/out --entrypoint python recording4-worker:ci \
