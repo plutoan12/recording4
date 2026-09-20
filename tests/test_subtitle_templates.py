@@ -106,12 +106,14 @@ def test_invalid_template_values_are_rejected(values):
 
 def test_box_template_puts_the_box_color_where_libass_reads_it():
     """libass는 BorderStyle 3의 상자를 외곽선 색으로 채웁니다. 뒷색만 넣으면 검은 상자입니다."""
-    style = get_template("box").style(1920)
+    # 반지름이 0인 각진 상자만 libass 상자를 씁니다(둥근 상자는 따로 그립니다).
+    square = get_template("box").model_copy(update={"box_radius": 0})
+    style = square.style(1920)
     assert style.borderstyle == 3
     assert style.outlinecolor == parse_color("#00000099")
     assert style.backcolor == parse_color("#00000099")
     # 상자+외곽선(BorderStyle 4)은 상자가 뒷색, 외곽선이 외곽선 색입니다.
-    card = get_template("pink-cabinet").style(1920)
+    card = get_template("pink-cabinet").model_copy(update={"box_radius": 0}).style(1920)
     assert card.borderstyle == 4
     assert card.backcolor == parse_color("#FFD1E8") and card.outlinecolor == parse_color("#F06AA8")
     # 외곽선 방식은 상자 색을 쓰지 않습니다.
@@ -422,5 +424,5 @@ def test_text_measurement_falls_back_to_estimates_without_font_files(monkeypatch
     subtitle_metrics.font_file_for.cache_clear()
     size = subtitle_metrics.measure_text("한글 ab", "Nope Font", 50, letter_spacing=2)
     assert not size.measured and size.line_height == 60
-    assert size.width == pytest.approx((2 + 0.35 + 0.55 * 2) * 50 + 2 * 5)
+    assert size.width == pytest.approx((2 + 0.35 + 0.55 * 2) * 50 + 2 * (len("한글 ab") - 1))
     subtitle_metrics.font_file_for.cache_clear()
