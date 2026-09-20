@@ -1,0 +1,34 @@
+{
+  "scores": {
+    "original": {
+      "reference_characters": 784,
+      "hypothesis_characters": 629,
+      "hits": 616,
+      "substitutions": 10,
+      "deletions": 158,
+      "insertions": 3,
+      "cer": 0.2181122448979592
+    },
+    "candidate": {
+      "reference_characters": 784,
+      "hypothesis_characters": 634,
+      "hits": 617,
+      "substitutions": 14,
+      "deletions": 153,
+      "insertions": 3,
+      "cer": 0.21683673469387754
+    }
+  },
+  "sha256": {
+    "reference": "30c9abf262b881972b771c5adb4864ef318a0d7547c1ead6bd8d04a1445eb095",
+    "prediction": "9a5d46ef099dc16a5cba4d2d93cf7e321f8dbdd719e73966930bba383bd69948"
+  },
+  "core_seconds": 0.3357812499999753,
+  "crop_count": 11,
+  "failed_crops": 0,
+  "baseline_invalid_timing_words": 1,
+  "normalization": "NFC + casefold + remove non-word and underscore",
+  "boundary_clipped_reference_words": 1,
+  "metric_scope": "ordered_full_window_CER_not_speaker_aware",
+  "deployment_allowed": false
+}
