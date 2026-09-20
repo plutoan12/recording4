@@ -64,6 +64,13 @@
     "ctc_weight": 0.0,
     "dtype": "float32"
   },
+  "posthoc_human_reference": {
+    "gaps": 3,
+    "overlap_words": 4,
+    "midpoint_words": 1,
+    "overlap_characters": 13,
+    "used_for_candidate_selection": false
+  },
   "accepted_words": 0,
   "evaluation_output_changed": false,
   "deployment_allowed": false,
