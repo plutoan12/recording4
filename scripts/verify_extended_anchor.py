@@ -3,6 +3,7 @@
 import argparse
 import itertools
 import math
+import os
 from pathlib import Path
 
 from prepare_conversation_evaluation import load_json
@@ -34,18 +35,32 @@ def _intersection(left, right):
 
 def map_labels(original, extended, evaluation_end, minimum_coverage=0.8):
     """Map anonymous labels only when temporal support is unique and bidirectionally strong."""
+    return map_required_labels(
+        original,
+        extended,
+        evaluation_end,
+        {turn["speaker"] for turn in original},
+        minimum_coverage,
+    )
+
+
+def map_required_labels(original, extended, evaluation_end, required, minimum_coverage=0.8):
+    """Map only candidate targets while comparing them with every original label."""
     if not math.isfinite(minimum_coverage) or not 0 <= minimum_coverage <= 1:
         raise ValueError("Invalid mapping coverage")
     old_labels = sorted({t["speaker"] for t in original})
+    required = sorted(set(required))
+    if not required or not set(required).issubset(old_labels):
+        raise ValueError("Invalid required labels")
     new_labels = sorted({t["speaker"] for t in extended if t["start"] < evaluation_end})
-    if len(new_labels) < len(old_labels):
-        raise ValueError("Extended prediction has fewer labels in the shared interval")
+    if len(new_labels) < len(required):
+        raise ValueError("Extended prediction has fewer labels than required")
     old = {x: _merged(original, x, 0, evaluation_end) for x in old_labels}
     new = {x: _merged(extended, x, 0, evaluation_end) for x in new_labels}
     support = {(a, b): _intersection(old[a], new[b]) for a in old_labels for b in new_labels}
     assignments = []
-    for chosen in itertools.permutations(new_labels, len(old_labels)):
-        mapping = dict(zip(old_labels, chosen, strict=True))
+    for chosen in itertools.permutations(new_labels, len(required)):
+        mapping = dict(zip(required, chosen, strict=True))
         assignments.append((sum(support[a, b] for a, b in mapping.items()), mapping))
     assignments.sort(key=lambda x: x[0], reverse=True)
     if len(assignments) > 1 and assignments[0][0] == assignments[1][0]:
@@ -85,7 +100,15 @@ def later_solo_spans(turns, evaluation_end, duration):
     }
 
 
+def remaining_prior_reasons(reasons):
+    """Remove only voice failures replaced by the extended-anchor measurement."""
+    replaced = {"unreliable_anchor", "insufficient_voice_match"}
+    return [reason for reason in reasons if reason not in replaced]
+
+
 def main():
+    os.environ["HF_HUB_OFFLINE"] = "1"
+    os.environ["TRANSFORMERS_OFFLINE"] = "1"
     import numpy as np
     import soundfile as sf
     import torch
@@ -142,7 +165,10 @@ def main():
     evaluation_end = len(evaluation) / rate
     # Validate every original turn before using it for anonymous-label identity mapping.
     solo_spans(original["turns"], evaluation_end)
-    mapping, mapping_audit = map_labels(original["turns"], extended["turns"], evaluation_end)
+    required_labels = {item["target"] for item in proposal["candidates"]}
+    mapping, mapping_audit = map_required_labels(
+        original["turns"], extended["turns"], evaluation_end, required_labels
+    )
     spans = later_solo_spans(extended["turns"], evaluation_end, len(audio) / rate)
     encoder = EncoderClassifier.from_hparams(
         source=str(args.model), savedir="/tmp/extended-anchor-ecapa", run_opts={"device": "cpu"}
@@ -212,7 +238,8 @@ def main():
             and margin >= 0.15
         )
         prior_audit = prior_by_id[item["id"]]
-        accepted = voice_passed and not prior_audit["reasons"]
+        remaining_reasons = remaining_prior_reasons(prior_audit["reasons"])
+        accepted = voice_passed and not remaining_reasons
         audits.append(
             dict(
                 id=item["id"],
@@ -228,6 +255,7 @@ def main():
                 },
                 alternative_evidence_only=alternative is not None,
                 prior_reasons=prior_audit["reasons"],
+                remaining_prior_reasons=remaining_reasons,
                 accepted=accepted,
             )
         )
