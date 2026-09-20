@@ -23,11 +23,11 @@ def sha256(path):
 
 
 def write_private_json(path, result):
+    payload = json.dumps(result, indent=2, allow_nan=False) + "\n"
     path.parent.mkdir(parents=True, exist_ok=True)
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     with os.fdopen(fd, "w", encoding="utf-8") as stream:
-        json.dump(result, stream, indent=2)
-        stream.write("\n")
+        stream.write(payload)
 
 
 def parse_segments(result, duration):
@@ -51,12 +51,42 @@ def parse_segments(result, duration):
     return sorted(turns, key=lambda t: (t["start"], t["end"], t["speaker"]))
 
 
+# NVIDIA v2.1 model-card high-latency profile; fixed before new evaluation.
+STREAMING_KEYS = (
+    "chunk_len",
+    "chunk_right_context",
+    "fifo_len",
+    "spkcache_update_period",
+    "spkcache_len",
+)
+HIGH_LATENCY = dict(zip(STREAMING_KEYS, (340, 40, 40, 300, 188), strict=True))
+
+
+def configure_streaming(model, profile):
+    if profile not in ("checkpoint", "v21-high-latency"):
+        raise ValueError("Unknown streaming profile")
+    if profile != "checkpoint":
+        if not getattr(model, "streaming_mode", False):
+            raise ValueError("Streaming profile requires a streaming model")
+        if not callable(getattr(model.sortformer_modules, "_check_streaming_parameters", None)):
+            raise ValueError("Unsupported streaming implementation")
+        for name, value in HIGH_LATENCY.items():
+            if not hasattr(model.sortformer_modules, name):
+                raise ValueError("Unsupported streaming implementation")
+            setattr(model.sortformer_modules, name, value)
+        model.sortformer_modules._check_streaming_parameters()
+    return {name: getattr(model.sortformer_modules, name, None) for name in STREAMING_KEYS}
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ("audio", "checkpoint", "output"):
         parser.add_argument(f"--{name}", type=Path, required=True)
     parser.add_argument("--model-revision", required=True)
     parser.add_argument("--threads", type=int, default=4)
+    parser.add_argument(
+        "--streaming-profile", choices=("checkpoint", "v21-high-latency"), default="checkpoint"
+    )
     args = parser.parse_args()
     raw_path = args.output.with_suffix(".raw.json")
     if args.output.exists() or raw_path.exists() or raw_path == args.output or args.threads < 1:
@@ -82,6 +112,7 @@ def main():
         restore_path=str(args.checkpoint), map_location="cpu", strict=True
     )
     model.eval()
+    streaming_parameters = configure_streaming(model, args.streaming_profile)
     loaded = time.monotonic()
     with torch.inference_mode():
         raw = model.diarize(audio=str(args.audio), batch_size=1)
@@ -89,7 +120,13 @@ def main():
     # Preserve evidence even when the strict parser rejects a padded end time.
     write_private_json(
         raw_path,
-        dict(source_sha256=audio_sha, checkpoint_sha256=checkpoint_sha, raw=raw),
+        dict(
+            source_sha256=audio_sha,
+            checkpoint_sha256=checkpoint_sha,
+            streaming_profile=args.streaming_profile,
+            streaming_parameters=streaming_parameters,
+            raw=raw,
+        ),
     )
     turns = parse_segments(raw, duration)
     if audio_sha != sha256(args.audio):
@@ -104,6 +141,8 @@ def main():
         threads=args.threads,
         seed=0,
         postprocessing="nemo_diarize_defaults",
+        streaming_profile=args.streaming_profile,
+        streaming_parameters=streaming_parameters,
         load_seconds=loaded - started,
         inference_seconds=inferred - loaded,
         elapsed_seconds=inferred - started,

@@ -55,3 +55,26 @@ def test_private_evidence_cannot_be_overwritten(tmp_path):
     with pytest.raises(FileExistsError):
         module.write_private_json(path, {"raw": []})
     assert path.read_bytes() == before
+
+
+def test_streaming_profile_is_explicit_and_defaults_unchanged():
+    from types import SimpleNamespace
+
+    values = dict(zip(module.STREAMING_KEYS, (188, 1, 0, 188, 188), strict=True))
+    model = SimpleNamespace(streaming_mode=True, sortformer_modules=SimpleNamespace(**values))
+    model.sortformer_modules._check_streaming_parameters = lambda: None
+    assert module.configure_streaming(model, "checkpoint") == values
+    assert module.configure_streaming(model, "v21-high-latency") == module.HIGH_LATENCY
+    model.streaming_mode = False
+    with pytest.raises(ValueError, match="streaming model"):
+        module.configure_streaming(model, "v21-high-latency")
+
+
+@pytest.mark.parametrize("bad", [{"raw": object()}, {"raw": float("nan")}])
+def test_invalid_evidence_does_not_create_partial_file(tmp_path, bad):
+    target = tmp_path / "invalid.json"
+    with pytest.raises((ValueError, TypeError)):
+        module.write_private_json(target, bad)
+    assert not target.exists()
+    module.write_private_json(target, {"raw": []})
+    assert target.is_file()
