@@ -37,13 +37,14 @@ subtitles = ["stable-ts==2.19.1", "whisperx==3.8.6", "kss==6.0.6", "speechbrain=
              "ffsubsync==0.4.27"]
 providers = ["google-cloud-translate==3.20.2", "google-api-python-client==2.160.0", "google-auth-oauthlib==1.2.1"]
 # 자막 템플릿 글꼴 설치(scripts/fetch_fonts.py). 눈누 저장소의 WOFF를 TTF/OTF로 바꾸는 데 씁니다.
-fonts = ["fonttools==4.65.0"]
+fonts = ["fonttools==4.65.0", "brotli==1.1.0"]
 dev = [
     "pytest==8.3.4",
     # scripts/verify_sync_matrix.py를 tests/test_verify_sync_matrix.py가 불러옵니다.
     # PR #33과 같은 고정 버전입니다. 없으면 CI 테스트가 4개 오류로 끝납니다.
     "numpy==2.2.6",
     "fonttools==4.65.0",
+    "brotli==1.1.0",
     "httpx==0.28.1",
     "ruff==0.8.4",
 ]

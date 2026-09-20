@@ -32,7 +32,9 @@ function motionStyle(animation: string): React.CSSProperties {
 // 픽셀 글꼴은 고정폭으로 대신합니다. 정확한 모양은 미리보기 시트(r4-subtitles sheet)를 봅니다.
 const FONT_ALIASES: Record<string, string> = { 'Nanum Pen': 'Nanum Pen Script', 'Galmuri11 Regular': 'monospace', 'Galmuri9 Regular': 'monospace',
   // Google Fonts에 없는 글꼴은 비슷한 굵기의 Google 글꼴로 대신 보여 줍니다. 실제 렌더는 워커의 원래 글꼴입니다.
-  'Jalnan': 'Black Han Sans', 'Cafe24 Ssurround': 'Jua', 'Cafe24 Simplehae': 'Jua', 'Gmarket Sans': 'Gothic A1', 'Pretendard': 'Gothic A1', 'Wanted Sans': 'Gothic A1' }
+  'Jalnan': 'Black Han Sans', 'Cafe24 Ssurround': 'Jua', 'Cafe24 Simplehae': 'Jua', 'Gmarket Sans': 'Gothic A1', 'Pretendard': 'Gothic A1', 'Wanted Sans': 'Gothic A1',
+  'S-Core Dream 6 Bold': 'Gothic A1', 'S-Core Dream 8 Heavy': 'Black Han Sans', 'NanumSquareRound': 'Jua', 'TmonMonsori': 'Black Han Sans', 'Swagger TTF': 'Do Hyeon',
+  'SUIT': 'Gothic A1', 'BM HANNA Pro': 'Do Hyeon', 'BM Euljiro oraeorae': 'Gugi', 'Ownglyph MoogungChae': 'Gaegu', 'Maplestory': 'Jua', 'NEXON Lv1 Gothic OTF': 'Gothic A1' }
 function cssColor(hex: string): string {
   // #RRGGBBAA(AA=불투명도)는 CSS도 같은 뜻이라 그대로 씁니다.
   return hex

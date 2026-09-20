@@ -375,8 +375,10 @@ def font_matches(family: str) -> str | None:
     binary = shutil.which("fc-match")
     if not binary:
         return None
+    # fontconfig 패턴은 하이픈을 이름과 크기의 구분자로 읽습니다("S-Core Dream" →
+    # 이름 "S"). `:family=` 꼴로 주면 이름을 그대로 봅니다.
     completed = subprocess.run(
-        [binary, "--format", "%{family}", family], capture_output=True, text=True
+        [binary, "--format", "%{family}", f":family={family}"], capture_output=True, text=True
     )
     if completed.returncode:
         return None

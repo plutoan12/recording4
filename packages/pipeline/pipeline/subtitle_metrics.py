@@ -59,8 +59,11 @@ def font_file_for(family: str) -> Path | None:
     binary = shutil.which("fc-match")
     if not binary:
         return None
+    # 하이픈이 든 이름을 크기로 오해하지 않도록 `:family=` 꼴로 묻습니다.
     completed = subprocess.run(
-        [binary, "--format", "%{file}|%{family}", family], capture_output=True, text=True
+        [binary, "--format", "%{file}|%{family}", f":family={family}"],
+        capture_output=True,
+        text=True,
     )
     if completed.returncode or "|" not in completed.stdout:
         return None

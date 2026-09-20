@@ -41,6 +41,13 @@ NOONNU_COMMITS = {
     "noonfonts_2105_2": "ebd02966e492dc9942e50484312494eb3e431a67",
     "noonfonts_twelve": "e06818913ae15902aebda52bc4793193055d6f8f",
     "noonfonts_2001": "5421a2f08a5a458848ea67ea7a2b0cdb0b978e68",
+    "noonfonts_six": "ef8a865f32c575494b7cc38103cb2867594b274d",
+    "noonfonts_two": "e5c4018d5b6fee2b90371e9f7557ee8d0459d66d",
+    "noonfonts_seven": "6f4050f9dc3affd63a1995c8c15c98a30d1e60a9",
+    "noonfonts_suit": "6478c6b390dba2dee825333683b6dca3c4ced18d",
+    "noonfonts_2110": "82fc95f73344f3b01e971ada7e48eab296cdfc74",
+    "noonfonts_2202": "843436bfa05b3a588c01d1aba8c5dc49758d7cbf",
+    "noonfonts_20-04": "a40d36091c0f9b56dbd8fe8e7b5dcc1ea0dce4e5",
 }
 PRETENDARD_COMMIT = "7aeb0698819be2b4097dae8ec8fe6a795e5cf3ae"
 WANTED_SANS_COMMIT = "02c9b822349c188ada95f9e2d90c2ed18f853235"
@@ -64,10 +71,13 @@ class FontSource:
     style: str = "Regular"
     # COLRv0 컬러 이모지 글꼴. 받은 뒤 색 층 겹침 글꼴과 표 JSON으로 바꿔 설치합니다.
     color_emoji: bool = False
+    # 파일의 family 이름을 `family`로 바꿔 씁니다. 굵기마다 파일이 따로인데 같은 family
+    # 이름을 쓰는 글꼴(에스코어 드림)은 이름을 나눠야 굵기를 골라 쓸 수 있습니다.
+    rename: bool = False
 
     @property
     def needs_conversion(self) -> bool:
-        return self.url.lower().endswith(".woff") or self.color_emoji
+        return self.url.lower().endswith((".woff", ".woff2")) or self.color_emoji
 
 
 def _google(family: str, folder: str, filename: str, sha256: str) -> FontSource:
@@ -312,6 +322,121 @@ FONT_SOURCES: tuple[FontSource, ...] = (
         ),
         sha256="02092d69b9518a541eb2dd96037e50f2a2d660bbf3168f987f38fa9718cf362b",
         license_url=f"https://github.com/wanteddev/wanted-sans/blob/{WANTED_SANS_COMMIT}/LICENSE",
+        google=False,
+    ),
+    # ---- 참고 팩(인스타 자막 템플릿)에 자주 보이는 글꼴. 모두 무료 상업용입니다.
+    FontSource(
+        family="S-Core Dream 6 Bold",
+        filename="SCoreDream6Bold.otf",
+        url=f"{_NOONNU}/noonfonts_six/{NOONNU_COMMITS['noonfonts_six']}/S-CoreDream-6Bold.woff",
+        sha256="e313ad29b71c447983886f038d272d4b3cdaab02ea61770fc5cc85899d103bd7",
+        license="에스코어 드림 라이선스(무료, 상업 사용·임베딩 허용)",
+        license_url="https://s-core.co.kr/company/font/",
+        google=False,
+        rename=True,
+    ),
+    FontSource(
+        family="S-Core Dream 8 Heavy",
+        filename="SCoreDream8Heavy.otf",
+        url=f"{_NOONNU}/noonfonts_six/{NOONNU_COMMITS['noonfonts_six']}/S-CoreDream-8Heavy.woff",
+        sha256="dcea95d26655092ffb2d8c3fc216705cb90f71579a9e1d9fb9b2e4269c904874",
+        license="에스코어 드림 라이선스(무료, 상업 사용·임베딩 허용)",
+        license_url="https://s-core.co.kr/company/font/",
+        google=False,
+        rename=True,
+    ),
+    FontSource(
+        # 파일에 이름이 없어(잘난체와 같음) 변환 때 이 이름을 써 넣습니다.
+        family="NanumSquareRound",
+        filename="NanumSquareRound.otf",
+        url=f"{_NOONNU}/noonfonts_two/{NOONNU_COMMITS['noonfonts_two']}/NanumSquareRound.woff",
+        sha256="5ca05d9443ffe73aa0ed78574616491f687c8a4389ccefbc2eba12b1156cfc53",
+        license_url="https://hangeul.naver.com/fonts",
+        google=False,
+    ),
+    FontSource(
+        family="TmonMonsori",
+        filename="TmonMonsori.ttf",
+        url=f"{_NOONNU}/noonfonts_two/{NOONNU_COMMITS['noonfonts_two']}/TmonMonsori.woff",
+        sha256="e54bb5ec021b9e94fe7557ede17a81aa70e6c049ad653f3b400047f305e4149d",
+        license="티몬 몬소리체 라이선스(무료, 상업 사용 허용)",
+        license_url="https://brunch.co.kr/@creative/32",
+        google=False,
+    ),
+    FontSource(
+        family="Swagger TTF",
+        filename="Swagger.ttf",
+        url=f"{_NOONNU}/noonfonts_two/{NOONNU_COMMITS['noonfonts_two']}/Swagger.woff",
+        sha256="3ba5d0a1c9330558db0a718a7fb1e9e0d050ec146c7b45366d43fce34cab074b",
+        license="스웨거체 라이선스(무료, 상업 사용 허용)",
+        license_url="https://www.swagger.kr/font",
+        google=False,
+    ),
+    FontSource(
+        family="SUIT",
+        filename="SUIT-Bold.ttf",
+        url=f"{_NOONNU}/noonfonts_suit/{NOONNU_COMMITS['noonfonts_suit']}/SUIT-Bold.woff2",
+        sha256="7db834e2ced0fca2228b139d7df1dc703db85144c55007bfc54f4455b333d16c",
+        license_url="https://sun.fo/suit",
+        google=False,
+    ),
+    FontSource(
+        family="BM HANNA Pro",
+        filename="BMHANNAPro.ttf",
+        url=f"{_NOONNU}/noonfonts_seven/{NOONNU_COMMITS['noonfonts_seven']}/BMHANNAPro.woff",
+        sha256="d462c9f271acfc448a03f047d5c6dea8c6cfb0c275a86f7fceb1a57b81992306",
+        license="배달의민족 글꼴 라이선스(무료, 상업 사용·임베딩 허용)",
+        license_url="https://www.woowahan.com/fonts",
+        google=False,
+    ),
+    FontSource(
+        family="BM Euljiro oraeorae",
+        filename="BMEuljirooraeorae.ttf",
+        url=(
+            f"{_NOONNU}/noonfonts_2110/{NOONNU_COMMITS['noonfonts_2110']}"
+            "/BMEuljirooraeorae.woff2"
+        ),
+        sha256="c9b5e584ca05caec8f34edc2a2b7159b54d06335bdc9dbdceb1f3e8be940c4c8",
+        license="배달의민족 글꼴 라이선스(무료, 상업 사용·임베딩 허용)",
+        license_url="https://www.woowahan.com/fonts",
+        google=False,
+    ),
+    FontSource(
+        family="Ownglyph MoogungChae",
+        filename="OwnglyphMoogungChae.ttf",
+        url=(
+            f"{_NOONNU}/noonfonts_2202/{NOONNU_COMMITS['noonfonts_2202']}"
+            "/OwnglyphMoogungChae.woff"
+        ),
+        sha256="9929d71273dcc3779f248a76a9671e553b4cb62bd894edfcbabd8c6b0da9d223",
+        license="온글잎 글꼴 라이선스(무료, 상업 사용 허용)",
+        license_url="https://ownglyph.com/",
+        google=False,
+    ),
+    FontSource(
+        # 파일에 이름이 없어 변환 때 이 이름을 써 넣습니다.
+        family="Maplestory",
+        filename="MaplestoryOTFBold.otf",
+        url=(
+            f"{_NOONNU}/noonfonts_20-04/{NOONNU_COMMITS['noonfonts_20-04']}"
+            "/MaplestoryOTFBold.woff"
+        ),
+        sha256="5e0926d4042b0235d23b56917753e548c6fe59d2db045725aff9e46b0709027a",
+        license="넥슨 글꼴 라이선스(무료, 상업 사용 허용)",
+        license_url="https://levelup.nexon.com/font",
+        google=False,
+        style="Bold",
+    ),
+    FontSource(
+        family="NEXON Lv1 Gothic OTF",
+        filename="NEXONLv1GothicOTFBold.otf",
+        url=(
+            f"{_NOONNU}/noonfonts_20-04/{NOONNU_COMMITS['noonfonts_20-04']}"
+            "/NEXON%20Lv1%20Gothic%20OTF%20Bold.woff"
+        ),
+        sha256="8df8ddf131871586be4654daca19647b1f597a385d5f8e953f659d4f5ca3edce",
+        license="넥슨 글꼴 라이선스(무료, 상업 사용 허용)",
+        license_url="https://levelup.nexon.com/font",
         google=False,
     ),
     FontSource(

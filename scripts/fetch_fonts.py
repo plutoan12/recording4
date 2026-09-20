@@ -61,11 +61,15 @@ def families_in(path: Path) -> list[str] | None:
     return names
 
 
-def convert_woff(data: bytes, family: str = "", style: str = "Regular") -> bytes:
-    """WOFF를 같은 글꼴의 TTF/OTF 바이트로 바꿉니다. fontTools가 필요합니다.
+def convert_woff(
+    data: bytes, family: str = "", style: str = "Regular", *, rename: bool = False
+) -> bytes:
+    """WOFF·WOFF2를 같은 글꼴의 TTF/OTF 바이트로 바꿉니다. fontTools(WOFF2는 brotli)가 필요합니다.
 
     name 테이블에 family 이름이 없으면(잘난체·지마켓 산스) `family`·`style`로 채웁니다.
     libass는 이름 없는 글꼴을 등록하지 못하고 조용히 다른 글꼴로 바꾸기 때문입니다.
+    `rename`이면 있는 이름도 지우고 `family`로 바꿉니다(굵기별 파일이 같은 family를
+    쓰는 글꼴을 따로 고를 수 있게).
     """
     try:
         from fontTools.ttLib import TTFont
@@ -75,8 +79,14 @@ def convert_woff(data: bytes, family: str = "", style: str = "Regular") -> bytes
         ) from None
     import io
 
-    font = TTFont(io.BytesIO(data))
+    try:
+        font = TTFont(io.BytesIO(data))
+    except ImportError as exc:  # WOFF2는 brotli가 있어야 풉니다.
+        raise RuntimeError(f"WOFF2 글꼴을 바꾸려면 brotli가 필요합니다: {exc}") from None
     font.flavor = None
+    if family and rename:
+        for name_id in (1, 2, 3, 4, 6, 16, 17):
+            font["name"].removeNames(nameID=name_id)
     if family and not any(r.nameID == 1 for r in font["name"].names):
         full = f"{family} {style}".strip()
         postscript = full.replace(" ", "-")
@@ -115,7 +125,7 @@ def fetch(source: FontSource, out: Path, *, timeout: float) -> str:
         installed, table = build_color_emoji_font(data, source.family)
         sidecar = json.dumps(table, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
     elif source.needs_conversion:
-        installed = convert_woff(data, source.family, source.style)
+        installed = convert_woff(data, source.family, source.style, rename=source.rename)
     else:
         installed = data
     # 이름 확인이 끝나기 전에는 제자리에 두지 않습니다. 실패한 파일이 남아 다음
