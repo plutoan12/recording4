@@ -71,3 +71,16 @@ button {
 .template-grid button { display: block; margin: 0; padding: .3rem; border: 2px solid transparent; border-radius: 8px; background: #f4f4f4; text-align: center; cursor: pointer; }
 .template-grid button.selected { border-color: #d33; }
 .template-grid small { display: block; margin-top: .2rem; }
+
+/* 자막 움직임 미리보기. 워커의 ASS 움직임(pipeline/subtitle_motion.py)을 흉내 냅니다.
+   2.6초마다 반복하고 앞 0.4초 안에 등장을 끝냅니다. */
+@keyframes r4-motion-fade { 0% { opacity: 0 } 12% { opacity: 1 } 85% { opacity: 1 } 100% { opacity: 0 } }
+@keyframes r4-motion-pop { 0% { scale: .4 } 8% { scale: 1.12 } 13% { scale: 1 } 100% { scale: 1 } }
+@keyframes r4-motion-bounce { 0% { translate: 0 -30px } 10% { translate: 0 0; scale: 1 1 } 14% { scale: 1.1 .84 } 20% { scale: 1 1 } 100% { scale: 1 1 } }
+@keyframes r4-motion-slide-up { 0% { translate: 0 24px; opacity: 0 } 12% { translate: 0 0; opacity: 1 } 100% { translate: 0 0 } }
+@keyframes r4-motion-slide-down { 0% { translate: 0 -24px; opacity: 0 } 12% { translate: 0 0; opacity: 1 } 100% { translate: 0 0 } }
+@keyframes r4-motion-zoom { 0% { scale: 1; opacity: 0 } 10% { opacity: 1 } 100% { scale: 1.1 } }
+@keyframes r4-motion-wiggle { 0% { rotate: 3deg } 25% { rotate: -3deg } 50% { rotate: 3deg } 75% { rotate: -3deg } 100% { rotate: 3deg } }
+@keyframes r4-motion-pulse { 0% { scale: 1 } 17% { scale: 1.05 } 35% { scale: 1 } 52% { scale: 1.05 } 70% { scale: 1 } 100% { scale: 1 } }
+@keyframes r4-motion-typewriter { 0% { clip-path: inset(0 100% 0 0) } 60% { clip-path: inset(0 0 0 0) } 100% { clip-path: inset(0 0 0 0) } }
+@media (prefers-reduced-motion: reduce) { .template-preview span { animation: none !important; } }

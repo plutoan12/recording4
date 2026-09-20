@@ -10,7 +10,20 @@ type Template = { name: string; label: string; description: string; category: st
   font_name: string; font_size: number; bold: boolean; italic: boolean; primary_color: string; outline_color: string; box_color: string;
   outline: number; outline2: number; outline2_color: string; shadow: number; glow: number; angle: number;
   hollow: boolean; extrude: number; extrude_color: string; accent_color: string; box_radius: number;
-  border_style: 'outline' | 'box' | 'box-outline'; letter_spacing: number; prefix: string; suffix: string }
+  border_style: 'outline' | 'box' | 'box-outline'; letter_spacing: number; prefix: string; suffix: string;
+  animation: string; animation_ms: number | null; animation_label: string }
+type AnimationChoice = { name: string; label: string }
+
+// 워커의 ASS 움직임을 CSS 키프레임(styles.css의 r4-motion-*)으로 흉내 냅니다. 타자기·단어별·
+// 노래방은 글자 단위라 CSS로는 비슷한 느낌(가리개 걷기·페이드)만 보여 줍니다.
+const MOTION_KEYFRAMES: Record<string, string> = {
+  fade: 'r4-motion-fade', pop: 'r4-motion-pop', bounce: 'r4-motion-bounce', 'slide-up': 'r4-motion-slide-up',
+  'slide-down': 'r4-motion-slide-down', zoom: 'r4-motion-zoom', wiggle: 'r4-motion-wiggle', pulse: 'r4-motion-pulse',
+  typewriter: 'r4-motion-typewriter', 'word-pop': 'r4-motion-typewriter', karaoke: 'r4-motion-fade' }
+function motionStyle(animation: string): React.CSSProperties {
+  const name = MOTION_KEYFRAMES[animation]
+  return name ? { animation: `${name} 2.6s ease-out infinite` } : {}
+}
 
 // 워커가 libass로 굽는 모양을 CSS로 흉내 냅니다. 글꼴 이름은 Google Fonts 이름으로 바꾸고
 // 픽셀 글꼴은 고정폭으로 대신합니다. 정확한 모양은 미리보기 시트(r4-subtitles sheet)를 봅니다.
@@ -54,6 +67,7 @@ function templatePreviewStyle(t: Template): React.CSSProperties {
     borderRadius: t.border_style !== 'outline' ? Math.max(4, Math.round(t.box_radius / 2.5)) : undefined,
     display: 'inline-block',
     transform: t.angle ? `rotate(${-t.angle}deg)` : undefined,
+    ...motionStyle(t.animation),
   }
   return style
 }
@@ -70,9 +84,9 @@ function splitMarkup(text: string): { piece: string; accent: boolean }[] {
   if (cursor < text.length) parts.push({ piece: text.slice(cursor).replaceAll(']]', ''), accent: false })
   return parts.filter(p => p.piece)
 }
-function TemplatePreview({ template }: { template: Template }) {
+function TemplatePreview({ template, animation }: { template: Template; animation?: string }) {
   const text = `${template.prefix ? template.prefix + ' ' : ''}${template.sample || template.label}${template.suffix ? ' ' + template.suffix : ''}`
-  const style = templatePreviewStyle(template)
+  const style = templatePreviewStyle(animation ? { ...template, animation } : template)
   const accent = template.accent_color ? cssColor(template.accent_color) : undefined
   return <div className="template-preview"><span style={style}>{splitMarkup(text).map((p, i) => accent && p.accent
     ? <span key={i} style={template.hollow ? { WebkitTextStroke: style.WebkitTextStroke ? `${String(style.WebkitTextStroke).split(' ')[0]} ${accent}` : undefined } : { color: accent }}>{p.piece}</span>
@@ -92,6 +106,9 @@ export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWo
   const [captionLanguage,setCaptionLanguage] = useState('ko')
   const [template,setTemplate] = useState('default')
   const [templates,setTemplates] = useState<Template[]>([])
+  // 빈 값이면 템플릿의 움직임을 그대로 씁니다.
+  const [animation,setAnimation] = useState('')
+  const [animations,setAnimations] = useState<AnimationChoice[]>([])
   const [title, setTitle] = useState('')
   const [captions, setCaptions] = useState<Cue[]>([])
   const [suggestions, setSuggestions] = useState<Suggestion[]>([])
@@ -122,6 +139,7 @@ export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWo
   useEffect(() => {
     // 내장 템플릿 목록은 서버가 정합니다. 못 받으면 기본 템플릿만 남겨 렌더는 계속할 수 있게 합니다.
     request<Template[]>('/subtitle-templates').then(setTemplates).catch(() => setTemplates([]))
+    request<AnimationChoice[]>('/subtitle-animations').then(setAnimations).catch(() => setAnimations([]))
   }, [])
 
   async function act(operation: () => Promise<void>) {
@@ -249,9 +267,13 @@ export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWo
           {templates.filter(t => t.category_label === group).map(t => <option key={t.name} value={t.name} title={t.description}>{t.label} ({t.name})</option>)}
         </optgroup>)}
       </select></label>
+      <label>자막 움직임<select value={animation} disabled={!burn} onChange={e=>setAnimation(e.target.value)}>
+        <option value="">템플릿 기본{(() => { const chosen = templates.find(t => t.name === template); return chosen ? ` (${chosen.animation_label})` : '' })()}</option>
+        {animations.map(a => <option key={a.name} value={a.name}>{a.label}</option>)}
+      </select></label>
       {burn && (() => { const chosen = templates.find(t => t.name === template); return chosen ? <div className="template-chosen">
-        <TemplatePreview template={chosen} />
-        <p>{chosen.description} 영상에 굽는 자막의 모양이며 SRT·VTT 파일에는 영향이 없습니다. 화면의 미리보기는 CSS 근사이고 실제 렌더는 워커의 libass입니다.{chosen.accent_color && ' 자막 내용에서 [[이렇게]] 감싼 부분은 강조 색으로 그려지고, 파일에는 괄호 없이 나갑니다.'}</p>
+        <TemplatePreview template={chosen} animation={animation || undefined} />
+        <p>{chosen.description} 영상에 굽는 자막의 모양이며 SRT·VTT 파일에는 영향이 없습니다. 화면의 미리보기는 CSS 근사이고 실제 렌더는 워커의 libass입니다.{chosen.accent_color && ' 자막 내용에서 [[이렇게]] 감싼 부분은 강조 색으로 그려지고, 파일에는 괄호 없이 나갑니다.'}{(animation || chosen.animation !== 'none') && ' 움직임은 자막마다 시작 시각에 맞춰 붙고 화면 제목에는 붙지 않습니다.'}</p>
       </div> : null })()}
       {burn && templates.length > 0 && <details className="template-gallery"><summary>템플릿 전체 미리보기 ({templates.length}종)</summary>
         <div className="template-grid">{templates.map(t => <button type="button" key={t.name} className={t.name === template ? 'selected' : ''} onClick={() => setTemplate(t.name)} title={t.description}>
@@ -281,11 +303,11 @@ export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWo
           setMessage('저장된 대본의 문장 경계로 후보를 만들었습니다. AI 인기도 예측은 아닙니다.')
         })}>구간 후보 찾기</button>
         <button disabled={busy || end <= start || end-start > 180} onClick={() => void act(async () => {
-          await request('/clips', {method:'POST', body: JSON.stringify({source_asset_id:assetId, start, end, mode, focus_x:focus, title, burn_subtitles:burn, caption_language:captionLanguage, subtitle_template:template, cues:captions})})
+          await request('/clips', {method:'POST', body: JSON.stringify({source_asset_id:assetId, start, end, mode, focus_x:focus, title, burn_subtitles:burn, caption_language:captionLanguage, subtitle_template:template, subtitle_animation:animation || null, cues:captions})})
           setMessage('새 편집본의 렌더를 요청했습니다.'); await refresh()
         })}>숏폼 렌더</button>
       </div>
-      <button disabled={busy||end<=start||end-start>180} onClick={()=>{onWorkflow({source_asset_id:assetId,start,end,mode,focus_x:focus,title,burn_subtitles:burn,caption_language:captionLanguage,subtitle_template:template,cues:captions});setMessage('아래 단계별 제작 화면에 선택 구간을 전달했습니다.')}}>선택 구간을 번역·더빙 단계로 보내기</button>
+      <button disabled={busy||end<=start||end-start>180} onClick={()=>{onWorkflow({source_asset_id:assetId,start,end,mode,focus_x:focus,title,burn_subtitles:burn,caption_language:captionLanguage,subtitle_template:template,subtitle_animation:animation||undefined,cues:captions});setMessage('아래 단계별 제작 화면에 선택 구간을 전달했습니다.')}}>선택 구간을 번역·더빙 단계로 보내기</button>
       {suggestions.map((s,i) => <button key={i} onClick={() => {setStart(s.start);setEnd(s.end);setTitle(s.title)}}>{s.start.toFixed(1)}–{s.end.toFixed(1)}초 · {s.title}</button>)}
     </>}
     {message && <p role="status">{message}</p>}

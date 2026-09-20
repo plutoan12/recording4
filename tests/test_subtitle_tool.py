@@ -245,3 +245,58 @@ def test_sheet_arguments_are_validated_before_ffmpeg_runs(tmp_path, monkeypatch)
     assert main(["sheet", str(tmp_path / "s.png"), "--category", "nope"]) == EXIT_ERROR
     # 인자가 맞으면 FFmpeg 부재가 오류입니다.
     assert main(["sheet", str(tmp_path / "s.png"), "--category", "pixel"]) == EXIT_ERROR
+
+
+def test_animation_option_overrides_the_template(srt, tmp_path, capsys):
+    out = tmp_path / "moving.ass"
+    assert (
+        main(["style", str(srt), str(out), "--template", "yellow", "--animation", "pop"]) == EXIT_OK
+    )
+    assert "\\fscx40" in out.read_text(encoding="utf-8")
+    assert (
+        main(["style", str(srt), str(out), "--template", "pop-jalnan", "--animation", "none"])
+        == EXIT_OK
+    )
+    assert "\\t(" not in out.read_text(encoding="utf-8")
+    assert main(["style", str(srt), str(out), "--animation-ms", "10"]) == EXIT_ERROR
+    assert "움직임" in capsys.readouterr().err
+    # 영상 출력 인자는 FFmpeg를 부르기 전에 확인합니다.
+    assert main(["preview", str(tmp_path / "a.webm"), "--seconds", "2"]) == EXIT_ERROR
+    assert main(["preview", str(tmp_path / "a.mp4"), "--seconds", "0"]) == EXIT_ERROR
+    assert main(["reel", str(tmp_path / "a.mp4"), "--category", "nope"]) == EXIT_ERROR
+    assert main(["reel", str(tmp_path / "a.mp4"), "--seconds", "0"]) == EXIT_ERROR
+
+
+def test_preview_and_reel_render_clips_when_ffmpeg_exists(tmp_path, capsys):
+    if not ffmpeg_available():
+        pytest.skip("FFmpeg required; CI installs it")
+    clip = tmp_path / "pop.mp4"
+    args = ["--template", "pop-jalnan", "--width", "320", "--height", "180", "--seconds", "1"]
+    assert main(["preview", str(clip), *args]) == EXIT_OK
+    assert clip.stat().st_size > 0 and "1초 영상" in capsys.readouterr().out
+    gif = tmp_path / "reel.gif"
+    ass = tmp_path / "reel.ass"
+    assert (
+        main(
+            [
+                "reel",
+                str(gif),
+                "--templates",
+                "karaoke-yellow",
+                "fade-film",
+                "--width",
+                "320",
+                "--height",
+                "180",
+                "--seconds",
+                "1",
+                "--gap",
+                "0",
+                "--ass",
+                str(ass),
+            ]
+        )
+        == EXIT_OK
+    )
+    assert gif.read_bytes()[:6] in (b"GIF89a", b"GIF87a")
+    assert "Caption" in ass.read_text(encoding="utf-8") and "2종을 2초" in capsys.readouterr().out

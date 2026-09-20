@@ -1,3 +1,10 @@
+## 2026-09-20: 움직이는 자막 (Claude)
+
+- 사용자 요청: "움직이는 자막도 만들어줘". [PR #36](https://github.com/plutoan12/recording4/pull/36) 후속 커밋, 같은 브랜치. 담당: `pipeline/subtitle_motion.py`(신규), `pipeline/subtitle_templates.py`, `pipeline/subtitle_tool.py`, `pipeline/editing.py`, `worker/rendering.py`, `worker/composition.py`, `adminapi/routers/editing.py`, `apps/web`(ClipEditor.tsx, WorkflowPanel.tsx, styles.css), `.github/workflows/ci.yml`, 테스트·문서.
+- 템플릿 항목 `animation`(12종: fade·pop·bounce·slide-up·slide-down·zoom·wiggle·pulse·typewriter·word-pop·karaoke)과 `animation_ms`. 움직임 카테고리 템플릿 13종 추가(총 82종). `EditSpec.subtitle_animation`과 `GET /subtitle-animations`로 어떤 템플릿에든 움직임을 덮어씀. 편집기에 **자막 움직임** 선택과 CSS 키프레임 미리보기. CLI `--animation`/`--animation-ms`, `preview`의 .mp4/.gif 출력, `reel`(템플릿을 차례로 보여 주는 영상). CI가 `subtitle-motion.mp4`를 시트 artifact에 함께 올림. 둥근 상자는 글자와 같은 정렬점(`\an`)으로 바꿔 움직임·회전이 글자와 같은 중심.
+- 검증: 이 환경에서 13종 영상을 렌더해 프레임을 뽑아 확인(팝·바운스·슬라이드·카드 이동·페이드·줌·흔들림·맥박·타자기·단어별·노래방 모두 의도대로). 크기가 변할 때 libass가 줄을 다시 나누던 것을 `\q2`로 막음. `python -m pytest -q` 474개 통과(기존 환경 전용 실패 1개), `ruff`, `tsc`, `vite build` 통과.
+- 남은 것: 노래방·단어별 등장은 자막 길이를 고르게 나눈 어림 시각이라 whisper 단어 타임스탬프 연결이 다음 작업. 브라우저에서 편집기 움직임 미리보기 확인. 워커 이미지의 libx264로 `reel`이 도는지는 CI에서 확인.
+
 ## 2026-09-20: 트렌디 자막 템플릿 팩·글꼴·미리보기 시트 (Claude)
 
 - 사용자 요청: 인스타그램 자막 템플릿 팩(파스텔 상자·네온·픽셀·통통 외곽선·손글씨) 같은 것. [PR #36](https://github.com/plutoan12/recording4/pull/36) 후속 커밋, 같은 브랜치. 담당: `pipeline/subtitle_templates.py`, `pipeline/subtitle_fonts.py`(신규), `pipeline/subtitle_tool.py`, `scripts/fetch_fonts.py`(신규), `worker/rendering.py`, `worker/composition.py`, `adminapi/routers/editing.py`, `infra/Dockerfile.worker`, `.github/workflows/ci.yml`, `apps/web`(index.html, ClipEditor.tsx, styles.css), 관련 테스트·문서.

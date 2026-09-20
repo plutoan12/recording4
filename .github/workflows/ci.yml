@@ -345,12 +345,18 @@ jobs:
             -m pipeline.subtitle_tool sheet /out/subtitle-templates.png
           docker run --rm -v /tmp/sheet:/out --entrypoint python recording4-worker:ci \
             -m pipeline.subtitle_tool templates check
+          # 움직이는 템플릿은 정지 시트로 볼 수 없어 짧은 영상으로 함께 남깁니다.
+          docker run --rm -v /tmp/sheet:/out --entrypoint python recording4-worker:ci \
+            -m pipeline.subtitle_tool reel /out/subtitle-motion.mp4 --category motion \
+            --width 720 --height 720 --seconds 2
       - name: 자막 템플릿 시트 업로드
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4
         with:
           name: subtitle-template-sheet
-          path: /tmp/sheet/subtitle-templates.png
+          path: |
+            /tmp/sheet/subtitle-templates.png
+            /tmp/sheet/subtitle-motion.mp4
           if-no-files-found: error
 
       # 빌드 로그가 길어서 중간 출력은 찾기 어렵습니다. 잡 끝에서 한 번 더 모읍니다.

@@ -38,6 +38,7 @@ from pipeline.subtitle_files import (
     encoding_choices,
     parse_subtitles,
 )
+from pipeline.subtitle_motion import ANIMATION_LABELS
 from pipeline.subtitle_templates import CATEGORY_LABELS, get_template, templates_by_category
 from pipeline.subtitles import check
 from pipeline.time import as_utc
@@ -388,6 +389,8 @@ def create_clip(payload: ClipRequest, user: CurrentUser, session: SessionDep):
     spec = EditSpec.model_validate(payload.model_dump(exclude={"source_asset_id"}))
     try:
         template = get_template(spec.subtitle_template)
+        if spec.subtitle_animation:
+            template = template.with_animation(spec.subtitle_animation)
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from None
     # Client sends its edited captions explicitly; an empty list means no captions.
@@ -409,6 +412,7 @@ def create_clip(payload: ClipRequest, user: CurrentUser, session: SessionDep):
         subtitle_style={
             "template": template.name,
             "font_size": spec.font_size or template.font_size,
+            "animation": template.animation,
         },
     )
     session.add(clip)
@@ -440,10 +444,23 @@ def subtitle_templates(user: CurrentUser) -> list[dict]:
     보여 주고, CSS로 모양을 흉내 낸 미리보기를 그립니다(실제 렌더는 libass).
     """
     return [
-        {**t.model_dump(), "category_label": CATEGORY_LABELS[t.category]}
+        {
+            **t.model_dump(),
+            "category_label": CATEGORY_LABELS[t.category],
+            "animation_label": ANIMATION_LABELS[t.animation],
+        }
         for templates in templates_by_category().values()
         for t in templates
     ]
+
+
+@router.get("/subtitle-animations")
+def subtitle_animations(user: CurrentUser) -> list[dict]:
+    """편집기가 고를 수 있는 자막 움직임. 이름을 `subtitle_animation`으로 보냅니다.
+
+    비우면 템플릿의 움직임을 쓰고, `none`이면 움직임을 뺍니다.
+    """
+    return [{"name": name, "label": label} for name, label in ANIMATION_LABELS.items()]
 
 
 @router.get("/clips/{clip_edit_id}/subtitles")

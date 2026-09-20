@@ -420,7 +420,7 @@ def test_subtitle_templates_are_listed_and_a_clip_remembers_its_template(
     created = client.post("/clips", headers=auth_headers, json=data)
     assert created.status_code == 202, created.text
     clip = session.get(ClipEdit, uuid.UUID(created.json()["clip_edit_id"]))
-    assert clip.subtitle_style == {"template": "yellow", "font_size": 64}
+    assert clip.subtitle_style == {"template": "yellow", "font_size": 64, "animation": "none"}
     task = session.get(MediaTask, uuid.UUID(created.json()["id"]))
     assert task.settings["subtitle_template"] == "yellow"
 
@@ -433,3 +433,18 @@ def test_subtitle_templates_are_listed_and_a_clip_remembers_its_template(
         "/clips", headers=auth_headers, json={**data, "subtitle_template": "nope"}
     )
     assert unknown.status_code == 422 and "모르는 자막 템플릿" in unknown.json()["detail"]
+
+    # 움직임은 템플릿 값을 덮어쓰고 편집본에 기록됩니다. 모르는 이름은 거절합니다.
+    animations = client.get("/subtitle-animations", headers=auth_headers).json()
+    assert {"name": "pop", "label": "팝(튀어나옴)"} in animations
+    assert listed.json()[0]["animation_label"] == "없음"
+    moving = client.post("/clips", headers=auth_headers, json={**data, "subtitle_animation": "pop"})
+    assert moving.status_code == 202, moving.text
+    clip = session.get(ClipEdit, uuid.UUID(moving.json()["clip_edit_id"]))
+    assert clip.subtitle_style["animation"] == "pop"
+    assert (
+        session.get(MediaTask, uuid.UUID(moving.json()["id"])).settings["subtitle_animation"]
+        == "pop"
+    )
+    bad = client.post("/clips", headers=auth_headers, json={**data, "subtitle_animation": "spin"})
+    assert bad.status_code == 422 and "모르는 움직임" in bad.json()["detail"]

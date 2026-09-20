@@ -37,6 +37,9 @@ class EditSpec(BaseModel):
     # 값이고, 적으면 그 값이 템플릿보다 우선합니다.
     subtitle_template: str = Field(default="default", pattern=r"^[a-z0-9][a-z0-9-]{0,39}$")
     font_size: int | None = Field(default=None, ge=20, le=120)
+    # 자막 움직임(pipeline.subtitle_motion.ANIMATION_LABELS의 이름). 비우면 템플릿 값,
+    # 적으면 그 값이 템플릿보다 우선합니다. `none`이면 움직임을 뺍니다.
+    subtitle_animation: str | None = Field(default=None, pattern=r"^[a-z][a-z-]{0,19}$")
     cues: list[Cue] = Field(default_factory=list, max_length=3000)
 
     @model_validator(mode="after")

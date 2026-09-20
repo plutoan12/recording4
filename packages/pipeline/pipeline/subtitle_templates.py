@@ -49,6 +49,15 @@ from pipeline.subtitle_files import plain_ass
 from pipeline.subtitle_fonts import EMOJI_FONT, FONT_FAMILIES
 from pipeline.subtitle_markup import split_emoji, split_markup, strip_markup
 from pipeline.subtitle_metrics import measure_text
+from pipeline.subtitle_motion import (
+    ANIMATION_DEFAULT_MS,
+    ANIMATION_LABELS,
+    MOVING,
+    PER_RUN,
+    Animation,
+    animate_runs,
+    motion_tags,
+)
 from pipeline.subtitles import text_width
 
 TEMPLATE_NAME = r"^[a-z0-9][a-z0-9-]{0,39}$"
@@ -57,7 +66,9 @@ TEMPLATE_NAME = r"^[a-z0-9][a-z0-9-]{0,39}$"
 Position = Literal["bottom", "middle", "top"]
 Horizontal = Literal["left", "center", "right"]
 BorderStyle = Literal["outline", "box", "box-outline"]
-Category = Literal["basic", "vlog", "cute", "neon", "pixel", "box", "handwriting", "retro"]
+Category = Literal[
+    "basic", "vlog", "cute", "neon", "pixel", "box", "handwriting", "retro", "motion"
+]
 
 CATEGORY_LABELS: dict[str, str] = {
     "basic": "기본",
@@ -68,6 +79,7 @@ CATEGORY_LABELS: dict[str, str] = {
     "box": "상자·카드",
     "handwriting": "손글씨",
     "retro": "레트로·세리프",
+    "motion": "움직임",
 }
 
 _COLOR = re.compile(r"^#([0-9A-Fa-f]{6})([0-9A-Fa-f]{2})?$")
@@ -96,6 +108,9 @@ def format_color(color: pysubs2.Color) -> str:
 
 
 # ASS 정렬은 숫자 키패드 배치입니다. 1·2·3 아래, 4·5·6 가운데, 7·8·9 위.
+# 노래방 강조 색이 템플릿에 없을 때 쓰는 노랑.
+KARAOKE_ACCENT = "#FFE14D"
+
 _ROW = {"bottom": 1, "middle": 4, "top": 7}
 _COLUMN = {"left": 0, "center": 1, "right": 2}
 _BORDER = {"outline": 1, "box": 3, "box-outline": 4}
@@ -155,6 +170,11 @@ class SubtitleTemplate(BaseModel):
     # 자막 앞뒤에 붙는 장식 기호(★ ☆ ♡ ✳ 등). 글꼴에 있는 글자여야 그려집니다.
     prefix: str = Field(default="", max_length=8)
     suffix: str = Field(default="", max_length=8)
+    # 움직임. 종류는 pipeline.subtitle_motion.ANIMATION_LABELS에, 시간(ms)은 비우면 종류별
+    # 기본값입니다. 등장 효과는 등장 시간, 타자기·단어별은 글자·단어 하나, 흔들림·맥박은
+    # 한 주기입니다. 화면 제목과 미리보기 시트에는 적용하지 않습니다.
+    animation: Animation = "none"
+    animation_ms: int | None = Field(default=None, ge=40, le=3000)
 
     @field_validator(
         "primary_color",
@@ -306,7 +326,68 @@ class SubtitleTemplate(BaseModel):
 
     def override_tags(self) -> str:
         """이벤트 글자 앞에 붙는 ASS 명령. 지금은 글로우뿐입니다."""
-        return f"{{\\blur{self.glow:g}}}" if self.glow else ""
+        inner = self._override_inner()
+        return "{" + inner + "}" if inner else ""
+
+    def _override_inner(self) -> str:
+        return f"\\blur{self.glow:g}" if self.glow else ""
+
+    @property
+    def animated(self) -> bool:
+        return self.animation != "none"
+
+    @property
+    def moves(self) -> bool:
+        """자리를 `\\move`로 정하는 움직임인지(그러면 `\\pos`를 쓰지 않습니다)."""
+        return self.animation in MOVING
+
+    @property
+    def motion_ms(self) -> int:
+        return self.animation_ms or ANIMATION_DEFAULT_MS[self.animation]
+
+    @property
+    def animation_label(self) -> str:
+        return ANIMATION_LABELS[self.animation]
+
+    def with_animation(self, kind: str, ms: int | None = None) -> SubtitleTemplate:
+        """움직임만 바꾼 템플릿. 값은 다시 검증합니다(모르는 종류면 ValueError)."""
+        try:
+            return SubtitleTemplate.model_validate(
+                {**self.model_dump(), "animation": kind, "animation_ms": ms}
+            )
+        except ValueError:
+            raise ValueError(
+                f"모르는 움직임입니다: {kind}. 쓸 수 있는 것: {', '.join(ANIMATION_LABELS)}"
+            ) from None
+
+    def motion_tags(self, duration_ms: int | None, anchor: tuple[float, float] | None) -> str:
+        """이벤트 전체(모든 층)에 붙는 움직임 명령. 시간이 없으면(정지 화면) 빈 문자열."""
+        if not duration_ms or not self.animated:
+            return ""
+        return motion_tags(
+            self.animation,
+            self.motion_ms,
+            duration_ms=duration_ms,
+            anchor=anchor,
+            angle=self.angle,
+            glow=self.glow,
+        )
+
+    def _animate(self, body: str, duration_ms: int | None, prefix: str) -> str:
+        """조각별 움직임(타자기·단어별·노래방)을 본문에 넣습니다."""
+        if not duration_ms or self.animation not in PER_RUN:
+            return body
+        base = self.outline_color if self.hollow else self.primary_color
+        return animate_runs(
+            self.animation,
+            body,
+            self.motion_ms,
+            duration_ms=duration_ms,
+            prefix=prefix,
+            hollow=self.hollow,
+            accent=self._ass_color_tag(self.accent_color or KARAOKE_ACCENT),
+            base=self._ass_color_tag(base),
+        )
 
     def _ass_color_tag(self, color: str) -> str:
         c = parse_color(color)
@@ -355,26 +436,41 @@ class SubtitleTemplate(BaseModel):
                 pieces.append(plain_ass(piece))
         return "".join(pieces)
 
-    def event_text_layers(self, text: str) -> list[tuple[int, str, str]]:
+    def event_text_layers(
+        self,
+        text: str,
+        *,
+        duration_ms: int | None = None,
+        anchor: tuple[float, float] | None = None,
+    ) -> list[tuple[int, str, str]]:
         """(layer, 이벤트 글자, 스타일 접미사) 목록. 뒤 층이 먼저 옵니다.
 
         접미사는 "" (앞 층), "-Back" (바깥 테두리·번짐), "-Extrude" (입체 돌출)입니다.
-        글로우는 뒤 층에만 붙여 앞 층 글자는 또렷하게 둡니다.
+        글로우는 뒤 층에만 붙여 앞 층 글자는 또렷하게 둡니다. `duration_ms`(자막 길이)를
+        주면 움직임 명령을 모든 층에 같게 붙이고, 없으면 정지 화면입니다. `anchor`는
+        글자가 정렬되는 점으로 이동하는 움직임의 목적지입니다.
         """
-        front = self.body_text(text)
+        lead = self.motion_tags(duration_ms, anchor)
+        lead = "{" + lead + "}" if lead else ""
+        # 노래방은 단어 색을 스스로 바꾸므로 `[[...]]` 강조와 겹치지 않게 뺍니다.
+        front = self.body_text(text, accent=self.animation != "karaoke" or not duration_ms)
+        blur = self._override_inner()
         if not self.layered:
-            return [(0, self.override_tags() + front, "")]
+            body = self._animate(front, duration_ms, blur)
+            return [(0, lead + self.override_tags() + body, "")]
         plain = self.body_text(text, accent=False)
         layers: list[tuple[int, str, str]] = []
         layer = 0
         for depth in range(self.extrude, 0, -1):
-            tags = f"{{\\shad0\\xshad{depth}\\yshad{depth}}}"
-            layers.append((layer, tags + plain, "-Extrude"))
+            inner = f"\\shad0\\xshad{depth}\\yshad{depth}"
+            body = self._animate(plain, duration_ms, inner)
+            layers.append((layer, lead + "{" + inner + "}" + body, "-Extrude"))
             layer += 1
         if self.has_back_layer:
-            layers.append((layer, self.override_tags() + plain, "-Back"))
+            body = self._animate(plain, duration_ms, blur)
+            layers.append((layer, lead + self.override_tags() + body, "-Back"))
             layer += 1
-        layers.append((layer, front, ""))
+        layers.append((layer, lead + self._animate(front, duration_ms, ""), ""))
         return layers
 
     def decorate(self, text: str) -> str:
@@ -1389,6 +1485,208 @@ BUILTIN_TEMPLATES: dict[str, SubtitleTemplate] = {
             prefix="✳",
             suffix="✳",
         ),
+        # ---- 움직임 -----------------------------------------------------
+        # 위 카테고리의 모양에 움직임을 붙인 것입니다. 어떤 템플릿이든 `animation` 값을
+        # 주면(편집기의 움직임 선택, CLI --animation) 같은 움직임이 붙습니다.
+        _builtin(
+            name="pop-jalnan",
+            label="팡! 잘난체",
+            description="잘난체 노란 글자가 작았다가 튀어나옵니다. 예능 강조에.",
+            sample="이거 진짜 대박!!",
+            category="motion",
+            font_name="Jalnan",
+            font_size=84,
+            primary_color="#FFE14D",
+            outline_color="#111111",
+            outline=4,
+            shadow=0,
+            animation="pop",
+        ),
+        _builtin(
+            name="bounce-sticker",
+            label="통통 스티커",
+            description="핑크 스티커 글자가 위에서 떨어져 통통 튑니다.",
+            sample="오늘의 브이로그 ♡",
+            category="motion",
+            font_name="Bagel Fat One",
+            font_size=78,
+            primary_color="#FF9BD2",
+            outline_color="#FFFFFF",
+            outline=5,
+            outline2=2.5,
+            outline2_color="#E84393",
+            shadow=0,
+            animation="bounce",
+        ),
+        _builtin(
+            name="slide-vlog",
+            label="올라오는 제목",
+            description="형광 연두 굵은 제목이 아래에서 스르륵 올라옵니다.",
+            sample="TOKYO VLOG",
+            category="motion",
+            font_name="Black Han Sans",
+            font_size=96,
+            primary_color="#9DFF3C",
+            outline_color="#0B3D00",
+            outline=2,
+            outline2=4,
+            outline2_color="#FFFFFF",
+            shadow=0,
+            animation="slide-up",
+        ),
+        _builtin(
+            name="drop-card",
+            label="내려오는 카드",
+            description="연핑크 둥근 카드가 위에서 내려오며 나타납니다.",
+            sample="민주의 핑크 캐비닛",
+            category="motion",
+            font_name="Cafe24 Ssurround",
+            font_size=52,
+            primary_color="#3A2A3A",
+            border_style="box-outline",
+            box_radius=14,
+            outline2=3,
+            box_color="#FFD1E8",
+            outline_color="#F06AA8",
+            outline=3,
+            shadow=0,
+            prefix="✳",
+            suffix="✳",
+            animation="slide-down",
+        ),
+        _builtin(
+            name="fade-film",
+            label="스며드는 영화 자막",
+            description="바탕체 흰 자막이 서서히 나타났다 사라집니다.",
+            sample="그날의 바다는 조용했다",
+            category="motion",
+            font_name="Gowun Batang",
+            font_size=52,
+            outline=1,
+            shadow=0,
+            letter_spacing=2,
+            animation="fade",
+            animation_ms=400,
+        ),
+        _builtin(
+            name="zoom-title",
+            label="천천히 커지는 제목",
+            description="가속 굵은 제목이 보이는 동안 천천히 커집니다. 인트로에.",
+            sample="EP.01 첫 자취 시작",
+            category="motion",
+            font_name="Gasoek One",
+            font_size=88,
+            primary_color="#FFFFFF",
+            outline_color="#000000",
+            outline=3,
+            shadow=2,
+            animation="zoom",
+        ),
+        _builtin(
+            name="wiggle-cute",
+            label="살랑살랑 귀여움",
+            description="연성체 핑크 스티커 글자가 좌우로 살랑살랑 흔들립니다.",
+            sample="♡ 오늘도 행복하개 ♡",
+            category="motion",
+            font_name="Yeon Sung",
+            font_size=80,
+            primary_color="#FFB7D5",
+            outline_color="#FFFFFF",
+            outline=4,
+            outline2=2,
+            outline2_color="#C2185B",
+            shadow=0,
+            animation="wiggle",
+        ),
+        _builtin(
+            name="neon-pulse",
+            label="두근두근 네온",
+            description="속 빈 핑크 네온이 맥박처럼 밝아졌다 어두워집니다.",
+            sample="제발... 제발!!!!!",
+            category="motion",
+            font_name="Gaegu",
+            font_size=88,
+            bold=True,
+            outline_color="#FF5FE0",
+            outline=3,
+            shadow=0,
+            glow=8,
+            hollow=True,
+            animation="pulse",
+        ),
+        _builtin(
+            name="typewriter-pixel",
+            label="타자기 픽셀",
+            description="도트 글꼴 글자가 한 글자씩 타닥타닥 찍힙니다. 게임 대사처럼.",
+            sample="▶ 요래 됐습니다...",
+            category="motion",
+            font_name="Galmuri11 Regular",
+            font_size=64,
+            primary_color="#FFFFFF",
+            outline_color="#1A1A2E",
+            outline=2,
+            shadow=0,
+            animation="typewriter",
+            animation_ms=80,
+        ),
+        _builtin(
+            name="typewriter-serif",
+            label="타자기 바탕",
+            description="바탕체 흰 글자가 한 글자씩 나타납니다. 내레이션·편지에.",
+            sample="너에게 쓰는 편지",
+            category="motion",
+            font_name="Gowun Batang",
+            font_size=56,
+            outline=1,
+            shadow=0,
+            letter_spacing=2,
+            animation="typewriter",
+        ),
+        _builtin(
+            name="word-pop-clean",
+            label="단어별 톡톡",
+            description="프리텐다드 흰 글자가 단어 하나씩 톡톡 나타납니다. 자동 자막 느낌.",
+            sample="단어가 하나씩 톡톡 나와요",
+            category="motion",
+            font_name="Pretendard",
+            font_size=64,
+            bold=True,
+            outline=3,
+            shadow=0,
+            animation="word-pop",
+        ),
+        _builtin(
+            name="karaoke-yellow",
+            label="노래방 노랑",
+            description="말하는 단어가 차례로 노랗게 빛납니다. 릴스 자동 자막처럼.",
+            sample="말하는 단어가 노랗게 빛나요",
+            category="motion",
+            font_name="Pretendard",
+            font_size=64,
+            bold=True,
+            outline=3,
+            shadow=0,
+            accent_color="#FFE14D",
+            animation="karaoke",
+        ),
+        _builtin(
+            name="karaoke-card",
+            label="노래방 카드",
+            description="흰 둥근 카드 위에서 말하는 단어가 핑크로 바뀝니다.",
+            sample="지금 말하는 단어를 따라가요",
+            category="motion",
+            font_name="Gmarket Sans",
+            font_size=52,
+            bold=True,
+            primary_color="#222222",
+            border_style="box",
+            box_radius=16,
+            box_color="#FFFFFF",
+            outline=4,
+            shadow=0,
+            accent_color="#E84393",
+            animation="karaoke",
+        ),
     )
 }
 
@@ -1467,42 +1765,24 @@ def styled_document(
     style = template.style(height, font_size=font_size)
     add_styles(subs, "Default", template, style)
     for cue in cues:
-        lift = 0
-        if template.rounded_box:
-            anchor_x, anchor_y = _anchor_for(style, template, width, height)
-            subs.append(
-                pysubs2.SSAEvent(
-                    start=round(cue.start * 1000),
-                    end=round(cue.end * 1000),
-                    layer=0,
-                    style="Default-Box",
-                    text=rounded_box_text(
-                        template,
-                        cue.text,
-                        style.fontsize,
-                        anchor_x=anchor_x,
-                        anchor_y=anchor_y,
-                        vertical=template.position,
-                        horizontal=template.horizontal,
-                    ),
-                )
-            )
-            lift = 1
-        for layer, text, suffix in template.event_text_layers(cue.text):
-            subs.append(
-                pysubs2.SSAEvent(
-                    start=round(cue.start * 1000),
-                    end=round(cue.end * 1000),
-                    layer=layer + lift,
-                    style=f"Default{suffix}",
-                    text=text,
-                )
-            )
+        append_cue(
+            subs,
+            template,
+            style,
+            "Default",
+            start_ms=round(cue.start * 1000),
+            end_ms=round(cue.end * 1000),
+            text=cue.text,
+            width=width,
+            height=height,
+        )
     if title:
         add_styles(subs, "Title", template, template.title_style(height, font_size=font_size))
         # 제목은 영상 전체 동안 보입니다. 자막이 없어도 제목만 보일 수 있습니다.
-        # 장식·강조는 대사에만 붙입니다. 제목은 편집기에서 직접 적는 글자입니다.
-        plain_title = template.model_copy(update={"prefix": "", "suffix": "", "accent_color": ""})
+        # 장식·강조·움직임은 대사에만 붙입니다. 제목은 편집기에서 직접 적는 글자입니다.
+        plain_title = template.model_copy(
+            update={"prefix": "", "suffix": "", "accent_color": "", "animation": "none"}
+        )
         lift = 0
         if template.rounded_box:
             title_style = subs.styles["Title"]
@@ -1540,6 +1820,126 @@ def styled_document(
                 )
             )
     return subs
+
+
+def append_cue(
+    subs: pysubs2.SSAFile,
+    template: SubtitleTemplate,
+    style: pysubs2.SSAStyle,
+    name: str,
+    *,
+    start_ms: int,
+    end_ms: int,
+    text: str,
+    width: int,
+    height: int,
+    base_layer: int = 0,
+) -> None:
+    """자막 하나를 층별 이벤트로 넣습니다(둥근 상자 → 돌출 → 뒤 층 → 앞 층).
+
+    스타일 `name`(과 `-Box`, `-Extrude`, `-Back`)은 `add_styles`로 미리 넣어 둡니다.
+    움직임은 자막 길이에 맞춰 모든 층에 같게 붙습니다.
+    """
+    anchor = _anchor_for(style, template, width, height)
+    duration = max(0, end_ms - start_ms)
+    layer = base_layer
+    if template.rounded_box:
+        subs.append(
+            pysubs2.SSAEvent(
+                start=start_ms,
+                end=end_ms,
+                layer=layer,
+                style=f"{name}-Box",
+                text=rounded_box_text(
+                    template,
+                    text,
+                    style.fontsize,
+                    anchor_x=anchor[0],
+                    anchor_y=anchor[1],
+                    vertical=template.position,
+                    horizontal=template.horizontal,
+                    duration_ms=duration,
+                ),
+            )
+        )
+        layer += 1
+    for offset, body, suffix in template.event_text_layers(
+        text, duration_ms=duration, anchor=anchor
+    ):
+        subs.append(
+            pysubs2.SSAEvent(
+                start=start_ms,
+                end=end_ms,
+                layer=layer + offset,
+                style=f"{name}{suffix}",
+                text=body,
+            )
+        )
+
+
+REEL_CAPTION_FONT = "Noto Sans CJK KR"
+
+
+def reel_document(
+    templates: list[SubtitleTemplate],
+    *,
+    width: int,
+    height: int,
+    seconds_each: float = 2.5,
+    gap: float = 0.3,
+    text: str | None = None,
+    font_size: int | None = None,
+    captions: bool = True,
+) -> tuple[pysubs2.SSAFile, float]:
+    """템플릿을 차례로 보여 주는 영상용 ASS 문서와 전체 길이(초)를 돌려줍니다.
+
+    움직이는 템플릿은 정지 시트로는 볼 수 없어 짧은 영상으로 확인합니다. 템플릿마다
+    예문 하나를 `seconds_each`초 보이고 `gap`초 쉽니다. `captions`면 화면 위에 템플릿
+    이름과 움직임 종류를 작게 적습니다.
+    """
+    if not templates:
+        raise ValueError("영상에 넣을 템플릿이 없습니다.")
+    if seconds_each <= 0 or gap < 0:
+        raise ValueError("템플릿당 시간은 0보다 크고 쉬는 시간은 0 이상이어야 합니다.")
+    subs = pysubs2.SSAFile()
+    subs.info.update(PlayResX=str(width), PlayResY=str(height), WrapStyle="0")
+    if captions:
+        caption = pysubs2.SSAStyle(
+            fontname=REEL_CAPTION_FONT,
+            fontsize=max(24, height // 40),
+            primarycolor=pysubs2.Color(200, 200, 200),
+            outlinecolor=pysubs2.Color(0, 0, 0),
+            outline=1,
+            shadow=0,
+            alignment=pysubs2.Alignment.TOP_CENTER,
+            marginv=max(20, height // 40),
+        )
+        subs.styles["Caption"] = caption
+    slot = seconds_each + gap
+    for index, template in enumerate(templates):
+        name = f"T{index}"
+        style = template.style(height, font_size=font_size)
+        add_styles(subs, name, template, style)
+        start_ms = round(index * slot * 1000)
+        end_ms = round((index * slot + seconds_each) * 1000)
+        if captions:
+            label = f"{template.label} ({template.name}) · {template.animation_label}"
+            subs.append(
+                pysubs2.SSAEvent(start=start_ms, end=end_ms, style="Caption", text=plain_ass(label))
+            )
+        append_cue(
+            subs,
+            template,
+            style,
+            name,
+            start_ms=start_ms,
+            end_ms=end_ms,
+            text=text or template.sample or template.label,
+            width=width,
+            height=height,
+            base_layer=1,
+        )
+    return subs, len(templates) * slot
 
 
 def _ass_hex(color: str) -> str:
@@ -1581,11 +1981,14 @@ def rounded_box_text(
     anchor_y: float,
     vertical: Position,
     horizontal: Horizontal,
+    duration_ms: int | None = None,
 ) -> str:
     """글자 뒤에 놓는 둥근 상자 이벤트의 글자(명령 + 벡터 경로).
 
     `anchor`는 글자가 정렬되는 점(libass가 글자 상자를 맞추는 점)입니다. 글자 폭·높이를
     재서 그 둘레에 `outline`만큼 여백을 두고, `outline2`가 있으면 테두리를 두릅니다.
+    상자도 글자와 같은 정렬(`\\an`)로 그 점 가까이에 놓아 크기·회전 움직임이 글자와
+    같은 점을 중심으로 일어나게 합니다. `duration_ms`를 주면 글자와 같은 움직임을 붙입니다.
     """
     lines = strip_markup(template.decorate(text)).split("\n") or [""]
     sizes = [
@@ -1602,25 +2005,23 @@ def rounded_box_text(
     text_height = sum(size.line_height for size in sizes)
     pad = template.outline
     width, height = text_width + 2 * pad, text_height + 2 * pad
-    left = {
-        "left": anchor_x - pad,
-        "center": anchor_x - width / 2,
-        "right": anchor_x - width + pad,
-    }[horizontal]
-    top = {
-        "top": anchor_y - pad,
-        "middle": anchor_y - height / 2,
-        "bottom": anchor_y - height + pad,
-    }[vertical]
+    # 상자의 정렬점은 글자의 정렬점에서 여백만큼 바깥입니다.
+    box_x = anchor_x + {"left": -pad, "center": 0, "right": pad}[horizontal]
+    box_y = anchor_y + {"top": -pad, "middle": 0, "bottom": pad}[vertical]
     border = template.outline2 if template.border_style == "box-outline" else 0
-    tags = (
-        f"\\pos({left:.0f},{top:.0f})\\an7\\p1\\shad0"
+    motion = template.motion_tags(duration_ms, (box_x, box_y))
+    tags = "" if template.moves and motion else f"\\pos({box_x:.0f},{box_y:.0f})"
+    tags += (
+        f"\\an{int(alignment_for(vertical, horizontal))}\\p1\\shad0"
         f"\\1c{_ass_hex(template.box_color)}\\1a{_ass_alpha(template.box_color)}"
         f"\\3c{_ass_hex(template.outline_color)}\\bord{border:g}"
     )
     if template.angle:
         tags += f"\\frz{template.angle:g}"
-    return "{" + tags + "}" + rounded_rect_path(width, height, template.box_radius)
+        if not (template.moves and motion):
+            # 글자와 같은 점을 중심으로 돌게 합니다.
+            tags += f"\\org({anchor_x:.0f},{anchor_y:.0f})"
+    return "{" + tags + motion + "}" + rounded_rect_path(width, height, template.box_radius)
 
 
 def _anchor_for(style: pysubs2.SSAStyle, template: SubtitleTemplate, width: int, height: int):

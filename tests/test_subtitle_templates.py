@@ -404,9 +404,9 @@ def test_rounded_box_is_drawn_behind_the_text_and_sized_from_the_measured_text(m
     box = document.events[0].text
     assert box.startswith("{\\pos(") and "\\p1" in box and "\\bord3" in box and " b " in box
     assert "\\1c&HE8D1FF&" in box  # 상자 색 #FFD1E8 → BGR
-    # 상자는 글자보다 넓고, 글자의 정렬 점(아래 가운데) 위에 놓입니다.
+    # 상자는 글자와 같은 정렬(아래 가운데)로 글자의 정렬 점에서 여백만큼 아래에 놓입니다.
     x, y = map(int, box[6 : box.index(")")].split(","))
-    assert 0 < x < 540 and y < 1920 - style.marginv
+    assert (x, y) == (540, 1920 - style.marginv + template.outline) and "\\an2" in box
     path = rounded_rect_path(100, 40, 10)
     assert path.startswith("m 10 0 l 90 0 b ") and path.count(" b ") == 4
     # 반지름이 너무 크면 짧은 변의 절반으로 줄입니다.
@@ -447,3 +447,112 @@ def test_flow_layout_packs_rows_by_measured_width_and_keeps_integer_height():
     # 흐름 배치는 격자보다 짧습니다(빽빽하게 채우므로).
     _, grid_height = sheet_document(templates, width=1080, layout="grid")
     assert height < grid_height
+
+
+def test_animated_template_puts_the_same_motion_on_every_layer_but_not_the_title():
+    from pipeline.subtitle_motion import ANIMATION_LABELS
+
+    assert "motion" in CATEGORY_LABELS and CATEGORY_LABELS["motion"] == "움직임"
+    sticker = get_template("bounce-sticker")
+    assert sticker.animation == "bounce" and sticker.animation_label == ANIMATION_LABELS["bounce"]
+    document = styled_document(
+        [Cue(start=1, end=3, text="오늘의 브이로그")],
+        sticker,
+        width=1080,
+        height=1920,
+        duration=5,
+        title="제목",
+    )
+    back, front, title_back, title_front = document.events
+    assert (back.style, front.style) == ("Default-Back", "Default")
+    lead = back.text[: back.text.index("}") + 1]
+    assert lead.startswith("{\\q2\\move(540,") and "\\fscy84" in lead
+    assert front.text.startswith(lead)
+    # 제목은 영상 내내 보이므로 움직이지 않습니다.
+    assert "\\move" not in title_back.text and "\\t(" not in title_front.text
+    # 정지 화면(시트)에는 움직임이 붙지 않습니다.
+    assert all("\\t(" not in text for _, text, _ in sticker.event_text_layers("가"))
+
+
+def test_rounded_box_moves_and_scales_with_its_text():
+    card = get_template("drop-card")
+    assert card.rounded_box and card.animation == "slide-down"
+    document = styled_document(
+        [Cue(start=0, end=2, text="민주의 핑크 캐비닛")], card, width=1080, height=1920, duration=2
+    )
+    box, text = document.events
+    assert box.style == "Default-Box" and "\\pos(" not in box.text
+    # 상자는 글자와 같은 정렬(아래 가운데)로 놓이고 같은 거리만큼 움직입니다.
+    assert "\\an2" in box.text and "\\move(540," in box.text and "\\move(540," in text.text
+    moved = get_template("pink-cabinet")
+    still = (
+        styled_document(
+            [Cue(start=0, end=2, text="가")], moved, width=1080, height=1920, duration=2
+        )
+        .events[0]
+        .text
+    )
+    assert still.startswith("{\\pos(540,") and "\\an2" in still
+
+
+def test_with_animation_validates_and_karaoke_drops_accent_markup():
+    yellow = get_template("yellow")
+    popped = yellow.with_animation("pop", 500)
+    assert (popped.animation, popped.animation_ms, popped.motion_ms) == ("pop", 500, 500)
+    assert yellow.with_animation("fade").motion_ms == 250
+    with pytest.raises(ValueError, match="모르는 움직임"):
+        yellow.with_animation("spin")
+    with pytest.raises(ValidationError):
+        SubtitleTemplate.model_validate({**yellow.model_dump(), "animation_ms": 10})
+    bubble = get_template("bubble-pink").with_animation("karaoke")
+    layers = bubble.event_text_layers("[[딸기]]말차라떼 최고", duration_ms=2000, anchor=(540, 1600))
+    front = layers[-1][1]
+    # 노래방은 단어 색을 스스로 바꾸므로 강조 표기는 빠지고 강조 색으로 단어를 칠합니다.
+    assert "[[" not in front and front.count("\\r") == 2 and "\\1c&HD29BFF&" in front
+    # 강조 색이 없는 템플릿은 기본 노랑을 씁니다.
+    plain = get_template("default").with_animation("karaoke")
+    assert "\\1c&H4DE1FF&" in plain.event_text_layers("가 나", duration_ms=1000)[0][1]
+
+
+def test_reel_document_shows_templates_one_after_another():
+    from pipeline.subtitle_templates import reel_document
+
+    chosen = [get_template("pop-jalnan"), get_template("karaoke-card")]
+    document, seconds = reel_document(chosen, width=720, height=720, seconds_each=2, gap=0.5)
+    assert seconds == 5
+    captions = [e for e in document.events if e.style == "Caption"]
+    assert [(e.start, e.end) for e in captions] == [(0, 2000), (2500, 4500)]
+    assert "pop-jalnan" in captions[0].text and "팝" in captions[0].text
+    assert {e.style for e in document.events} >= {"T0", "T1-Box", "T1"}
+    assert any("\\fscx40" in e.text for e in document.events)
+    with pytest.raises(ValueError):
+        reel_document([], width=720, height=720)
+    with pytest.raises(ValueError):
+        reel_document(chosen, width=720, height=720, seconds_each=0)
+
+
+def test_render_applies_the_animation_named_in_the_edit_spec(tmp_path):
+    from worker.rendering import RenderError, write_subtitles
+
+    spec = EditSpec(
+        start=0,
+        end=5,
+        subtitle_template="yellow",
+        subtitle_animation="fade",
+        cues=[Cue(start=0, end=2, text="노랑")],
+    )
+    path = tmp_path / "captions.ass"
+    write_subtitles(path, spec)
+    assert "\\fad(250,250)" in path.read_text(encoding="utf-8")
+    # `none`은 템플릿의 움직임을 뺍니다.
+    write_subtitles(path, spec.model_copy(update={"subtitle_template": "pop-jalnan"}))
+    assert "\\fad(" in path.read_text(encoding="utf-8")
+    write_subtitles(
+        path,
+        spec.model_copy(update={"subtitle_template": "pop-jalnan", "subtitle_animation": "none"}),
+    )
+    assert "\\t(" not in path.read_text(encoding="utf-8")
+    with pytest.raises(RenderError, match="모르는 움직임"):
+        write_subtitles(path, spec.model_copy(update={"subtitle_animation": "spin"}))
+    with pytest.raises(ValidationError):
+        EditSpec(start=0, end=5, subtitle_animation="Spin!")

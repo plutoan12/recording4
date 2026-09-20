@@ -51,10 +51,12 @@ from pipeline.subtitle_files import (
     parse_subtitles,
 )
 from pipeline.subtitle_fonts import FONT_FAMILIES
+from pipeline.subtitle_motion import ANIMATION_LABELS
 from pipeline.subtitle_templates import (
     BUILTIN_TEMPLATES,
     CATEGORY_LABELS,
     SubtitleTemplate,
+    reel_document,
     resolve_template,
     sheet_document,
     styled_document,
@@ -139,6 +141,31 @@ def _add_template(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--no-rules", action="store_true", help="줄바꿈·분할 규칙을 적용하지 않고 그대로 씁니다."
     )
+    _add_animation(parser)
+
+
+def _add_animation(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--animation",
+        choices=tuple(ANIMATION_LABELS),
+        help="움직임. 템플릿 값보다 우선합니다. none이면 움직임을 뺍니다.",
+    )
+    parser.add_argument(
+        "--animation-ms",
+        type=int,
+        help="움직임 시간(ms, 40~3000). 등장 시간·글자당·단어당·한 주기. 비우면 종류별 기본값",
+    )
+
+
+def _apply_animation(template: SubtitleTemplate, args: argparse.Namespace) -> SubtitleTemplate:
+    kind = getattr(args, "animation", None)
+    ms = getattr(args, "animation_ms", None)
+    if kind is None and ms is None:
+        return template
+    try:
+        return template.with_animation(kind or template.animation, ms or template.animation_ms)
+    except ValueError as exc:
+        raise ToolError(str(exc)) from None
 
 
 def rules_from(args: argparse.Namespace) -> SubtitleRules:
@@ -399,9 +426,10 @@ def cmd_templates(args: argparse.Namespace) -> int:
 
 def _template_from(args: argparse.Namespace) -> SubtitleTemplate:
     try:
-        return resolve_template(args.template)
+        template = resolve_template(args.template)
     except ValueError as exc:
         raise ToolError(str(exc)) from None
+    return _apply_animation(template, args)
 
 
 def build_document(
@@ -599,6 +627,77 @@ def render_frame(
         shutil.copyfile(temp / "frame.png", output)
 
 
+CLIP_SUFFIXES = (".mp4", ".gif")
+CLIP_FPS = 30
+GIF_FPS = 15
+
+
+def render_clip(
+    ass_text: str,
+    output: Path,
+    *,
+    width: int,
+    height: int,
+    seconds: float,
+    fonts: Path | None,
+    background: str,
+) -> None:
+    """ASS 글자를 단색 배경 위 짧은 영상(MP4 또는 GIF)으로 그립니다. 움직임 확인용입니다."""
+    if output.suffix.lower() not in CLIP_SUFFIXES:
+        raise ToolError("영상 출력은 .mp4 또는 .gif여야 합니다.")
+    if not 0 < seconds <= 600:
+        raise ToolError("영상 길이는 0초 초과 600초 이하여야 합니다.")
+    ffmpeg = _binary("ffmpeg", "R4_FFMPEG_BINARY")
+    output.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="r4-motion-") as directory:
+        temp = Path(directory)
+        (temp / "motion.ass").write_text(ass_text, encoding="utf-8")
+        subtitles = subtitles_filter("motion.ass", fonts)
+        source = f"color=c={background}:s={width}x{height}:r={CLIP_FPS}:d={seconds:g}"
+        if output.suffix.lower() == ".gif":
+            # GIF는 팔레트를 먼저 뽑아야 색이 뭉개지지 않습니다.
+            codec = [
+                "-filter_complex",
+                f"[0:v]{subtitles},fps={GIF_FPS},split[a][b];[a]palettegen=stats_mode=diff[p];"
+                "[b][p]paletteuse=dither=bayer:bayer_scale=3",
+            ]
+        else:
+            codec = [
+                "-vf",
+                f"{subtitles},format=yuv420p",
+                "-c:v",
+                "libx264",
+                "-preset",
+                "fast",
+                "-crf",
+                "20",
+                "-movflags",
+                "+faststart",
+            ]
+        result = temp / f"result{output.suffix.lower()}"
+        command = [
+            ffmpeg,
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-nostdin",
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            source,
+            *codec,
+            str(result),
+        ]
+        try:
+            completed = subprocess.run(command, cwd=temp, capture_output=True, timeout=600)
+        except subprocess.TimeoutExpired:
+            raise ToolError("영상 렌더가 10분 제한을 넘었습니다.") from None
+        if completed.returncode:
+            raise ToolError("FFmpeg 렌더 실패: libass(subtitles 필터)·libx264와 글꼴을 확인하세요.")
+        shutil.copyfile(result, output)
+
+
 def _background(value: str) -> str:
     if not re.fullmatch(r"#[0-9A-Fa-f]{6}", value):
         raise ToolError("배경색은 #RRGGBB 형식이어야 합니다.")
@@ -609,46 +708,106 @@ def cmd_preview(args: argparse.Namespace) -> int:
     template = _template_from(args)
     fonts = fonts_dir_from(args)
     text = args.text or template.sample or template.label
-    cues = [Cue(start=0, end=1, text=text)]
+    background = _background(args.background)
+    suffix = args.output.suffix.lower()
+    if suffix not in (".png", *CLIP_SUFFIXES):
+        raise ToolError("미리보기 출력은 .png(정지 화면) 또는 .mp4/.gif(영상)여야 합니다.")
+    as_clip = suffix in CLIP_SUFFIXES
+    seconds = args.seconds if as_clip else 1
+    if not 0 < seconds <= 600:
+        raise ToolError("영상 길이는 0초 초과 600초 이하여야 합니다.")
+    cues = [Cue(start=0, end=seconds, text=text)]
     ass_text = build_document(
         cues,
         template,
         width=args.width,
         height=args.height,
-        duration=1,
+        duration=seconds,
         title=args.title,
         font_size=args.font_size,
         rules=None if args.no_rules else rules_from(args),
     )
+    if as_clip:
+        render_clip(
+            ass_text,
+            args.output,
+            width=args.width,
+            height=args.height,
+            seconds=seconds,
+            fonts=fonts,
+            background=background,
+        )
+        print(
+            f"{args.output}: 템플릿 {template.name}({template.label}, 움직임 "
+            f"{template.animation_label}) {seconds:g}초 영상을 썼습니다."
+        )
+        return EXIT_OK
     render_frame(
         ass_text,
         args.output,
         width=args.width,
         height=args.height,
         fonts=fonts,
-        background=_background(args.background),
+        background=background,
     )
     print(f"{args.output}: 템플릿 {template.name}({template.label}) 미리보기를 썼습니다.")
     return EXIT_OK
 
 
-def cmd_sheet(args: argparse.Namespace) -> int:
-    fonts = fonts_dir_from(args)
+def _chosen_templates(args: argparse.Namespace) -> list[SubtitleTemplate]:
+    """`--templates`(이름·JSON) 또는 `--category`로 고른 템플릿. 비우면 전부."""
     if args.templates:
         try:
-            chosen = [resolve_template(name) for name in args.templates]
+            return [resolve_template(name) for name in args.templates]
         except ValueError as exc:
             raise ToolError(str(exc)) from None
-    elif args.category:
-        grouped = templates_by_category()
+    grouped = templates_by_category()
+    if args.category:
         unknown = [c for c in args.category if c not in grouped]
         if unknown:
             raise ToolError(
                 f"모르는 카테고리입니다: {', '.join(unknown)}. 쓸 수 있는 것: {', '.join(grouped)}"
             )
-        chosen = [t for c in args.category for t in grouped[c]]
-    else:
-        chosen = [t for templates in templates_by_category().values() for t in templates]
+        return [t for c in args.category for t in grouped[c]]
+    return [t for templates in grouped.values() for t in templates]
+
+
+def cmd_reel(args: argparse.Namespace) -> int:
+    fonts = fonts_dir_from(args)
+    chosen = [_apply_animation(t, args) for t in _chosen_templates(args)]
+    if args.font_size is not None and not 20 <= args.font_size <= 120:
+        raise ToolError("글자 크기는 20~120이어야 합니다.")
+    try:
+        document, seconds = reel_document(
+            chosen,
+            width=args.width,
+            height=args.height,
+            seconds_each=args.seconds,
+            gap=args.gap,
+            text=args.text,
+            font_size=args.font_size,
+            captions=not args.no_captions,
+        )
+    except ValueError as exc:
+        raise ToolError(str(exc)) from None
+    if args.ass:
+        _write_text(args.ass, document.to_string("ass"))
+    render_clip(
+        document.to_string("ass"),
+        args.output,
+        width=args.width,
+        height=args.height,
+        seconds=seconds,
+        fonts=fonts,
+        background=_background(args.background),
+    )
+    print(f"{args.output}: 템플릿 {len(chosen)}종을 {seconds:g}초 영상으로 썼습니다.")
+    return EXIT_OK
+
+
+def cmd_sheet(args: argparse.Namespace) -> int:
+    fonts = fonts_dir_from(args)
+    chosen = _chosen_templates(args)
     try:
         document, height = sheet_document(
             chosen,
@@ -768,9 +927,12 @@ def build_parser() -> argparse.ArgumentParser:
     _add_rules(burn)
     burn.set_defaults(run=cmd_burn)
 
-    preview = sub.add_parser("preview", help="템플릿 하나를 PNG 한 장으로 (FFmpeg 필요)")
-    preview.add_argument("output", type=Path)
+    preview = sub.add_parser(
+        "preview", help="템플릿 하나를 PNG 한 장 또는 .mp4/.gif 짧은 영상으로 (FFmpeg 필요)"
+    )
+    preview.add_argument("output", type=Path, help=".png는 정지 화면, .mp4/.gif는 움직임 영상")
     preview.add_argument("--text", help="예문. 비우면 템플릿의 예문")
+    preview.add_argument("--seconds", type=float, default=3.0, help="영상 출력의 길이(초). 기본 3")
     preview.add_argument("--width", type=int, default=DEFAULT_WIDTH)
     preview.add_argument("--height", type=int, default=DEFAULT_HEIGHT)
     preview.add_argument("--background", default="#141414", help="배경색 #RRGGBB")
@@ -799,6 +961,25 @@ def build_parser() -> argparse.ArgumentParser:
     sheet.add_argument("--ass", type=Path, help="시트 ASS 파일도 함께 저장")
     _add_fonts_dir(sheet)
     sheet.set_defaults(run=cmd_sheet)
+
+    reel = sub.add_parser(
+        "reel", help="템플릿을 차례로 보여 주는 .mp4/.gif 영상 (움직임 확인용, FFmpeg 필요)"
+    )
+    reel.add_argument("output", type=Path)
+    reel.add_argument("--templates", nargs="*", help="넣을 템플릿 이름 또는 JSON 파일. 비우면 전부")
+    reel.add_argument("--category", nargs="*", help="넣을 카테고리. 비우면 전부")
+    reel.add_argument("--text", help="모든 템플릿에 같은 예문을 씁니다. 비우면 템플릿별 예문")
+    reel.add_argument("--seconds", type=float, default=2.5, help="템플릿당 시간(초). 기본 2.5")
+    reel.add_argument("--gap", type=float, default=0.3, help="템플릿 사이 빈 시간(초). 기본 0.3")
+    reel.add_argument("--width", type=int, default=DEFAULT_WIDTH)
+    reel.add_argument("--height", type=int, default=DEFAULT_HEIGHT)
+    reel.add_argument("--font-size", type=int, help="글자 크기. 템플릿 값보다 우선합니다.")
+    reel.add_argument("--background", default="#141414", help="배경색 #RRGGBB")
+    reel.add_argument("--no-captions", action="store_true", help="화면 위 템플릿 이름을 뺍니다.")
+    reel.add_argument("--ass", type=Path, help="영상 ASS 파일도 함께 저장")
+    _add_animation(reel)
+    _add_fonts_dir(reel)
+    reel.set_defaults(run=cmd_reel)
     return parser
 
 

@@ -23,8 +23,9 @@ python -m pipeline.subtitle_tool --help   # 같은 도구
 | `shift IN OUT --offset 초` | 시각 이동. 0초 앞으로 나간 자막은 자르고 다 나간 자막은 뺌 | 0 |
 | `cut IN OUT --start 초 --end 초` | 구간만 남기고 구간 시작을 0초로 | 0 |
 | `templates list` / `show 이름` / `export 이름 OUT.json` / `check` | 내장 템플릿 목록(카테고리별)·내용·JSON 저장·글꼴 확인 | check는 문제 있으면 1 |
-| `preview OUT.png --template 이름` | 템플릿 하나를 PNG 한 장으로 | 0 |
+| `preview OUT.png\|.mp4\|.gif --template 이름` | 템플릿 하나를 PNG 한 장 또는 짧은 영상(움직임 확인)으로 | 0 |
 | `sheet OUT.png [--category ...] [--templates ...]` | 내장 템플릿 전부(또는 일부)를 한 장의 PNG 시트로 | 0 |
+| `reel OUT.mp4\|.gif [--category ...] [--templates ...]` | 템플릿을 차례로 보여 주는 영상. 움직이는 템플릿 확인용 | 0 |
 | `style IN OUT.ass --template 이름\|파일.json` | 템플릿 모양의 ASS 파일 생성 | 0 |
 | `burn VIDEO SUBS OUT.mp4 --template ...` | FFmpeg로 영상에 자막 굽기 | 0 |
 
@@ -48,7 +49,7 @@ python -m pipeline.subtitle_tool --help   # 같은 도구
 
 템플릿은 **영상에 굽는 자막의 모양**입니다. 어떤 자막을 언제 보일지(줄바꿈·분할·구간)는 표시 규칙이 정하고, SRT·VTT 파일에는 모양이 들어가지 않습니다.
 
-내장 템플릿은 카테고리별로 69종입니다. 인스타그램 브이로그 편집자들이 파는 "자막 템플릿 팩"의 흔한 모양(파스텔 상자, 네온 글로우, 픽셀, 통통한 외곽선, 손글씨, 영화 자막, 레트로)을 libass가 그릴 수 있는 값으로 옮긴 것입니다. 전체 목록은 `r4-subtitles templates list`, 실제 렌더 모양은 `r4-subtitles sheet`로 봅니다.
+내장 템플릿은 카테고리별로 82종입니다. 인스타그램 브이로그 편집자들이 파는 "자막 템플릿 팩"의 흔한 모양(파스텔 상자, 네온 글로우, 픽셀, 통통한 외곽선, 손글씨, 영화 자막, 레트로)을 libass가 그릴 수 있는 값으로 옮긴 것입니다. 전체 목록은 `r4-subtitles templates list`, 실제 렌더 모양은 `r4-subtitles sheet`로 봅니다.
 
 | 카테고리 | 이름 | 모양 |
 |---|---|---|
@@ -61,6 +62,7 @@ python -m pipeline.subtitle_tool --help   # 같은 도구
 | 상자·카드 | `box`, `pink-cabinet`, `note-yellow`, `note-pink`, `note-blue`, `tmi-blue`, `white-card`, `black-tag`, `cyan-strip`, `news-bar`, `wanted-mint-card` | 파스텔 상자·테두리 카드·검은 태그·빨간 뉴스 바·민트 카드. 소제목, 짧은 한마디, 제품 정보에 |
 | 손글씨 | `pen-white`, `melody-pink`, `gamja-yellow`, `brush-white`, `brush-shadow`, `diary`, `brush-red` | 나눔손글씨 펜·붓, 하이멜로디, 감자꽃, 서툰이야기, 독도 붓글씨 |
 | 레트로·세리프 | `movie-serif`, `luxury-serif`, `retro-orange`, `retro-blue-pixel`, `retro-blue-3d`, `songmyung-cream`, `elegant-serif`, `grandiflora-pink` | 고운바탕 영화 자막, 모이라이 레트로, 송명·디필레이아·그랜디플로라 세리프, 파란 도트 |
+| 움직임 | `pop-jalnan`, `bounce-sticker`, `slide-vlog`, `drop-card`, `fade-film`, `zoom-title`, `wiggle-cute`, `neon-pulse`, `typewriter-pixel`, `typewriter-serif`, `word-pop-clean`, `karaoke-yellow`, `karaoke-card` | 위 모양에 움직임을 붙인 것. 팝·바운스·슬라이드·페이드·줌·흔들림·맥박·타자기·단어별 등장·노래방 강조. 아래 [움직임](#움직임) 참고 |
 
 값을 바꾸려면 내보내서 고칩니다.
 
@@ -99,6 +101,35 @@ r4-subtitles burn source.mp4 captions.srt result.mp4 --template mine.json
 | `margin_vertical_ratio` | 화면 높이 대비 위·아래 여백 비율 | 0.13 |
 | `letter_spacing` | 자간 | 0 |
 | `prefix`, `suffix` | 자막 앞뒤 장식 기호(★ ☆ ♡ ✳ ♪ ✧ 등), 8자 이하. 글꼴에 있는 글자여야 그려지고 이모지는 안 됩니다 | 빈 값 |
+| `animation` | 움직임 종류. `none`, `fade`, `pop`, `bounce`, `slide-up`, `slide-down`, `zoom`, `wiggle`, `pulse`, `typewriter`, `word-pop`, `karaoke` | `none` |
+| `animation_ms` | 움직임 시간(ms, 40~3000). 등장 효과는 등장에 걸리는 시간, 타자기는 글자 하나, 단어별 등장은 단어 하나, 흔들림·맥박은 한 주기. 비우면 종류별 기본값 | 빈 값 |
+
+### 움직임
+
+어떤 템플릿이든 `animation`을 주면 자막마다 시작 시각에 맞춰 움직입니다. 편집기의 **자막 움직임** 선택(`/clips`의 `subtitle_animation`)과 명령줄 `--animation`은 템플릿 값을 덮어쓰고, `none`이면 움직임을 뺍니다. 구현은 `packages/pipeline/pipeline/subtitle_motion.py`이며 libass가 지원하는 ASS 명령만 씁니다.
+
+| 종류 | 움직임 | ASS 명령 |
+|---|---|---|
+| `fade` | 서서히 나타났다 사라짐 | `\fad` |
+| `pop` | 작았다가 살짝 크게 튀어나온 뒤 제자리 | `\fscx`/`\fscy` + `\t` |
+| `bounce` | 위에서 떨어져 바닥에서 납작해졌다 펴짐 | `\move` + `\t` |
+| `slide-up`, `slide-down` | 아래(위)에서 밀려 들어오며 나타남 | `\move` + `\fad` |
+| `zoom` | 보이는 동안 천천히 커짐(인트로 제목) | `\t(\fscx\fscy)` |
+| `wiggle` | 좌우로 살랑살랑 흔들림(±3°) | `\t(\frz)` 반복 |
+| `pulse` | 맥박처럼 커졌다 작아짐. 글로우가 있으면 번짐도 함께 | `\t(\fscx\fscy\blur)` 반복 |
+| `typewriter` | 한 글자씩 나타남. 자막 길이의 70% 안에 다 나옴 | 글자마다 `\alpha` + `\t` |
+| `word-pop` | 단어가 하나씩 톡톡 나타남(세로로 살짝 커졌다 줄어듦) | 단어마다 `\alpha`·`\fscy` + `\t` |
+| `karaoke` | 말하는 단어가 차례로 `accent_color`(없으면 노랑)로 바뀜. 자막 길이를 단어 수로 고르게 나눔 | 단어마다 `\t(\1c)` |
+
+글자·단어마다 붙는 움직임은 앞 조각의 명령이 뒤 조각에 이어지는 ASS 규칙 때문에 조각마다 `\r`로 되돌린 뒤 그때까지의 명령(글로우, 이모지 글꼴, 강조 색)을 다시 적습니다. 노래방은 단어 색을 스스로 바꾸므로 `[[...]]` 강조와 함께 쓰이지 않습니다(표기만 빠집니다). 둥근 상자·바깥 테두리·입체 돌출 층은 모두 같은 움직임을 받아 함께 움직이며, 크기가 변하는 동안 libass가 줄을 다시 나누지 않도록 `\q2`를 붙입니다. 화면 제목과 미리보기 시트에는 움직임이 붙지 않습니다.
+
+노래방·단어별 등장은 자막 안에서 단어 시각을 모르므로 자막 길이를 고르게 나눕니다. 말과 정확히 맞추려면 자막을 짧게(한 문장씩) 나누는 것이 좋습니다. 단어별 실제 시각(whisper 단어 타임스탬프)을 쓰는 것은 다음 작업입니다.
+
+```bash
+r4-subtitles preview pop.mp4 --template yellow --animation pop --seconds 2 --fonts-dir .fonts
+r4-subtitles reel motion.gif --category motion --width 540 --height 540 --fonts-dir .fonts
+r4-subtitles style in.srt out.ass --template karaoke-yellow           # 움직임이 든 ASS
+```
 
 ### 이모지
 
@@ -139,14 +170,17 @@ Nanum Pen Script와 Galmuri는 파일 안의 family 이름이 Google Fonts 이�
 
 ```bash
 r4-subtitles templates check --fonts-dir .fonts                      # 글꼴이 실제로 찾아지는지
-r4-subtitles sheet templates.png --fonts-dir .fonts                  # 69종 전부 한 장 (흐름 배치, 1080x약 5000)
+r4-subtitles sheet templates.png --fonts-dir .fonts                  # 82종 전부 한 장 (흐름 배치, 1080x약 5600)
 r4-subtitles sheet neon.png --category neon pixel --columns 1 --width 720 --text "같은 예문"
 r4-subtitles preview one.png --template neon-pink --text "제발... 제발!!!!!" --height 400
+r4-subtitles reel motion.mp4 --category motion --width 720 --height 720 --fonts-dir .fonts  # 움직임 확인
 ```
+
+`preview`는 출력이 `.mp4`/`.gif`면 `--seconds`(기본 3초) 길이의 영상을 만들어 움직임을 볼 수 있고, `reel`은 고른 템플릿을 차례로(템플릿당 `--seconds`, 기본 2.5초) 보여 주며 화면 위에 이름과 움직임 종류를 적습니다. CI의 `워커 이미지 빌드`는 움직임 카테고리 영상 `subtitle-motion.mp4`도 같은 artifact에 올립니다.
 
 `sheet`는 기본(`--layout flow`)으로 글자 폭을 재서 한 줄에 들어가는 만큼 채워 넣어 참고 이미지처럼 빽빽하게 만들고, `--layout grid`는 같은 크기 칸에 하나씩 놓습니다. 인스타그램 소개 이미지처럼 템플릿마다 예문 한 줄을 놓고 카테고리 구분 줄과 흐린 별 배경을 넣어 한 프레임으로 렌더합니다. 글자 크기는 칸에 맞춰 줄이므로(글꼴별 폭 계수로 어림) 실제 영상보다 작게 보일 수 있습니다. `--columns 1`로 크게 볼 수 있습니다. CI의 `워커 이미지 빌드`가 실제 글꼴로 시트를 만들어 `subtitle-template-sheet` artifact로 올리고, `templates check`로 글꼴 누락을 잡습니다.
 
-관리화면의 템플릿 선택은 같은 글꼴을 Google Fonts CSS로 불러 **CSS로 흉내 낸** 미리보기를 보여 줍니다. 픽셀 글꼴은 Google Fonts에 없어 고정폭으로 대신하고, 글로우·상자·바깥 테두리·기울임은 `text-shadow`·배경·`transform`으로 근사합니다. 정확한 모양은 시트나 실제 렌더로 확인합니다.
+관리화면의 템플릿 선택은 같은 글꼴을 Google Fonts CSS로 불러 **CSS로 흉내 낸** 미리보기를 보여 줍니다. 움직임은 CSS 키프레임으로 비슷하게 반복 재생하고(타자기·단어별·노래방은 가리개 걷기·페이드로 대신), **자막 움직임** 선택으로 어떤 템플릿에든 다른 움직임을 붙일 수 있습니다. 픽셀 글꼴은 Google Fonts에 없어 고정폭으로 대신하고, 글로우·상자·바깥 테두리·기울임은 `text-shadow`·배경·`transform`으로 근사합니다. 정확한 모양은 시트나 실제 렌더로 확인합니다.
 
 ## 관리화면·API 연결
 
