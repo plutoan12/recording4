@@ -10,8 +10,15 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from pipeline.editing import Cue, EditSpec
+from pipeline.subtitle_stickers import clip_stickers
 from pipeline.subtitles import DEFAULT_RULES, SubtitleRules
-from worker.rendering import ffmpeg_binary, subtitles_filter, video_filter, write_subtitles
+from worker.rendering import (
+    ffmpeg_binary,
+    subtitles_filter,
+    video_filter,
+    video_filter_args,
+    write_subtitles,
+)
 
 RATE = 48000
 
@@ -161,6 +168,8 @@ def render_final(
             subtitle_template=clip.subtitle_template if clip else "default",
             subtitle_animation=clip.subtitle_animation if clip else None,
             font_size=clip.font_size if clip else max(20, height // 24),
+            # 스티커 시각은 원본 시간축이라 여기서 구간 시작이 0초가 되게 옮깁니다.
+            stickers=clip_stickers(clip.stickers, start, start + duration) if clip else [],
         )
         write_subtitles(temp / "captions.ass", captions, rules)
         filters = (
@@ -176,12 +185,9 @@ def render_final(
                 str(source.resolve()),
                 "-t",
                 str(duration),
-                "-map",
-                "0:v:0",
+                *video_filter_args(captions, base_chain=filters),
                 "-map",
                 "0:a:0?",
-                "-vf",
-                filters,
                 "-c:v",
                 "libx264",
                 "-preset",

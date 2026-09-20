@@ -17,6 +17,10 @@ type Template = { name: string; label: string; description: string; category: st
   animation: string; animation_ms: number | null; animation_label: string;
   gradient_color: string; gradient_direction: 'vertical' | 'horizontal' }
 type AnimationChoice = { name: string; label: string }
+type StickerKind = { kind: string; label: string; images?: string[] }
+// 워커의 pipeline.subtitle_stickers.Sticker와 같은 항목입니다. 시각은 원본 영상 기준 초입니다.
+type Sticker = { kind: string; image?: string | null; x: number; y: number; size: number; start: number; end: number | null;
+  color: string; outline_color: string; outline: number; angle: number; animation: string }
 
 // 워커의 ASS 움직임을 CSS 키프레임(styles.css의 r4-motion-*)으로 흉내 냅니다. 타자기·단어별·
 // 노래방은 글자 단위라 CSS로는 비슷한 느낌(가리개 걷기·페이드)만 보여 줍니다.
@@ -123,6 +127,8 @@ export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWo
   // 빈 값이면 템플릿의 움직임을 그대로 씁니다.
   const [animation,setAnimation] = useState('')
   const [animations,setAnimations] = useState<AnimationChoice[]>([])
+  const [stickerKinds,setStickerKinds] = useState<StickerKind[]>([])
+  const [stickers,setStickers] = useState<Sticker[]>([])
   const [title, setTitle] = useState('')
   const [captions, setCaptions] = useState<Cue[]>([])
   const [suggestions, setSuggestions] = useState<Suggestion[]>([])
@@ -154,6 +160,7 @@ export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWo
     // 내장 템플릿 목록은 서버가 정합니다. 못 받으면 기본 템플릿만 남겨 렌더는 계속할 수 있게 합니다.
     request<Template[]>('/subtitle-templates').then(setTemplates).catch(() => setTemplates([]))
     request<AnimationChoice[]>('/subtitle-animations').then(setAnimations).catch(() => setAnimations([]))
+    request<StickerKind[]>('/stickers').then(setStickerKinds).catch(() => setStickerKinds([]))
   }, [])
 
   async function act(operation: () => Promise<void>) {
@@ -198,6 +205,11 @@ export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWo
         + (imported.skipped.length ? ` 뺀 자막 ${imported.skipped.length}개: ${imported.skipped.join(' ')}` : ''))
     })
   }
+  function updateSticker(index: number, patch: Partial<Sticker>) {
+    setStickers(current => current.map((s, i) => i === index ? {...s, ...patch} : s))
+  }
+  // 정확 미리보기에 넣을 스티커: 시각을 선택 구간 기준(0초)으로 옮기고 이미지는 뺍니다(합성 단계).
+  const previewStickers = stickers.filter(s => s.kind !== 'image').map(s => ({...s, image: undefined, start: 0, end: null}))
   function updateCue(index: number, patch: Partial<Cue>) {
     setCaptions(current => current.map((cue, i) => i === index ? {...cue, ...patch, ...(patch.text !== undefined && patch.text !== cue.text ? {words: null} : {})} : cue))
   }
@@ -287,13 +299,41 @@ export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWo
       </select></label>
       {burn && (() => { const chosen = templates.find(t => t.name === template); return chosen ? <div className="template-chosen">
         <TemplatePreview template={chosen} animation={animation || undefined} />
-        <SubtitlePreview template={chosen.name} animation={animation || undefined} text={captions.find(c => c.text.trim())?.text.split('\n')[0]} />
+        <SubtitlePreview template={chosen.name} animation={animation || undefined} text={captions.find(c => c.text.trim())?.text.split('\n')[0]} stickers={previewStickers} />
         <p>{chosen.description} 영상에 굽는 자막의 모양이며 SRT·VTT 파일에는 영향이 없습니다. 위 첫 줄은 CSS 근사이고, 아래 세로 화면은 워커와 같은 libass 렌더(정확 미리보기)입니다.{chosen.accent_color && ' 자막 내용에서 [[이렇게]] 감싼 부분은 강조 색으로 그려지고, 파일에는 괄호 없이 나갑니다.'}{(animation || chosen.animation !== 'none') && ' 움직임은 자막마다 시작 시각에 맞춰 붙고 화면 제목에는 붙지 않습니다.'}</p>
       </div> : null })()}
       {burn && templates.length > 0 && <details className="template-gallery"><summary>템플릿 전체 미리보기 ({templates.length}종)</summary>
         <div className="template-grid">{templates.map(t => <button type="button" key={t.name} className={t.name === template ? 'selected' : ''} onClick={() => setTemplate(t.name)} title={t.description}>
           <TemplatePreview template={t} /><small>{t.label}</small>
         </button>)}</div>
+      </details>}
+      {burn && <details className="sticker-panel" open={stickers.length > 0}>
+        <summary>스티커 ({stickers.length})</summary>
+        <p>화살표·반짝이·말풍선 같은 장식을 자막 위에 얹습니다. 자리는 화면 비율(0~1), 크기는 px, 시각은 원본 영상 기준 초이고 비우면 구간 끝까지입니다. 이미지(PNG)는 워커의 스티커 디렉터리에 있는 파일만 쓸 수 있고 움직임이 붙지 않습니다.</p>
+        {stickers.map((s, index) => <div className="sticker-row" key={index}>
+          <label>종류<select value={s.kind} onChange={e => updateSticker(index, {kind: e.target.value, image: e.target.value === 'image' ? (stickerKinds.find(k => k.kind === 'image')?.images?.[0] ?? null) : null})}>
+            {stickerKinds.map(k => <option key={k.kind} value={k.kind}>{k.label}</option>)}
+          </select></label>
+          {s.kind === 'image' && <label>파일<select value={s.image ?? ''} onChange={e => updateSticker(index, {image: e.target.value || null})}>
+            <option value="">(없음)</option>
+            {(stickerKinds.find(k => k.kind === 'image')?.images ?? []).map(name => <option key={name} value={name}>{name}</option>)}
+          </select></label>}
+          <label>가로 위치<input type="number" min="0" max="1" step="0.05" value={s.x} onChange={e => updateSticker(index, {x: Number(e.target.value)})} /></label>
+          <label>세로 위치<input type="number" min="0" max="1" step="0.05" value={s.y} onChange={e => updateSticker(index, {y: Number(e.target.value)})} /></label>
+          <label>크기(px)<input type="number" min="16" max="1080" step="8" value={s.size} onChange={e => updateSticker(index, {size: Number(e.target.value)})} /></label>
+          <label>시작(초)<input type="number" min="0" step="0.1" value={s.start} onChange={e => updateSticker(index, {start: Number(e.target.value)})} /></label>
+          <label>종료(초)<input type="number" min="0" step="0.1" value={s.end ?? ''} onChange={e => updateSticker(index, {end: e.target.value === '' ? null : Number(e.target.value)})} /></label>
+          {s.kind !== 'image' && <>
+            <label>색<input type="color" value={s.color.slice(0, 7)} onChange={e => updateSticker(index, {color: e.target.value.toUpperCase()})} /></label>
+            <label>외곽선 색<input type="color" value={s.outline_color.slice(0, 7)} onChange={e => updateSticker(index, {outline_color: e.target.value.toUpperCase()})} /></label>
+            <label>기울기<input type="number" min="-180" max="180" step="5" value={s.angle} onChange={e => updateSticker(index, {angle: Number(e.target.value)})} /></label>
+            <label>움직임<select value={s.animation} onChange={e => updateSticker(index, {animation: e.target.value})}>
+              {animations.filter(a => !['typewriter', 'word-pop', 'karaoke'].includes(a.name)).map(a => <option key={a.name} value={a.name}>{a.label}</option>)}
+            </select></label>
+          </>}
+          <button onClick={() => setStickers(current => current.filter((_, i) => i !== index))}>삭제</button>
+        </div>)}
+        <button onClick={() => setStickers(current => [...current, {kind: 'arrow-down', x: 0.5, y: 0.3, size: 160, start, end: null, color: '#FFE14D', outline_color: '#111111', outline: 2, angle: 0, animation: 'bounce'}])}>스티커 추가</button>
       </details>}
       {captions.map((cue, index) => <div className="caption-row" key={index}>
         <label>시작(초)<input type="number" min="0" step="0.01" value={cue.start} onChange={e => updateCue(index,{start:Number(e.target.value)})} /></label>
@@ -318,11 +358,11 @@ export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWo
           setMessage('저장된 대본의 문장 경계로 후보를 만들었습니다. AI 인기도 예측은 아닙니다.')
         })}>구간 후보 찾기</button>
         <button disabled={busy || end <= start || end-start > 180} onClick={() => void act(async () => {
-          await request('/clips', {method:'POST', body: JSON.stringify({source_asset_id:assetId, start, end, mode, focus_x:focus, title, burn_subtitles:burn, caption_language:captionLanguage, subtitle_template:template, subtitle_animation:animation || null, cues:captions})})
+          await request('/clips', {method:'POST', body: JSON.stringify({source_asset_id:assetId, start, end, mode, focus_x:focus, title, burn_subtitles:burn, caption_language:captionLanguage, subtitle_template:template, subtitle_animation:animation || null, cues:captions, stickers})})
           setMessage('새 편집본의 렌더를 요청했습니다.'); await refresh()
         })}>숏폼 렌더</button>
       </div>
-      <button disabled={busy||end<=start||end-start>180} onClick={()=>{onWorkflow({source_asset_id:assetId,start,end,mode,focus_x:focus,title,burn_subtitles:burn,caption_language:captionLanguage,subtitle_template:template,subtitle_animation:animation||undefined,cues:captions});setMessage('아래 단계별 제작 화면에 선택 구간을 전달했습니다.')}}>선택 구간을 번역·더빙 단계로 보내기</button>
+      <button disabled={busy||end<=start||end-start>180} onClick={()=>{onWorkflow({source_asset_id:assetId,start,end,mode,focus_x:focus,title,burn_subtitles:burn,caption_language:captionLanguage,subtitle_template:template,subtitle_animation:animation||undefined,cues:captions,stickers});setMessage('아래 단계별 제작 화면에 선택 구간을 전달했습니다.')}}>선택 구간을 번역·더빙 단계로 보내기</button>
       {suggestions.map((s,i) => <button key={i} onClick={() => {setStart(s.start);setEnd(s.end);setTitle(s.title)}}>{s.start.toFixed(1)}–{s.end.toFixed(1)}초 · {s.title}</button>)}
     </>}
     {message && <p role="status">{message}</p>}

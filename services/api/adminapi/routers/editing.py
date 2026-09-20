@@ -42,6 +42,7 @@ from pipeline.subtitle_files import (
 )
 from pipeline.subtitle_metrics import font_file_for
 from pipeline.subtitle_motion import ANIMATION_LABELS
+from pipeline.subtitle_stickers import STICKER_LABELS, Sticker, add_sticker_events
 from pipeline.subtitle_templates import (
     CATEGORY_LABELS,
     TEMPLATE_NAME,
@@ -471,6 +472,25 @@ def subtitle_templates(user: CurrentUser) -> list[dict]:
     ]
 
 
+@router.get("/stickers")
+def stickers(user: CurrentUser) -> list[dict]:
+    """편집기가 붙일 수 있는 스티커 종류. `kind`를 `stickers[].kind`로 보냅니다.
+
+    `image`는 워커의 스티커 디렉터리(R4_STICKERS_DIR)에 있는 PNG 파일 이름을 `image`로
+    함께 보냅니다. 파일 목록은 서버 설정(R4_STICKERS_DIR)이 API에도 있을 때만 붙습니다.
+    """
+    import os
+
+    directory = os.environ.get("R4_STICKERS_DIR", "").strip()
+    images = []
+    if directory and os.path.isdir(directory):
+        images = sorted(name for name in os.listdir(directory) if name.lower().endswith(".png"))
+    return [
+        {"kind": kind, "label": label, **({"images": images} if kind == "image" else {})}
+        for kind, label in STICKER_LABELS.items()
+    ]
+
+
 @router.get("/subtitle-animations")
 def subtitle_animations(user: CurrentUser) -> list[dict]:
     """편집기가 고를 수 있는 자막 움직임. 이름을 `subtitle_animation`으로 보냅니다.
@@ -488,6 +508,8 @@ class PreviewRequest(BaseModel):
     height: int = Field(default=960, ge=180, le=1920, multiple_of=2)
     seconds: float = Field(default=3.0, gt=0, le=10)
     font_size: int | None = Field(default=None, ge=20, le=120)
+    # 벡터 스티커만 미리보기에 그립니다(이미지는 합성 단계라 빠집니다). 시각은 0초 기준입니다.
+    stickers: list[Sticker] = Field(default_factory=list, max_length=20)
 
 
 _FONT_TAG = re.compile(r"\\fn([^\\}]+)")
@@ -517,6 +539,13 @@ def subtitle_preview(payload: PreviewRequest, user: CurrentUser) -> dict:
         height=payload.height,
         duration=payload.seconds,
         font_size=payload.font_size,
+    )
+    add_sticker_events(
+        document,
+        payload.stickers,
+        width=payload.width,
+        height=payload.height,
+        duration=payload.seconds,
     )
     ass = document.to_string("ass")
     families = {style.fontname for style in document.styles.values()}

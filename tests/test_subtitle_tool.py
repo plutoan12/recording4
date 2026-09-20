@@ -300,3 +300,17 @@ def test_preview_and_reel_render_clips_when_ffmpeg_exists(tmp_path, capsys):
     )
     assert gif.read_bytes()[:6] in (b"GIF89a", b"GIF87a")
     assert "Caption" in ass.read_text(encoding="utf-8") and "2종을 2초" in capsys.readouterr().out
+
+
+def test_stickers_list_and_style_with_stickers(srt, tmp_path, capsys):
+    assert main(["stickers", "list"]) == EXIT_OK
+    assert "arrow-right" in capsys.readouterr().out
+    out = tmp_path / "s.ass"
+    sticker = '{"kind":"star","x":0.8,"y":0.2,"size":120,"start":0,"end":1.5,"animation":"pop"}'
+    assert main(["style", str(srt), str(out), "--sticker", sticker]) == EXIT_OK
+    text = out.read_text(encoding="utf-8")
+    assert "Style: Sticker" in text and "\\p1" in text and "\\fscx40" in text
+    assert main(["style", str(srt), str(out), "--sticker", '{"kind":"nope"}']) == EXIT_ERROR
+    assert "스티커" in capsys.readouterr().err
+    # 이미지 스티커는 디렉터리가 있어야 굽습니다(FFmpeg 전에 잡힙니다).
+    assert main(["burn", str(srt), str(srt), str(tmp_path / "o.mp4")]) == EXIT_ERROR

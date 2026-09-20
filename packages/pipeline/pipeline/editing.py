@@ -6,6 +6,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from pipeline.subtitle_stickers import Sticker
+
 
 class Word(BaseModel):
     """자막 안 단어 하나의 시각. 정렬기(whisper)가 준 값이며 노래방·단어별 움직임이 씁니다."""
@@ -59,6 +61,8 @@ class EditSpec(BaseModel):
     # 적으면 그 값이 템플릿보다 우선합니다. `none`이면 움직임을 뺍니다.
     subtitle_animation: str | None = Field(default=None, pattern=r"^[a-z][a-z-]{0,19}$")
     cues: list[Cue] = Field(default_factory=list, max_length=3000)
+    # 스티커(화살표·반짝이·말풍선·PNG). 시각은 자막과 같은 원본 시간축이며 구간에 맞춰 옮깁니다.
+    stickers: list[Sticker] = Field(default_factory=list, max_length=20)
 
     @model_validator(mode="after")
     def valid_range(self):

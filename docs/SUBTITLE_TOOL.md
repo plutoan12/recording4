@@ -26,7 +26,8 @@ python -m pipeline.subtitle_tool --help   # 같은 도구
 | `preview OUT.png\|.mp4\|.gif --template 이름` | 템플릿 하나를 PNG 한 장 또는 짧은 영상(움직임 확인)으로 | 0 |
 | `sheet OUT.png [--category ...] [--templates ...]` | 내장 템플릿 전부(또는 일부)를 한 장의 PNG 시트로 | 0 |
 | `reel OUT.mp4\|.gif [--category ...] [--templates ...]` | 템플릿을 차례로 보여 주는 영상. 움직이는 템플릿 확인용 | 0 |
-| `style IN OUT.ass --template 이름\|파일.json` | 템플릿 모양의 ASS 파일 생성 | 0 |
+| `style IN OUT.ass --template 이름\|파일.json [--sticker JSON]` | 템플릿 모양의 ASS 파일 생성(벡터 스티커 포함) | 0 |
+| `stickers list` | 스티커 종류 목록 | 0 |
 | `burn VIDEO SUBS OUT.mp4 --template ...` | FFmpeg로 영상에 자막 굽기 | 0 |
 
 입력·환경 오류는 종료 코드 2와 한 줄 메시지입니다. 출력 형식은 확장자(.srt/.vtt)로 정하고 `--format`으로 바꿉니다. ASS는 모양이 필요하므로 `convert`가 아니라 `style`로 만듭니다.
@@ -137,6 +138,23 @@ r4-subtitles style in.srt out.ass --template karaoke-yellow           # 움직�
 ### 그라데이션
 
 ASS에는 그라데이션이 없습니다. `gradient_color`가 있으면 앞 층 글자를 24개 띠로 나눠, 띠마다 색을 조금씩 바꾼 같은 글자를 `\clip`(사각형)으로 잘라 겹칩니다(`gradient_strips`). 띠는 겹치지 않으므로 반투명 겹침이 생기지 않고, 첫 띠와 끝 띠는 화면 끝까지 늘려 외곽선·그림자가 잘리지 않습니다. 띠의 위치는 글자 폭·높이를 재서 정하며(`text_block`, 글꼴 메트릭) 글꼴을 못 찾으면 어림값이라 조금 어긋날 수 있습니다. libass는 같은 층·같은 시간의 이벤트를 겹치지 않게 위로 쌓으므로 띠에 `\pos`를 붙여 자리를 고정합니다. 이동하는 움직임(슬라이드·바운스)에서는 `\clip`도 `\t`로 함께 움직여 띠가 글자를 따라가고, 크기가 변하는 움직임(팝·줌·맥박)에서는 변하는 동안 잠깐 어긋날 수 있습니다. 속 빈 글자는 선 색(`\3c`)이 흐릅니다. 입체 돌출·바깥 테두리 층은 단색 그대로입니다.
+
+### 스티커
+
+화살표·반짝이·말풍선 같은 장식을 자막 위에 얹습니다(`pipeline/subtitle_stickers.py`). 편집본의 `stickers` 목록(최대 20개)이며 편집기의 **스티커** 패널, `/clips`·워크플로 `clip.stickers`, 명령줄 `--sticker JSON`으로 붙입니다.
+
+| 항목 | 뜻 | 기본 |
+|---|---|---|
+| `kind` | `arrow-right`, `arrow-down`, `sparkle`, `star`, `heart`, `circle`(테두리만), `speech-bubble`, `check`, `wave-underline`, `image` | 필수 |
+| `image` | `kind=image`일 때 스티커 디렉터리(`R4_STICKERS_DIR`) 안의 PNG 파일 이름. 경로는 안 됨 | 빈 값 |
+| `x`, `y` | 스티커 가운데의 자리. 화면 폭·높이에 대한 비율(0~1) | 0.5 / 0.3 |
+| `size` | 폭(px, 16~1080) | 160 |
+| `start`, `end` | 보이는 시각(초, 자막과 같은 원본 시간축). `end`를 비우면 구간 끝까지 | 0 / 빈 값 |
+| `color`, `outline_color`, `outline` | 채움 색(`#RRGGBB[AA]`), 외곽선 색·두께. `circle`은 `color`가 선 색 | 노랑 / 검정 / 2 |
+| `angle` | 기울기(도) | 0 |
+| `animation`, `animation_ms` | 움직임(글자 단위 움직임 제외). 팝·바운스·슬라이드·페이드·줌·흔들림·맥박 | `none` |
+
+내장 도형은 ASS 드로잉(`\p1`)으로 자막 문서에 들어가므로 자막과 같은 libass 경로로 그려지고, 움직임도 같은 명령으로 붙으며 편집기 정확 미리보기에 그대로 나옵니다(`stickers list`로 목록, `r4-subtitles preview one.mp4 --sticker '{"kind":"arrow-down","animation":"bounce"}'`). 이미지 스티커는 libass가 못 그리므로 영상 합성 단계에서 FFmpeg `overlay`로 얹습니다(`-filter_complex`, 시각은 `enable=between`). 이미지는 워커의 `R4_STICKERS_DIR`(명령줄은 `--stickers-dir`)에 미리 넣어 두며, 업로드 화면은 없습니다. 이미지에는 움직임이 붙지 않고 정확 미리보기에도 나오지 않습니다. `GET /stickers`가 종류와(디렉터리가 API에도 있으면) 이미지 목록을 돌려줍니다.
 
 ### 이모지
 

@@ -52,6 +52,13 @@ from pipeline.subtitle_files import (
 )
 from pipeline.subtitle_fonts import FONT_FAMILIES
 from pipeline.subtitle_motion import ANIMATION_LABELS
+from pipeline.subtitle_stickers import (
+    STICKER_LABELS,
+    Sticker,
+    add_sticker_events,
+    image_overlays,
+    overlay_filter_graph,
+)
 from pipeline.subtitle_templates import (
     BUILTIN_TEMPLATES,
     CATEGORY_LABELS,
@@ -142,6 +149,50 @@ def _add_template(parser: argparse.ArgumentParser) -> None:
         "--no-rules", action="store_true", help="줄바꿈·분할 규칙을 적용하지 않고 그대로 씁니다."
     )
     _add_animation(parser)
+
+
+def _add_stickers(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--sticker",
+        action="append",
+        default=[],
+        metavar="JSON",
+        help=(
+            '스티커 하나를 JSON으로. 예: \'{"kind":"arrow-right","x":0.7,"y":0.4}\'. '
+            "여러 번 줄 수 있습니다. 종류는 `stickers list`."
+        ),
+    )
+    parser.add_argument(
+        "--stickers-dir", type=Path, help="이미지 스티커(PNG) 디렉터리. 비우면 R4_STICKERS_DIR"
+    )
+
+
+def stickers_from(args: argparse.Namespace) -> list[Sticker]:
+    found = []
+    for raw in getattr(args, "sticker", None) or []:
+        try:
+            found.append(Sticker.model_validate_json(raw))
+        except ValueError as exc:
+            raise ToolError(f"스티커 JSON이 잘못됐습니다: {exc}") from None
+    return found
+
+
+def stickers_dir_from(args: argparse.Namespace) -> Path | None:
+    given = getattr(args, "stickers_dir", None)
+    if given is None:
+        value = os.environ.get("R4_STICKERS_DIR", "").strip()
+        given = Path(value) if value else None
+    if given is not None and not given.is_dir():
+        raise ToolError(f"스티커 디렉터리가 없습니다: {given}")
+    return given
+
+
+def cmd_stickers(args: argparse.Namespace) -> int:
+    print("내장 스티커 (kind):")
+    for kind, label in STICKER_LABELS.items():
+        print(f"  {kind:<16} {label}")
+    print("이미지 스티커는 kind=image, image=파일이름.png (--stickers-dir 안)")
+    return EXIT_OK
 
 
 def _add_animation(parser: argparse.ArgumentParser) -> None:
@@ -444,8 +495,9 @@ def build_document(
     title: str,
     font_size: int | None,
     rules: SubtitleRules | None,
+    stickers: list[Sticker] | None = None,
 ) -> str:
-    """서버 렌더와 같은 순서(규칙 → 템플릿)로 ASS 글자를 만듭니다."""
+    """서버 렌더와 같은 순서(규칙 → 템플릿)로 ASS 글자를 만듭니다. 벡터 스티커도 넣습니다."""
     if width < 2 or height < 2 or width % 2 or height % 2:
         raise ToolError("화면 크기는 2 이상의 짝수여야 합니다.")
     if font_size is not None and not 20 <= font_size <= 120:
@@ -462,6 +514,7 @@ def build_document(
         title=title,
         font_size=font_size,
     )
+    add_sticker_events(document, stickers or [], width=width, height=height, duration=duration)
     return document.to_string("ass")
 
 
@@ -478,6 +531,7 @@ def cmd_style(args: argparse.Namespace) -> int:
         title=args.title,
         font_size=args.font_size,
         rules=None if args.no_rules else rules_from(args),
+        stickers=stickers_from(args),
     )
     _write_text(args.output, text)
     print(f"{args.output}: 템플릿 {template.name}({template.label})로 ASS를 썼습니다.")
@@ -532,6 +586,7 @@ def cmd_burn(args: argparse.Namespace) -> int:
         raise ToolError("출력 경로는 입력 영상과 달라야 합니다.")
     ffmpeg = _binary("ffmpeg", "R4_FFMPEG_BINARY")
     fonts = fonts_dir_from(args)
+    stickers = stickers_from(args)
     cues, notes, decoded = read_cues(args.subtitles, args.encoding)
     _report_read(args.subtitles, notes, decoded, cues)
     width, height, duration = args.width, args.height, None
@@ -547,7 +602,26 @@ def cmd_burn(args: argparse.Namespace) -> int:
         title=args.title,
         font_size=args.font_size,
         rules=None if args.no_rules else rules_from(args),
+        stickers=stickers,
     )
+    try:
+        overlays = image_overlays(
+            stickers,
+            stickers_dir_from(args),
+            width=width,
+            height=height,
+            duration=duration or max(c.end for c in cues),
+        )
+    except ValueError as exc:
+        raise ToolError(str(exc)) from None
+    base_chain = (
+        f"scale={width}:{height},setsar=1,{subtitles_filter('captions.ass', fonts)},format=yuv420p"
+    )
+    if overlays:
+        inputs, graph, out = overlay_filter_graph(base_chain, overlays)
+        filter_args = [*inputs, "-filter_complex", graph, "-map", f"[{out}]", "-map", "0:a?"]
+    else:
+        filter_args = ["-vf", base_chain]
     args.output.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="r4-burn-") as directory:
         temp = Path(directory)
@@ -561,9 +635,7 @@ def cmd_burn(args: argparse.Namespace) -> int:
             "-y",
             "-i",
             str(args.video.resolve()),
-            "-vf",
-            f"scale={width}:{height},setsar=1,"
-            f"{subtitles_filter('captions.ass', fonts)},format=yuv420p",
+            *filter_args,
             "-c:v",
             "libx264",
             "-preset",
@@ -728,6 +800,7 @@ def cmd_preview(args: argparse.Namespace) -> int:
         title=args.title,
         font_size=args.font_size,
         rules=None if args.no_rules else rules_from(args),
+        stickers=stickers_from(args),
     )
     if as_clip:
         render_clip(
@@ -913,6 +986,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--duration", type=float, help="영상 길이(초). 제목 표시 시간. 비우면 마지막 자막 끝"
     )
     _add_template(style)
+    _add_stickers(style)
     _add_encoding(style)
     _add_rules(style)
     style.set_defaults(run=cmd_style)
@@ -924,10 +998,17 @@ def build_parser() -> argparse.ArgumentParser:
     burn.add_argument("--width", type=int, help="비우면 ffprobe로 영상에서 읽습니다.")
     burn.add_argument("--height", type=int, help="비우면 ffprobe로 영상에서 읽습니다.")
     _add_template(burn)
+    _add_stickers(burn)
     _add_fonts_dir(burn)
     _add_encoding(burn)
     _add_rules(burn)
     burn.set_defaults(run=cmd_burn)
+
+    stickers = sub.add_parser("stickers", help="스티커 종류 목록")
+    stickers.add_subparsers(dest="action", required=True).add_parser(
+        "list", help="내장 스티커 목록"
+    )
+    stickers.set_defaults(run=cmd_stickers)
 
     preview = sub.add_parser(
         "preview", help="템플릿 하나를 PNG 한 장 또는 .mp4/.gif 짧은 영상으로 (FFmpeg 필요)"
@@ -939,6 +1020,7 @@ def build_parser() -> argparse.ArgumentParser:
     preview.add_argument("--height", type=int, default=DEFAULT_HEIGHT)
     preview.add_argument("--background", default="#141414", help="배경색 #RRGGBB")
     _add_template(preview)
+    _add_stickers(preview)
     _add_fonts_dir(preview)
     _add_rules(preview)
     preview.set_defaults(run=cmd_preview)

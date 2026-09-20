@@ -1,3 +1,13 @@
+## 2026-09-20: 단어 시각 연결·글꼴 11종·정확 미리보기·스티커 (Claude)
+
+- 사용자 요청: "1 → 3 → 2 → 4 이 순서대로 추가해줘"(단어 타임스탬프 연결, 참고 팩 글꼴, libass WASM 미리보기, 스티커 오버레이). [PR #36](https://github.com/plutoan12/recording4/pull/36) 후속 커밋. 담당: `pipeline/editing.py`(Cue.words, EditSpec.stickers), `pipeline/alignment.py`, `pipeline/subtitles.py`, `pipeline/subtitle_motion.py`, `pipeline/subtitle_templates.py`, `pipeline/subtitle_fonts.py`, `pipeline/subtitle_metrics.py`, `pipeline/subtitle_stickers.py`(신규), `pipeline/subtitle_tool.py`, `scripts/fetch_fonts.py`, `migrations/versions/0007_transcript_words.py`, `adminapi/models.py`·`routers/editing.py`, `worker/analysis.py`·`media_tasks.py`·`rendering.py`·`composition.py`, `infra/Dockerfile.api`, `apps/web`(ClipEditor.tsx, SubtitlePreview.tsx 신규, api.ts, WorkflowPanel.tsx, vite.config.ts, styles.css, package.json jassub), 테스트·문서.
+- 1) 단어 시각: `Cue.words`가 정렬·전사 → DB(`transcript_segments.words`, 마이그레이션 0007 필요) → API → 편집기 → 렌더로 흐르고, 노래방·단어별 등장이 실제 시각에 켜집니다. 구간 자르기·규칙 분할도 단어를 나눠 따라갑니다.
+- 3) 글꼴: 에스코어 드림 6 Bold·8 Heavy, 나눔스퀘어라운드, 티몬 몬소리, 스웨거, SUIT, 배민 한나 Pro·을지로오래오래, 온글잎 무궁체, 메이플스토리, 넥슨 Lv1 고딕(총 47종, WOFF2는 brotli). 템플릿 11종 추가로 101종. 페이퍼로지는 눈누 GitHub에 없어 뺐습니다.
+- 2) 정확 미리보기: `POST /subtitle-preview`(ASS + 글꼴 이름), `GET /subtitle-fonts/{family}`, 편집기 `SubtitlePreview`(jassub). 받은 글꼴의 family 이름(nameID 1)을 템플릿 이름으로 정리(`normalize_names`). headless Chromium으로 그라데이션+컬러 이모지+슬라이드, 단어 시각 노래방 렌더를 확인했습니다.
+- 4) 스티커: 내장 도형 9종(ASS 드로잉, 움직임 지원) + PNG(FFmpeg overlay, `R4_STICKERS_DIR`). 편집기 스티커 패널, `--sticker JSON`, `stickers list`, `GET /stickers`.
+- 검증: `python -m pytest -q` 통과(기존 환경 전용 실패 1개), `ruff`, `tsc`, `vite build` 통과. 실제 렌더로 스티커 9종·바운스/맥박/팝 움직임 확인.
+- 남은 것: 기존 DB는 `alembic upgrade head`. API 이미지가 글꼴을 새로 설치하므로 재빌드 필요. 브라우저에서 편집기 전체 흐름(로그인 → 스티커 패널 → 정확 미리보기) 실사용 확인은 하지 않았고 하네스로 렌더만 확인. 이미지 스티커 업로드 화면 없음.
+
 ## 2026-09-20: 그라데이션 글자·컬러 이모지 (Claude)
 
 - 사용자 요청: "그라데이션 글자, 컬러 이모지, 움직이는 자막은 지원해줘" + 핀터레스트 90년대 TV 광고 자막 스크린샷. [PR #36](https://github.com/plutoan12/recording4/pull/36) 후속 커밋. 담당: `pipeline/subtitle_emoji.py`(신규), `pipeline/subtitle_templates.py`, `pipeline/subtitle_motion.py`, `pipeline/subtitle_fonts.py`, `scripts/fetch_fonts.py`, `apps/web/src/ClipEditor.tsx`, 테스트·문서.

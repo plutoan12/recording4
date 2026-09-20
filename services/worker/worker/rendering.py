@@ -10,6 +10,12 @@ from pathlib import Path
 
 from pipeline.editing import EditSpec, clip_cues
 from pipeline.subtitle_files import plain_ass
+from pipeline.subtitle_stickers import (
+    add_sticker_events,
+    clip_stickers,
+    image_overlays,
+    overlay_filter_graph,
+)
 from pipeline.subtitle_templates import SubtitleTemplate, resolve_template, styled_document
 from pipeline.subtitles import DEFAULT_RULES, SubtitleRules, apply_rules
 
@@ -18,7 +24,9 @@ __all__ = [
     "ffmpeg_binary",
     "plain_ass",
     "render_clip",
+    "stickers_dir",
     "subtitles_filter",
+    "video_filter_args",
     "write_subtitles",
 ]
 
@@ -67,7 +75,39 @@ def write_subtitles(
         title=spec.title,
         font_size=getattr(spec, "font_size", None),
     )
+    # 벡터 스티커는 자막과 같은 문서에 들어갑니다. 이미지 스티커는 합성 단계(overlay)입니다.
+    add_sticker_events(
+        document,
+        clip_stickers(getattr(spec, "stickers", None) or [], spec.start, spec.end),
+        width=spec.width,
+        height=spec.height,
+        duration=spec.end - spec.start,
+    )
     document.save(str(path), encoding="utf-8")
+
+
+def stickers_dir() -> Path | None:
+    """이미지 스티커(PNG)를 두는 디렉터리. `R4_STICKERS_DIR`로 알려 줍니다."""
+    value = os.environ.get("R4_STICKERS_DIR", "").strip()
+    return Path(value) if value else None
+
+
+def video_filter_args(spec: EditSpec, *, base_chain: str) -> list[str]:
+    """`-vf` 또는 (이미지 스티커가 있으면) `-i … -filter_complex … -map` 인자.
+
+    영상 스트림 매핑까지 돌려주므로 부르는 쪽은 `-map 0:v:0`을 넣지 않습니다.
+    """
+    overlays = image_overlays(
+        clip_stickers(getattr(spec, "stickers", None) or [], spec.start, spec.end),
+        stickers_dir(),
+        width=spec.width,
+        height=spec.height,
+        duration=spec.end - spec.start,
+    )
+    if not overlays:
+        return ["-map", "0:v:0", "-vf", base_chain]
+    inputs, graph, out = overlay_filter_graph(base_chain, overlays)
+    return [*inputs, "-filter_complex", graph, "-map", f"[{out}]"]
 
 
 def fonts_dir() -> str | None:
@@ -114,6 +154,10 @@ def render_clip(
     with tempfile.TemporaryDirectory(prefix="r4-render-") as directory:
         temp = Path(directory)
         write_subtitles(temp / "captions.ass", spec, rules)
+        try:
+            filters = video_filter_args(spec, base_chain=video_filter(spec))
+        except ValueError as exc:
+            raise RenderError(str(exc)) from None
         command = [
             ffmpeg_binary(),
             "-hide_banner",
@@ -127,12 +171,9 @@ def render_clip(
             str(source),
             "-t",
             str(spec.end - spec.start),
-            "-map",
-            "0:v:0",
+            *filters,
             "-map",
             "0:a:0?",
-            "-vf",
-            video_filter(spec),
             "-c:v",
             "libx264",
             "-preset",

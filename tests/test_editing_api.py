@@ -511,3 +511,33 @@ def test_subtitle_font_endpoint_serves_installed_fonts_by_family(
         422,
     )
     assert client.get("/subtitle-fonts/a%7Bb", headers=auth_headers).status_code == 422
+
+
+def test_stickers_are_listed_and_previewed_and_stored_with_the_clip(
+    client, auth_headers, asset, session, tmp_path, monkeypatch
+):
+    from adminapi.models import MediaTask
+
+    (tmp_path / "wow.png").write_bytes(b"\x89PNG")
+    monkeypatch.setenv("R4_STICKERS_DIR", str(tmp_path))
+    listed = client.get("/stickers", headers=auth_headers).json()
+    assert {"kind": "arrow-right", "label": "화살표 →"} in listed
+    assert next(k for k in listed if k["kind"] == "image")["images"] == ["wow.png"]
+    preview = client.post(
+        "/subtitle-preview",
+        headers=auth_headers,
+        json={"template": "yellow", "stickers": [{"kind": "heart", "x": 0.5, "y": 0.2}]},
+    ).json()
+    assert "Sticker" in preview["ass"] and "\\p1" in preview["ass"]
+    data = {
+        "source_asset_id": str(asset.id),
+        "start": 10,
+        "end": 40,
+        "stickers": [{"kind": "sparkle", "start": 12, "end": 20, "animation": "pulse"}],
+    }
+    created = client.post("/clips", headers=auth_headers, json=data)
+    assert created.status_code == 202, created.text
+    task = session.get(MediaTask, uuid.UUID(created.json()["id"]))
+    assert task.settings["stickers"][0]["kind"] == "sparkle"
+    bad = client.post("/clips", headers=auth_headers, json={**data, "stickers": [{"kind": "nope"}]})
+    assert bad.status_code == 422
