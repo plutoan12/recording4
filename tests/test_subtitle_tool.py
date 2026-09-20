@@ -226,7 +226,7 @@ def test_sheet_and_preview_render_a_png_when_ffmpeg_exists(tmp_path, capsys):
     assert out.read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"
     text = ass.read_text(encoding="utf-8")
     assert "Galmuri11 Regular" in text and "\\blur" in text
-    assert "8종" in capsys.readouterr().out
+    assert "11종" in capsys.readouterr().out
     single = tmp_path / "one.png"
     assert (
         main(["preview", str(single), "--template", "yellow", "--text", "예문", "--height", "320"])

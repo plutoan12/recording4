@@ -74,3 +74,42 @@ def test_main_reports_unknown_family_and_partial_failure(
     code = fetch_fonts.main(["--out", str(tmp_path), "--only", "Jua", "Gugi"])
     captured = capsys.readouterr()
     assert code == 1 and "0/2개 준비됨" in captured.out and captured.err.count("실패") == 2
+
+
+def test_convert_woff_fills_missing_names_so_libass_can_register_the_font(fetch_fonts):
+    """잘난체·지마켓 산스 OTF는 name 테이블이 비어 libass가 등록하지 못합니다. 변환 때 채웁니다."""
+    import io
+
+    from fontTools.fontBuilder import FontBuilder
+    from fontTools.pens.ttGlyphPen import TTGlyphPen
+
+    builder = FontBuilder(1000, isTTF=True)
+    builder.setupGlyphOrder([".notdef", "A"])
+    builder.setupCharacterMap({65: "A"})
+    pen = TTGlyphPen(None)
+    pen.moveTo((0, 0))
+    pen.lineTo((0, 500))
+    pen.lineTo((500, 500))
+    pen.closePath()
+    builder.setupGlyf({".notdef": TTGlyphPen(None).glyph(), "A": pen.glyph()})
+    builder.setupHorizontalMetrics({".notdef": (500, 0), "A": (600, 0)})
+    builder.setupHorizontalHeader(ascent=800, descent=-200)
+    builder.setupOS2()
+    builder.setupPost()
+    builder.setupNameTable({})  # 이름 없음
+    builder.font.flavor = "woff"
+    buffer = io.BytesIO()
+    builder.font.save(buffer)
+
+    converted = fetch_fonts.convert_woff(buffer.getvalue(), "Round Font", "Bold")
+    from fontTools.ttLib import TTFont
+
+    font = TTFont(io.BytesIO(converted))
+    assert font.flavor is None
+    names = {r.nameID: r.toUnicode() for r in font["name"].names if r.platformID == 3}
+    assert names[1] == "Round Font" and names[2] == "Bold" and names[4] == "Round Font Bold"
+    # 이름이 이미 있으면 건드리지 않습니다.
+    again = fetch_fonts.convert_woff(converted, "Other", "Regular")
+    assert {r.toUnicode() for r in TTFont(io.BytesIO(again))["name"].names if r.nameID == 1} == {
+        "Round Font"
+    }

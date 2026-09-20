@@ -49,6 +49,9 @@ class FontSource:
     license_url: str = ""
     # Google Fonts에도 있는 글꼴이면 관리화면이 같은 이름의 CSS를 불러 미리보기에 씁니다.
     google: bool = True
+    # name 테이블이 빈 글꼴(잘난체·지마켓 산스 OTF)에 변환할 때 써 넣는 이름입니다.
+    # libass는 이름이 없는 글꼴을 등록하지 못해 조용히 다른 글꼴로 바꿉니다.
+    style: str = "Regular"
 
     @property
     def needs_conversion(self) -> bool:
@@ -230,8 +233,8 @@ FONT_SOURCES: tuple[FontSource, ...] = (
     ),
     # ---- Google Fonts 밖의 무료 상업용 글꼴. 굵고 둥근 "썸네일 글씨"들입니다.
     FontSource(
-        family="JalnanOTF00",
-        filename="JalnanOTF00.otf",
+        family="Jalnan",
+        filename="Jalnan.otf",
         url=f"{_NOONNU}/noonfonts_four/{NOONNU_COMMITS['noonfonts_four']}/JalnanOTF00.woff",
         sha256="46fc3434dbd3b616859b3c459aac52b60aa944f51c4860447437d1243a57da26",
         license="여기어때 잘난체 라이선스(무료, 상업 사용·영상 삽입 허용, 수정·판매 금지)",
@@ -260,13 +263,14 @@ FONT_SOURCES: tuple[FontSource, ...] = (
         google=False,
     ),
     FontSource(
-        family="GmarketSansBold",
-        filename="GmarketSansBold.otf",
+        family="Gmarket Sans",
+        filename="GmarketSans-Bold.otf",
         url=f"{_NOONNU}/noonfonts_2001/{NOONNU_COMMITS['noonfonts_2001']}/GmarketSansBold.woff",
         sha256="c9f30fc9cb858a716c07da51c5817e90c27bd7387016a2047a8b02b02fb4040d",
         license="지마켓 산스 라이선스(무료, 상업 사용·영상 삽입 허용, 판매 금지)",
         license_url="https://corp.gmarket.com/fonts/",
         google=False,
+        style="Bold",
     ),
     FontSource(
         family="Pretendard",

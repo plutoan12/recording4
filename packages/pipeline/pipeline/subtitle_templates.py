@@ -19,6 +19,11 @@ ASS는 알파를 반대로(0이 불투명) 두므로 여기서 바꿔 줍니다.
 겹으로 냅니다. 뒤 층은 외곽선을 `outline + outline2`만큼 바깥 색으로, 앞 층은 원래
 외곽선으로 그립니다. 그림자와 글로우는 뒤 층에만 둡니다.
 
+속 빈 글자(`hollow`)는 채움 색을 투명으로 두고 외곽선만 그립니다. 글로우와 함께 쓰면
+선만 빛나는 네온사인이 됩니다. 입체 돌출(`extrude`)은 그림자를 1px씩 밀어 여러 겹
+쌓아 두께처럼 보이게 합니다. 단어별 강조(`accent_color`)는 글자 안의 `[[...]]` 표기를
+그 색으로 그립니다(pipeline.subtitle_markup).
+
 글로우는 ASS `\\blur` 명령입니다. 스타일에는 없고 이벤트 글자 앞에 붙는 명령이라
 `styled_document`가 넣습니다. 사용자 글자는 `plain_ass`로 명령을 막지만 이 명령은
 우리가 만드는 것이라 그대로 둡니다.
@@ -39,6 +44,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from pipeline.editing import Cue
 from pipeline.subtitle_files import plain_ass
 from pipeline.subtitle_fonts import FONT_FAMILIES
+from pipeline.subtitle_markup import split_markup, strip_markup
 from pipeline.subtitles import text_width
 
 TEMPLATE_NAME = r"^[a-z0-9][a-z0-9-]{0,39}$"
@@ -123,6 +129,13 @@ class SubtitleTemplate(BaseModel):
     shadow: float = Field(default=1, ge=0, le=20)
     # 살짝 기울인 글자(도). 양수가 반시계 방향입니다.
     angle: float = Field(default=0, ge=-30, le=30)
+    # 속 빈 글자. 채움을 투명으로 두고 외곽선만 그립니다(네온사인).
+    hollow: bool = False
+    # 입체 돌출 깊이(px)와 색. 그림자를 1px씩 밀어 쌓습니다. 0이면 없습니다.
+    extrude: int = Field(default=0, ge=0, le=16)
+    extrude_color: str = "#222222"
+    # `[[...]]`로 감싼 부분의 색. 비우면 표기만 빼고 같은 색으로 그립니다.
+    accent_color: str = ""
     # 글자 주변을 번지게 하는 정도(ASS \blur). 외곽선 색이 번져 네온처럼 보입니다.
     glow: float = Field(default=0, ge=0, le=20)
     border_style: BorderStyle = "outline"
@@ -136,10 +149,24 @@ class SubtitleTemplate(BaseModel):
     prefix: str = Field(default="", max_length=8)
     suffix: str = Field(default="", max_length=8)
 
-    @field_validator("primary_color", "outline_color", "back_color", "box_color", "outline2_color")
+    @field_validator(
+        "primary_color",
+        "outline_color",
+        "back_color",
+        "box_color",
+        "outline2_color",
+        "extrude_color",
+    )
     @classmethod
     def _valid_color(cls, value: str) -> str:
         parse_color(value)
+        return value.upper()
+
+    @field_validator("accent_color")
+    @classmethod
+    def _valid_optional_color(cls, value: str) -> str:
+        if value:
+            parse_color(value)
         return value.upper()
 
     @field_validator("font_name")
@@ -175,12 +202,15 @@ class SubtitleTemplate(BaseModel):
             back_color = parse_color(self.box_color)
         elif self.border_style == "box-outline":
             back_color = parse_color(self.box_color)
+        primary = parse_color(self.primary_color)
+        if self.hollow:
+            primary = pysubs2.Color(primary.r, primary.g, primary.b, 255)  # 완전 투명
         return pysubs2.SSAStyle(
             fontname=self.font_name,
             fontsize=font_size or self.font_size,
             bold=self.bold,
             italic=self.italic,
-            primarycolor=parse_color(self.primary_color),
+            primarycolor=primary,
             outlinecolor=outline_color,
             backcolor=back_color,
             outline=self.outline,
@@ -196,15 +226,37 @@ class SubtitleTemplate(BaseModel):
 
     @property
     def layered(self) -> bool:
-        """두 겹으로 그려야 하는지(바깥 테두리가 있는 외곽선 방식)."""
-        return self.border_style == "outline" and self.outline2 > 0
+        """두 겹 이상으로 그려야 하는지.
+
+        바깥 테두리가 있거나, 속 빈 글자에 글로우를 줄 때(뒤 층만 번지고 앞 선은 또렷),
+        입체 돌출이 있을 때입니다. 외곽선 방식에서만입니다.
+        """
+        if self.border_style != "outline":
+            return False
+        return self.outline2 > 0 or (self.hollow and self.glow > 0) or self.extrude > 0
+
+    @property
+    def has_back_layer(self) -> bool:
+        return self.border_style == "outline" and (
+            self.outline2 > 0 or (self.hollow and self.glow > 0)
+        )
 
     def back_style(self, style: pysubs2.SSAStyle) -> pysubs2.SSAStyle:
-        """앞 층 스타일에서 뒤 층(바깥 테두리) 스타일을 만듭니다."""
+        """앞 층 스타일에서 뒤 층(바깥 테두리 또는 번지는 선) 스타일을 만듭니다."""
         back = style.copy()
-        back.outlinecolor = parse_color(self.outline2_color)
-        back.outline = style.outline + self.outline2
+        if self.outline2 > 0:
+            back.outlinecolor = parse_color(self.outline2_color)
+            back.outline = style.outline + self.outline2
         return back
+
+    def extrude_style(self, style: pysubs2.SSAStyle) -> pysubs2.SSAStyle:
+        """입체 돌출 층. 글자와 외곽선을 돌출 색으로 칠해 뒤로 밀어 쌓습니다."""
+        color = parse_color(self.extrude_color)
+        depth = style.copy()
+        depth.primarycolor = color
+        depth.outlinecolor = color
+        depth.shadow = 0
+        return depth
 
     def front_style(self, style: pysubs2.SSAStyle) -> pysubs2.SSAStyle:
         """두 겹일 때 앞 층. 그림자는 뒤 층이 그리므로 뺍니다."""
@@ -227,15 +279,58 @@ class SubtitleTemplate(BaseModel):
         """이벤트 글자 앞에 붙는 ASS 명령. 지금은 글로우뿐입니다."""
         return f"{{\\blur{self.glow:g}}}" if self.glow else ""
 
-    def event_text_layers(self, text: str) -> list[tuple[int, str, bool]]:
-        """(layer, 이벤트 글자, 뒤 층인지) 목록. 두 겹이면 뒤 층이 먼저 옵니다.
+    def _ass_color_tag(self, color: str) -> str:
+        c = parse_color(color)
+        return f"\\{'3' if self.hollow else '1'}c&H{c.b:02X}{c.g:02X}{c.r:02X}&"
 
-        글로우는 뒤 층(바깥 테두리)에만 붙여 앞 층 글자는 또렷하게 둡니다.
+    def body_text(self, text: str, *, accent: bool = True) -> str:
+        """사용자 글자를 안전하게 만들고 장식과 `[[...]]` 강조 색을 붙인 이벤트 글자.
+
+        강조는 앞 층에만 넣습니다(`accent=False`면 표기만 뺍니다). 속 빈 글자는 채움이
+        투명이라 외곽선 색(\\3c)을 바꿉니다. 색을 되돌리는 명령을 뒤에 붙여 다음 조각이
+        원래 색으로 돌아가게 합니다.
         """
-        body = plain_ass(self.decorate(text))
-        if self.layered:
-            return [(0, self.override_tags() + body, True), (1, body, False)]
-        return [(0, self.override_tags() + body, False)]
+        decorated = self.decorate(text)
+        if not accent or not self.accent_color:
+            return plain_ass(strip_markup(decorated))
+        base = self.outline_color if self.hollow else self.primary_color
+        pieces = []
+        for piece, highlighted in split_markup(decorated):
+            if highlighted:
+                pieces.append(
+                    "{"
+                    + self._ass_color_tag(self.accent_color)
+                    + "}"
+                    + plain_ass(piece)
+                    + "{"
+                    + self._ass_color_tag(base)
+                    + "}"
+                )
+            else:
+                pieces.append(plain_ass(piece))
+        return "".join(pieces)
+
+    def event_text_layers(self, text: str) -> list[tuple[int, str, str]]:
+        """(layer, 이벤트 글자, 스타일 접미사) 목록. 뒤 층이 먼저 옵니다.
+
+        접미사는 "" (앞 층), "-Back" (바깥 테두리·번짐), "-Extrude" (입체 돌출)입니다.
+        글로우는 뒤 층에만 붙여 앞 층 글자는 또렷하게 둡니다.
+        """
+        front = self.body_text(text)
+        if not self.layered:
+            return [(0, self.override_tags() + front, "")]
+        plain = self.body_text(text, accent=False)
+        layers: list[tuple[int, str, str]] = []
+        layer = 0
+        for depth in range(self.extrude, 0, -1):
+            tags = f"{{\\shad0\\xshad{depth}\\yshad{depth}}}"
+            layers.append((layer, tags + plain, "-Extrude"))
+            layer += 1
+        if self.has_back_layer:
+            layers.append((layer, self.override_tags() + plain, "-Back"))
+            layer += 1
+        layers.append((layer, front, ""))
+        return layers
 
     def decorate(self, text: str) -> str:
         """장식을 붙입니다. 여러 줄이면 첫 줄 앞과 마지막 줄 뒤에만 붙입니다."""
@@ -246,8 +341,8 @@ class SubtitleTemplate(BaseModel):
         return text
 
     def event_text(self, text: str) -> str:
-        """사용자 글자를 안전하게 만들고 장식·명령을 붙인 이벤트 글자."""
-        return self.override_tags() + plain_ass(self.decorate(text))
+        """한 겹일 때의 이벤트 글자(명령 + 본문)."""
+        return self.override_tags() + self.body_text(text)
 
     def to_json(self) -> str:
         return json.dumps(self.model_dump(), ensure_ascii=False, indent=2) + "\n"
@@ -416,16 +511,17 @@ BUILTIN_TEMPLATES: dict[str, SubtitleTemplate] = {
             name="bubble-pink",
             label="말풍선 핑크",
             description="핑크 통통 글자에 흰 외곽선.",
-            sample="딸기말차라떼",
+            sample="[[딸기]]말차라떼",
             category="cute",
             font_name="Bagel Fat One",
             font_size=78,
-            primary_color="#FF9BD2",
+            primary_color="#8FD48A",
             outline_color="#FFFFFF",
             outline=5,
             outline2=2.5,
             outline2_color="#E84393",
             shadow=0,
+            accent_color="#FF9BD2",
         ),
         _builtin(
             name="round-white",
@@ -473,6 +569,50 @@ BUILTIN_TEMPLATES: dict[str, SubtitleTemplate] = {
             glow=7,
         ),
         _builtin(
+            name="neon-hollow-pink",
+            label="속 빈 네온 핑크",
+            description="글자 속을 비우고 핑크 선만 빛나게. 네온사인 간판 느낌.",
+            sample="제발... 제발!!!!!",
+            category="neon",
+            font_name="Gaegu",
+            font_size=88,
+            bold=True,
+            outline_color="#FF5FE0",
+            outline=3,
+            shadow=0,
+            glow=8,
+            hollow=True,
+        ),
+        _builtin(
+            name="neon-hollow-round",
+            label="속 빈 네온 둥글",
+            description="써라운드 글자 속을 비우고 연핑크 선이 번지게.",
+            sample="둥글둥글 귀엽다",
+            category="neon",
+            font_name="Cafe24 Ssurround",
+            font_size=88,
+            outline_color="#FFB3F0",
+            outline=4,
+            shadow=0,
+            glow=6,
+            hollow=True,
+            suffix="♡",
+        ),
+        _builtin(
+            name="neon-hollow-lime",
+            label="속 빈 네온 라임",
+            description="잘난체 속 빈 글자에 연두 선이 빛나게. 강조에.",
+            sample="파워 충전 완료",
+            category="neon",
+            font_name="Jalnan",
+            font_size=84,
+            outline_color="#B8FF5A",
+            outline=3,
+            shadow=0,
+            glow=7,
+            hollow=True,
+        ),
+        _builtin(
             name="neon-blue",
             label="네온 블루",
             description="파란 빛 번짐. 완전 레트로 느낌.",
@@ -492,7 +632,7 @@ BUILTIN_TEMPLATES: dict[str, SubtitleTemplate] = {
             description="보라 빛 번짐에 별 장식.",
             sample="쿨하게 패스",
             category="neon",
-            font_name="JalnanOTF00",
+            font_name="Jalnan",
             font_size=78,
             primary_color="#F4E6FF",
             outline_color="#9B4DFF",
@@ -641,7 +781,7 @@ BUILTIN_TEMPLATES: dict[str, SubtitleTemplate] = {
             description="흰 카드에 검은 글자. 제품 이름·정보 표시에.",
             sample="WAKEMAKE 소프트 블러링",
             category="box",
-            font_name="GmarketSansBold",
+            font_name="Gmarket Sans",
             font_size=56,
             primary_color="#111111",
             border_style="box-outline",
@@ -974,6 +1114,37 @@ BUILTIN_TEMPLATES: dict[str, SubtitleTemplate] = {
             shadow=3,
         ),
         _builtin(
+            name="retro-blue-3d",
+            label="레트로 블루 입체",
+            description="잘난체 하늘색 글자에 흰 선, 남색으로 두껍게 돌출. 레트로 크롬 느낌.",
+            sample="완전 레트로 느낌이잖아",
+            category="retro",
+            font_name="Jalnan",
+            font_size=84,
+            primary_color="#9BD2FF",
+            outline_color="#FFFFFF",
+            outline=3,
+            shadow=0,
+            extrude=8,
+            extrude_color="#1B2A6B",
+        ),
+        _builtin(
+            name="pop-yellow-3d",
+            label="팝 노랑 입체",
+            description="가속 노란 글자에 검은 선, 진갈색 돌출과 별 장식. 팝 스티커.",
+            sample="[[#1]] Base 파운데이션",
+            category="vlog",
+            font_name="Gasoek One",
+            font_size=84,
+            primary_color="#FFE14D",
+            outline_color="#222222",
+            outline=3,
+            shadow=0,
+            extrude=7,
+            extrude_color="#5D3A1A",
+            accent_color="#7FC8FF",
+        ),
+        _builtin(
             name="songmyung-cream",
             label="송명 레트로",
             description="송명 세리프에 크림색 글자, 자간 살짝. 옛날 잡지 느낌.",
@@ -1023,7 +1194,7 @@ BUILTIN_TEMPLATES: dict[str, SubtitleTemplate] = {
             description="잘난체 흰 글자에 검은 선과 흰 테두리. 썸네일의 정석.",
             sample="썸네일용으로 진짜 딱임!!",
             category="vlog",
-            font_name="JalnanOTF00",
+            font_name="Jalnan",
             font_size=84,
             outline_color="#111111",
             outline=4,
@@ -1037,7 +1208,7 @@ BUILTIN_TEMPLATES: dict[str, SubtitleTemplate] = {
             description="잘난체 노란 글자에 검은 외곽선. 예능 강조.",
             sample="이거 진짜 맛있다",
             category="vlog",
-            font_name="JalnanOTF00",
+            font_name="Jalnan",
             font_size=84,
             primary_color="#FFE14D",
             outline_color="#111111",
@@ -1050,7 +1221,7 @@ BUILTIN_TEMPLATES: dict[str, SubtitleTemplate] = {
             description="잘난체 핑크 글자에 흰 선과 진핑크 테두리.",
             sample="우왕 뽑았다!!!!!",
             category="cute",
-            font_name="JalnanOTF00",
+            font_name="Jalnan",
             font_size=84,
             primary_color="#FF6FB5",
             outline_color="#FFFFFF",
@@ -1092,16 +1263,17 @@ BUILTIN_TEMPLATES: dict[str, SubtitleTemplate] = {
             name="ssurround-peach",
             label="써라운드 피치",
             description="카페24 써라운드 살구색 글자에 흰 선과 주황 테두리.",
-            sample="딸기말차라떼",
+            sample="[[딸기]]말차라떼",
             category="cute",
             font_name="Cafe24 Ssurround",
             font_size=84,
-            primary_color="#FFC8A2",
+            primary_color="#B5E88A",
             outline_color="#FFFFFF",
             outline=5,
             outline2=2.5,
             outline2_color="#E86A2F",
             shadow=0,
+            accent_color="#FF9BB0",
         ),
         _builtin(
             name="simplehae-lilac",
@@ -1123,7 +1295,7 @@ BUILTIN_TEMPLATES: dict[str, SubtitleTemplate] = {
             description="지마켓 산스 굵은 노란 글자에 검은 외곽선. 깔끔한 예능 자막.",
             sample="이거 진짜 맛있다",
             category="basic",
-            font_name="GmarketSansBold",
+            font_name="Gmarket Sans",
             font_size=64,
             primary_color="#FFE14D",
             outline_color="#111111",
@@ -1235,33 +1407,28 @@ def styled_document(
     subs.info.update(PlayResX=str(width), PlayResY=str(height), WrapStyle="0")
     add_styles(subs, "Default", template, template.style(height, font_size=font_size))
     for cue in cues:
-        for layer, text, back in template.event_text_layers(cue.text):
+        for layer, text, suffix in template.event_text_layers(cue.text):
             subs.append(
                 pysubs2.SSAEvent(
                     start=round(cue.start * 1000),
                     end=round(cue.end * 1000),
                     layer=layer,
-                    style="Default-Back" if back else "Default",
+                    style=f"Default{suffix}",
                     text=text,
                 )
             )
     if title:
         add_styles(subs, "Title", template, template.title_style(height, font_size=font_size))
         # 제목은 영상 전체 동안 보입니다. 자막이 없어도 제목만 보일 수 있습니다.
-        # 장식은 대사에만 붙입니다. 제목은 편집기에서 직접 적는 글자입니다.
-        body = plain_ass(title)
-        layers = (
-            [(0, template.override_tags() + body, True), (1, body, False)]
-            if template.layered
-            else [(0, template.override_tags() + body, False)]
-        )
-        for layer, text, back in layers:
+        # 장식·강조는 대사에만 붙입니다. 제목은 편집기에서 직접 적는 글자입니다.
+        plain_title = template.model_copy(update={"prefix": "", "suffix": "", "accent_color": ""})
+        for layer, text, suffix in plain_title.event_text_layers(title):
             subs.append(
                 pysubs2.SSAEvent(
                     start=0,
                     end=round(duration * 1000),
                     layer=layer,
-                    style="Title-Back" if back else "Title",
+                    style=f"Title{suffix}",
                     text=text,
                 )
             )
@@ -1271,12 +1438,15 @@ def styled_document(
 def add_styles(
     subs: pysubs2.SSAFile, name: str, template: SubtitleTemplate, style: pysubs2.SSAStyle
 ) -> None:
-    """스타일을 등록합니다. 두 겹이면 `<name>-Back`도 함께 넣습니다."""
-    if template.layered:
-        subs.styles[f"{name}-Back"] = template.back_style(style)
-        subs.styles[name] = template.front_style(style)
-    else:
+    """스타일을 등록합니다. 여러 겹이면 `<name>-Back`, `<name>-Extrude`도 함께 넣습니다."""
+    if not template.layered:
         subs.styles[name] = style
+        return
+    if template.extrude > 0:
+        subs.styles[f"{name}-Extrude"] = template.extrude_style(style)
+    if template.has_back_layer:
+        subs.styles[f"{name}-Back"] = template.back_style(style)
+    subs.styles[name] = template.front_style(style)
 
 
 # ---------------------------------------------------------------- 미리보기 시트
@@ -1308,10 +1478,10 @@ FONT_WIDTH_FACTORS: dict[str, float] = {
     "Diphylleia": 0.95,
     "Black Han Sans": 1.05,
     "Gasoek One": 1.05,
-    "JalnanOTF00": 1.05,
+    "Jalnan": 1.05,
     "Cafe24 Ssurround": 1.0,
     "Cafe24 Simplehae": 0.95,
-    "GmarketSansBold": 1.05,
+    "Gmarket Sans": 1.05,
     "Pretendard": 1.0,
     "Wanted Sans": 1.0,
 }
@@ -1440,7 +1610,7 @@ def sheet_document(
             )
             y += SHEET_CATEGORY_HEIGHT
         sample = text or template.sample or template.label
-        shown = template.decorate(sample)
+        shown = strip_markup(template.decorate(sample))
         fit = _fit_font_size(template, shown, cell_width, row_height)
         style = template.style(SHEET_ROW_HEIGHT, font_size=fit)
         style.alignment = pysubs2.Alignment.MIDDLE_CENTER
@@ -1449,13 +1619,13 @@ def sheet_document(
         add_styles(subs, name, template, style)
         x = SHEET_PADDING + cell_width * (column + 0.5)
         cy = y + row_height / 2
-        for layer, body, back in template.event_text_layers(sample):
+        for layer, body, suffix in template.event_text_layers(sample):
             events.append(
                 pysubs2.SSAEvent(
                     start=0,
                     end=1000,
                     layer=layer + 1,
-                    style=f"{name}-Back" if back else name,
+                    style=f"{name}{suffix}",
                     text=f"{{\\pos({x:.0f},{cy:.0f})}}" + body,
                 )
             )

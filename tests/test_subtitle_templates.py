@@ -164,12 +164,18 @@ def test_sheet_places_every_template_in_a_grid_with_its_own_style():
     assert height % 2 == 0 and height > 150 * (len(templates) // 2)
     assert document.info["PlayResY"] == str(height)
     # 앞 층 이벤트만 셉니다(두 겹 템플릿은 -Back 층이 하나 더 있고, 별·카테고리 줄도 있습니다).
-    events = [e for e in document.events if e.style.startswith("T") and "-Back" not in e.style]
+    events = [e for e in document.events if e.style.startswith("T") and "-" not in e.style]
     assert len(events) == len(templates)
     assert all(e.text.startswith("{\\pos(") for e in events)
     assert len({e.style for e in events}) == len(templates)
     backs = [e for e in document.events if e.style.endswith("-Back")]
-    assert len(backs) == sum(t.layered for t in templates) and all(e.layer == 1 for e in backs)
+    assert len(backs) == sum(t.has_back_layer for t in templates)
+    extrudes = [e for e in document.events if e.style.endswith("-Extrude")]
+    assert len(extrudes) == sum(t.extrude for t in templates)
+    # 앞 층은 같은 칸의 뒤 층들보다 위에 그려집니다.
+    for event in events:
+        siblings = [e for e in document.events if e.style.startswith(event.style + "-")]
+        assert all(e.layer < event.layer for e in siblings)
     # 받은 순서와 무관하게 카테고리별로 묶여 구분 줄은 카테고리 수만큼입니다.
     categories = [e for e in document.events if e.style == "Category"]
     assert len(categories) == len(templates_by_category())
@@ -340,3 +346,36 @@ def test_sheet_fit_accounts_for_wide_latin_and_narrow_fonts():
     # 좁은 글꼴(Dongle)은 같은 칸에서 더 크게, 넓은 라틴 대문자는 더 작게 맞춥니다.
     assert sizes["T1"] > sizes["T0"]
     assert "T0-Back" in document.styles
+
+
+def test_hollow_neon_keeps_a_crisp_front_line_and_a_glowing_back_line():
+    template = get_template("neon-hollow-pink")
+    assert template.hollow and template.glow > 0 and template.layered
+    document = styled_document(
+        [Cue(start=0, end=1, text="제발")], template, width=1080, height=1920, duration=1
+    )
+    back, front = document.styles["Default-Back"], document.styles["Default"]
+    # 채움은 완전 투명, 선만 남습니다. 뒤 층만 번집니다.
+    assert front.primarycolor.a == 255 and back.primarycolor.a == 255
+    layers = template.event_text_layers("제발")
+    assert layers[0][1].startswith("{\\blur") and layers[0][2] == "-Back"
+    assert not layers[1][1].startswith("{") and layers[1][2] == ""
+
+
+def test_extrude_stacks_shadow_layers_behind_the_text():
+    template = get_template("retro-blue-3d")
+    layers = template.event_text_layers("레트로")
+    depths = [layer for layer in layers if layer[2] == "-Extrude"]
+    assert len(depths) == template.extrude == 8
+    assert depths[0][1].startswith("{\\shad0\\xshad8\\yshad8}")
+    assert depths[-1][1].startswith("{\\shad0\\xshad1\\yshad1}")
+    assert layers[-1][2] == "" and layers[-1][0] == len(layers) - 1
+    document = styled_document(
+        [Cue(start=0, end=1, text="x")], template, width=1080, height=1920, duration=1
+    )
+    extrude = document.styles["Default-Extrude"]
+    assert extrude.primarycolor == parse_color("#1B2A6B") == extrude.outlinecolor
+    with pytest.raises(ValidationError):
+        SubtitleTemplate(name="e", label="e", extrude=40)
+    with pytest.raises(ValidationError):
+        SubtitleTemplate(name="e", label="e", accent_color="red")

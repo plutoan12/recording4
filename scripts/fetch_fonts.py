@@ -60,8 +60,12 @@ def families_in(path: Path) -> list[str] | None:
     return names
 
 
-def convert_woff(data: bytes) -> bytes:
-    """WOFF를 같은 글꼴의 TTF/OTF 바이트로 바꿉니다. fontTools가 필요합니다."""
+def convert_woff(data: bytes, family: str = "", style: str = "Regular") -> bytes:
+    """WOFF를 같은 글꼴의 TTF/OTF 바이트로 바꿉니다. fontTools가 필요합니다.
+
+    name 테이블에 family 이름이 없으면(잘난체·지마켓 산스) `family`·`style`로 채웁니다.
+    libass는 이름 없는 글꼴을 등록하지 못하고 조용히 다른 글꼴로 바꾸기 때문입니다.
+    """
     try:
         from fontTools.ttLib import TTFont
     except ImportError:
@@ -72,6 +76,12 @@ def convert_woff(data: bytes) -> bytes:
 
     font = TTFont(io.BytesIO(data))
     font.flavor = None
+    if family and not any(r.nameID == 1 for r in font["name"].names):
+        full = f"{family} {style}".strip()
+        postscript = full.replace(" ", "-")
+        for name_id, value in ((1, family), (2, style), (3, full), (4, full), (6, postscript)):
+            font["name"].setName(value, name_id, 3, 1, 0x409)
+            font["name"].setName(value, name_id, 1, 0, 0)
     buffer = io.BytesIO()
     font.save(buffer)
     return buffer.getvalue()
@@ -97,7 +107,7 @@ def fetch(source: FontSource, out: Path, *, timeout: float) -> str:
         raise RuntimeError(
             f"{source.filename}: 체크섬이 다릅니다. 기대 {source.sha256[:12]}…, 실제 {actual[:12]}…"
         )
-    installed = convert_woff(data) if source.needs_conversion else data
+    installed = convert_woff(data, source.family, source.style) if source.needs_conversion else data
     # 이름 확인이 끝나기 전에는 제자리에 두지 않습니다. 실패한 파일이 남아 다음
     # 실행에서 "이미 있음"으로 통과하면 안 됩니다. 임시 파일도 **같은 파일 이름**을
     # 씁니다. name 테이블이 빈 글꼴(잘난체·지마켓 산스 OTF)은 fontconfig가 파일

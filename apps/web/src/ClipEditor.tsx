@@ -9,13 +9,14 @@ type Violation = { index: number; kind: string; detail: string }
 type Template = { name: string; label: string; description: string; category: string; category_label: string; sample: string;
   font_name: string; font_size: number; bold: boolean; italic: boolean; primary_color: string; outline_color: string; box_color: string;
   outline: number; outline2: number; outline2_color: string; shadow: number; glow: number; angle: number;
+  hollow: boolean; extrude: number; extrude_color: string; accent_color: string;
   border_style: 'outline' | 'box' | 'box-outline'; letter_spacing: number; prefix: string; suffix: string }
 
 // 워커가 libass로 굽는 모양을 CSS로 흉내 냅니다. 글꼴 이름은 Google Fonts 이름으로 바꾸고
 // 픽셀 글꼴은 고정폭으로 대신합니다. 정확한 모양은 미리보기 시트(r4-subtitles sheet)를 봅니다.
 const FONT_ALIASES: Record<string, string> = { 'Nanum Pen': 'Nanum Pen Script', 'Galmuri11 Regular': 'monospace', 'Galmuri9 Regular': 'monospace',
   // Google Fonts에 없는 글꼴은 비슷한 굵기의 Google 글꼴로 대신 보여 줍니다. 실제 렌더는 워커의 원래 글꼴입니다.
-  'JalnanOTF00': 'Black Han Sans', 'Cafe24 Ssurround': 'Jua', 'Cafe24 Simplehae': 'Jua', 'GmarketSansBold': 'Gothic A1', 'Pretendard': 'Gothic A1', 'Wanted Sans': 'Gothic A1' }
+  'Jalnan': 'Black Han Sans', 'Cafe24 Ssurround': 'Jua', 'Cafe24 Simplehae': 'Jua', 'Gmarket Sans': 'Gothic A1', 'Pretendard': 'Gothic A1', 'Wanted Sans': 'Gothic A1' }
 function cssColor(hex: string): string {
   // #RRGGBBAA(AA=불투명도)는 CSS도 같은 뜻이라 그대로 씁니다.
   return hex
@@ -34,12 +35,15 @@ function templatePreviewStyle(t: Template): React.CSSProperties {
   }
   if (t.glow > 0) shadows.push(`0 0 ${Math.round(t.glow * 1.5)}px ${cssColor(t.outline_color)}`, `0 0 ${Math.round(t.glow * 3)}px ${cssColor(t.outline_color)}`)
   if (t.shadow > 0 && t.border_style === 'outline') shadows.push(`${Math.round(t.shadow)}px ${Math.round(t.shadow)}px 0 rgba(0,0,0,.6)`)
+  // 입체 돌출: 그림자를 1px씩 밀어 쌓습니다(워커의 -Extrude 층과 같은 방식).
+  for (let d = 1; d <= Math.round(t.extrude / 2); d++) shadows.push(`${d}px ${d}px 0 ${cssColor(t.extrude_color)}`)
   const style: React.CSSProperties = {
     fontFamily: `'${family}', 'Noto Sans KR', sans-serif`,
     fontSize: `${size}px`,
     fontWeight: t.bold ? 700 : 400,
     fontStyle: t.italic ? 'italic' : 'normal',
-    color: cssColor(t.primary_color),
+    // 속 빈 글자는 채움을 투명으로 두고 선만 보입니다.
+    color: t.hollow ? 'transparent' : cssColor(t.primary_color),
     letterSpacing: `${t.letter_spacing / 3}px`,
     WebkitTextStroke: t.border_style === 'outline' && stroke > 0 ? `${stroke}px ${cssColor(t.outline_color)}` : undefined,
     paintOrder: 'stroke fill',
@@ -53,9 +57,26 @@ function templatePreviewStyle(t: Template): React.CSSProperties {
   }
   return style
 }
+// `[[...]]` 강조 표기를 조각으로 나눕니다. 워커의 pipeline.subtitle_markup과 같은 규칙입니다.
+function splitMarkup(text: string): { piece: string; accent: boolean }[] {
+  const parts: { piece: string; accent: boolean }[] = []
+  const re = /\[\[(.*?)(?:\]\]|$)/gs
+  let cursor = 0
+  for (const m of text.matchAll(re)) {
+    if (m.index! > cursor) parts.push({ piece: text.slice(cursor, m.index).replaceAll(']]', ''), accent: false })
+    if (m[1]) parts.push({ piece: m[1], accent: true })
+    cursor = m.index! + m[0].length
+  }
+  if (cursor < text.length) parts.push({ piece: text.slice(cursor).replaceAll(']]', ''), accent: false })
+  return parts.filter(p => p.piece)
+}
 function TemplatePreview({ template }: { template: Template }) {
   const text = `${template.prefix ? template.prefix + ' ' : ''}${template.sample || template.label}${template.suffix ? ' ' + template.suffix : ''}`
-  return <div className="template-preview"><span style={templatePreviewStyle(template)}>{text}</span></div>
+  const style = templatePreviewStyle(template)
+  const accent = template.accent_color ? cssColor(template.accent_color) : undefined
+  return <div className="template-preview"><span style={style}>{splitMarkup(text).map((p, i) => accent && p.accent
+    ? <span key={i} style={template.hollow ? { WebkitTextStroke: style.WebkitTextStroke ? `${String(style.WebkitTextStroke).split(' ')[0]} ${accent}` : undefined } : { color: accent }}>{p.piece}</span>
+    : <span key={i}>{p.piece}</span>)}</span></div>
 }
 type Task = { id: string; source_asset_id: string; clip_edit_id: string | null; kind: string; state: string; error: string | null;
   result: { artifact_id?: string; scenes?: {start: number; end: number}[]; sync?: {offset_seconds:number; framerate_scale:number; clamped:number} } }
@@ -230,7 +251,7 @@ export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWo
       </select></label>
       {burn && (() => { const chosen = templates.find(t => t.name === template); return chosen ? <div className="template-chosen">
         <TemplatePreview template={chosen} />
-        <p>{chosen.description} 영상에 굽는 자막의 모양이며 SRT·VTT 파일에는 영향이 없습니다. 화면의 미리보기는 CSS 근사이고 실제 렌더는 워커의 libass입니다.</p>
+        <p>{chosen.description} 영상에 굽는 자막의 모양이며 SRT·VTT 파일에는 영향이 없습니다. 화면의 미리보기는 CSS 근사이고 실제 렌더는 워커의 libass입니다.{chosen.accent_color && ' 자막 내용에서 [[이렇게]] 감싼 부분은 강조 색으로 그려지고, 파일에는 괄호 없이 나갑니다.'}</p>
       </div> : null })()}
       {burn && templates.length > 0 && <details className="template-gallery"><summary>템플릿 전체 미리보기 ({templates.length}종)</summary>
         <div className="template-grid">{templates.map(t => <button type="button" key={t.name} className={t.name === template ? 'selected' : ''} onClick={() => setTemplate(t.name)} title={t.description}>
