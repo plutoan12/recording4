@@ -1,0 +1,61 @@
+{
+  "evaluation_seconds": 120,
+  "extended_seconds": 300,
+  "community": {
+    "turns": 51,
+    "speakers": 2,
+    "elapsed_seconds": 505.7285805629799,
+    "target_mapping_original_coverage": 0.9995332555425904,
+    "target_mapping_extended_purity": 0.9997021839984198,
+    "other_mapping_original_coverage": 1.0,
+    "other_mapping_extended_purity": 1.0,
+    "later_target_anchor_seconds": 149.5921875,
+    "later_other_anchor_seconds": 0.0,
+    "candidate_target_similarity": 0.15656176209449768
+  },
+  "sortformer": {
+    "turns": 136,
+    "speakers": 4,
+    "elapsed_seconds": 8.713121917040553,
+    "later_anchor_seconds": {
+      "speaker_0": 105.03,
+      "speaker_1": 0.0,
+      "speaker_2": 0.0,
+      "speaker_3": 1.76
+    },
+    "candidate_voice_similarities": {
+      "speaker_0": 0.15414273738861084,
+      "speaker_3": 0.05492773279547691
+    },
+    "evidence_only": true
+  },
+  "separated_asr": {
+    "stem_exact_matches": [
+      false,
+      false
+    ],
+    "stem_text_similarities": [
+      0.14285714285714285,
+      0.0
+    ],
+    "speaker_identity_proven": false
+  },
+  "consensus_speech_gaps": {
+    "minimum_gap_seconds": 0.5,
+    "word_guard_seconds": 0.1,
+    "gap_count": 3,
+    "gap_seconds": 1.963468750000004,
+    "candidate_groups": 0,
+    "proposed_words": 0
+  },
+  "accepted_words": 0,
+  "evaluation_output_changed": false,
+  "deployment_allowed": false,
+  "four_language_improvement_proven": false,
+  "sha256": {
+    "evaluation_audio": "12b29461406fe6725138fff370086ce15bb9bcab47c21801043e3ac88e3ea9f5",
+    "extended_audio": "a4584c04ce0373851fe457ab1e4f0e962c5bced5a685dd415449f44343817b99",
+    "community_prediction": "02c8b1a99606d19ef1a67560bd4b6d662b0699aaaa4a2a9ee0fdecf9f229ed9c",
+    "sortformer_prediction": "d7a9eebbf5477d0cd3e9e79784b557663a43db3ad0b0b3634f93aa5684b72cd6"
+  }
+}
