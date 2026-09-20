@@ -1,0 +1,61 @@
+{
+  "scores": {
+    "original": {
+      "reference_characters": 784,
+      "hits": 616,
+      "substitutions": 10,
+      "deletions": 158,
+      "insertions": 3,
+      "cer": 0.2181122448979592
+    },
+    "verified_candidate": {
+      "reference_characters": 784,
+      "hits": 616,
+      "substitutions": 10,
+      "deletions": 158,
+      "insertions": 3,
+      "cer": 0.2181122448979592
+    },
+    "unverified_counterfactual": {
+      "reference_characters": 784,
+      "hits": 621,
+      "substitutions": 11,
+      "deletions": 152,
+      "insertions": 3,
+      "cer": 0.21173469387755103
+    }
+  },
+  "audit": [
+    {
+      "id": "community-4-SPEAKER_00",
+      "duration": 0.6799999999999997,
+      "anchor_seconds": {
+        "SPEAKER_00": 66.880625,
+        "SPEAKER_01": 0.0
+      },
+      "target_anchor_available": true,
+      "comparison_available": false,
+      "anchor_status": "missing_competing_anchor",
+      "voice_similarity": 0.14132443070411682,
+      "voice_margin": null,
+      "reasons": [
+        "unreliable_anchor",
+        "insufficient_voice_match",
+        "independent_asr_disagrees"
+      ],
+      "proposed_words": 2,
+      "accepted": false
+    }
+  ],
+  "accepted_words": 0,
+  "proposal_reproduced": true,
+  "baseline_preserved": true,
+  "deploy_allowed": false,
+  "four_language_improvement_proven": false,
+  "counterfactual_applied": false,
+  "sha256": {
+    "proposals-final.json": "50e5fc835c7bbc78c0aec8ece5dc7c3f9ffd6f09e431f7c771e6f336fce70e38",
+    "verified-diagnostic.json": "c121c564e431e6d29a3d3f9046782c31aadeb2ec82442f96e0d8461cd87c5ff5",
+    "scores.json": "37882f0d800d512722ed5dad4f6673eec1633de12053f0139bbaaceb55d33ae4"
+  }
+}
