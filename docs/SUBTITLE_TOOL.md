@@ -100,6 +100,10 @@ r4-subtitles burn source.mp4 captions.srt result.mp4 --template mine.json
 | `letter_spacing` | 자간 | 0 |
 | `prefix`, `suffix` | 자막 앞뒤 장식 기호(★ ☆ ♡ ✳ ♪ ✧ 등), 8자 이하. 글꼴에 있는 글자여야 그려지고 이모지는 안 됩니다 | 빈 값 |
 
+### 이모지
+
+libass는 컬러 이모지(🍓🍵💗)를 못 그립니다. 자막 글자에 이모지가 있으면 그 구간에만 흑백 Noto Emoji 글꼴을 붙여 선 그림으로 그립니다(`pipeline/subtitle_markup.py`의 `split_emoji`). 색은 자막 글자 색을 따릅니다. ★☆♡♪✳✧ 같은 기호는 한글 글꼴에 있으므로 그대로 둡니다. 글꼴 대체에 맡기면 픽셀 글꼴의 이모지가 걸리는 등 결과가 달라져 명시합니다.
+
 ### 단어별 강조 `[[...]]`
 
 자막 내용에서 `[[딸기]]말차라떼`처럼 감싼 부분은 템플릿의 `accent_color`로 그립니다(속 빈 글자는 선 색이 바뀝니다). 표기는 굽는 자막 전용이라 SRT·VTT 파일, 화면 제목, 편집기 표시에서는 괄호 없이 글자만 나갑니다. 표시 규칙이 긴 자막을 나눠 표기가 두 자막에 걸치면 앞 자막은 끝까지 강조하고 뒤 자막의 짝 없는 `]]`는 뺍니다. 규칙은 `packages/pipeline/pipeline/subtitle_markup.py`에 있습니다. 강조 색이 없는 템플릿에서는 표기만 빠집니다.
@@ -119,6 +123,7 @@ r4-subtitles burn source.mp4 captions.srt result.mp4 --template mine.json
 | Noto Sans CJK KR | OFL | 워커 이미지 `fonts-noto-cjk` 패키지 | 기본 |
 | Jua, Black Han Sans, Bagel Fat One, Gaegu, Do Hyeon, Gowun Batang, Nanum Pen, Gugi, Moirai One, Dongle, Single Day, Hi Melody, Gamja Flower, East Sea Dokdo, Gasoek One, Kirang Haerang, Yeon Sung, Sunflower, Cute Font, Nanum Brush Script, Song Myung, Orbit, Diphylleia, Dokdo, Gothic A1, Poor Story, Grandiflora One | OFL | Google Fonts 저장소(`google/fonts` 커밋 고정) | 브이로그·귀여운·네온·상자·손글씨·레트로 |
 | Galmuri11 Regular, Galmuri9 Regular | OFL | `quiple/galmuri` 커밋 고정 | 픽셀 |
+| Noto Emoji(흑백) | OFL | Google Fonts 저장소 | 템플릿 글꼴이 아니라 이모지 구간에 자동으로 붙는 대체 글꼴 |
 | Jalnan(여기어때 잘난체) | 잘난체 라이선스 | 눈누 `projectnoonnu/noonfonts_four` 커밋 고정 WOFF → OTF 변환 | 잘난체 스티커·노랑·핑크, 네온 퍼플 |
 | Cafe24 Ssurround, Cafe24 Simplehae | 카페24 서체 라이선스 | 눈누 `noonfonts_2105_2`·`noonfonts_twelve` WOFF → TTF 변환 | 써라운드 라임·하늘·피치, 심플해, 민트 파스텔, 핑크 캐비닛, 하늘 띠 |
 | Gmarket Sans(Bold) | 지마켓 산스 라이선스 | 눈누 `noonfonts_2001` WOFF → OTF 변환 | 지마켓 노랑, 흰 카드 |
@@ -134,12 +139,12 @@ Nanum Pen Script와 Galmuri는 파일 안의 family 이름이 Google Fonts 이�
 
 ```bash
 r4-subtitles templates check --fonts-dir .fonts                      # 글꼴이 실제로 찾아지는지
-r4-subtitles sheet templates.png --fonts-dir .fonts                  # 69종 전부 한 장 (1080x약 7300)
+r4-subtitles sheet templates.png --fonts-dir .fonts                  # 69종 전부 한 장 (흐름 배치, 1080x약 5000)
 r4-subtitles sheet neon.png --category neon pixel --columns 1 --width 720 --text "같은 예문"
 r4-subtitles preview one.png --template neon-pink --text "제발... 제발!!!!!" --height 400
 ```
 
-`sheet`는 인스타그램 소개 이미지처럼 템플릿마다 예문 한 줄을 격자에 놓고 카테고리 구분 줄과 흐린 별 배경을 넣어 한 프레임으로 렌더합니다. 글자 크기는 칸에 맞춰 줄이므로(글꼴별 폭 계수로 어림) 실제 영상보다 작게 보일 수 있습니다. `--columns 1`로 크게 볼 수 있습니다. CI의 `워커 이미지 빌드`가 실제 글꼴로 시트를 만들어 `subtitle-template-sheet` artifact로 올리고, `templates check`로 글꼴 누락을 잡습니다.
+`sheet`는 기본(`--layout flow`)으로 글자 폭을 재서 한 줄에 들어가는 만큼 채워 넣어 참고 이미지처럼 빽빽하게 만들고, `--layout grid`는 같은 크기 칸에 하나씩 놓습니다. 인스타그램 소개 이미지처럼 템플릿마다 예문 한 줄을 놓고 카테고리 구분 줄과 흐린 별 배경을 넣어 한 프레임으로 렌더합니다. 글자 크기는 칸에 맞춰 줄이므로(글꼴별 폭 계수로 어림) 실제 영상보다 작게 보일 수 있습니다. `--columns 1`로 크게 볼 수 있습니다. CI의 `워커 이미지 빌드`가 실제 글꼴로 시트를 만들어 `subtitle-template-sheet` artifact로 올리고, `templates check`로 글꼴 누락을 잡습니다.
 
 관리화면의 템플릿 선택은 같은 글꼴을 Google Fonts CSS로 불러 **CSS로 흉내 낸** 미리보기를 보여 줍니다. 픽셀 글꼴은 Google Fonts에 없어 고정폭으로 대신하고, 글로우·상자·바깥 테두리·기울임은 `text-shadow`·배경·`transform`으로 근사합니다. 정확한 모양은 시트나 실제 렌더로 확인합니다.
 

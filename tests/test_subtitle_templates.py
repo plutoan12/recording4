@@ -426,3 +426,24 @@ def test_text_measurement_falls_back_to_estimates_without_font_files(monkeypatch
     assert not size.measured and size.line_height == 60
     assert size.width == pytest.approx((2 + 0.35 + 0.55 * 2) * 50 + 2 * (len("한글 ab") - 1))
     subtitle_metrics.font_file_for.cache_clear()
+
+
+def test_flow_layout_packs_rows_by_measured_width_and_keeps_integer_height():
+    templates = [t for ts in templates_by_category().values() for t in ts]
+    document, height = sheet_document(templates, width=1080, layout="flow")
+    assert isinstance(height, int) and height % 2 == 0
+    assert document.info["PlayResY"] == str(height)
+    fronts = [e for e in document.events if e.style.startswith("T") and "-" not in e.style]
+    assert len(fronts) == len(templates)
+    # 같은 줄(같은 y)에 놓인 항목은 서로 겹치지 않고 화면 안에 있습니다.
+    rows: dict[str, list[float]] = {}
+    for event in fronts:
+        x, y = event.text[6 : event.text.index(")")].split(",")
+        rows.setdefault(y, []).append(float(x))
+        assert 0 < float(x) < 1080
+    assert any(len(xs) >= 2 for xs in rows.values())
+    for xs in rows.values():
+        assert xs == sorted(xs) and len(set(xs)) == len(xs)
+    # 흐름 배치는 격자보다 짧습니다(빽빽하게 채우므로).
+    _, grid_height = sheet_document(templates, width=1080, layout="grid")
+    assert height < grid_height

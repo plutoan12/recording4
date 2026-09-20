@@ -48,3 +48,16 @@ def test_markup_never_reaches_srt_vtt_or_the_title():
     assert title.text == "제목" and "\\1c" not in title.text
     parsed = pysubs2.SSAFile.from_string(document.to_string("ass"))
     assert parsed[0].plaintext or True  # 파싱만 되면 됩니다.
+
+
+def test_emoji_runs_get_the_monochrome_emoji_font():
+    from pipeline.subtitle_markup import is_emoji, split_emoji
+
+    assert split_emoji("라떼 🍓🍵!") == [("라떼 ", False), ("🍓🍵", True), ("!", False)]
+    # 한글 글꼴에 있는 기호는 이모지로 보지 않습니다(글꼴을 바꾸면 모양이 달라집니다).
+    assert not any(is_emoji(c) for c in "★☆♡♪✳✧")
+    assert is_emoji("💗") and is_emoji("✨") and is_emoji("⭐")
+    template = SubtitleTemplate(name="e", label="e", font_name="Jua")
+    assert template.body_text("라떼 🍓") == "라떼 {\\fnNoto Emoji}🍓{\\fnJua}"
+    accented = template.model_copy(update={"accent_color": "#FF0000"})
+    assert "{\\fnNoto Emoji}🍓{\\fnJua}" in accented.body_text("[[딸기 🍓]]라떼")

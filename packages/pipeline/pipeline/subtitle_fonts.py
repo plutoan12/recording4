@@ -22,6 +22,7 @@ _GOOGLE = f"https://raw.githubusercontent.com/google/fonts/{GOOGLE_FONTS_COMMIT}
 _GALMURI = f"https://raw.githubusercontent.com/quiple/galmuri/{GALMURI_COMMIT}/dist"
 
 SYSTEM_FONTS = ("Noto Sans CJK KR",)
+EMOJI_FONT = "Noto Emoji"
 """워커 이미지에 패키지로 이미 있는 글꼴. 받지 않습니다."""
 
 
@@ -230,6 +231,14 @@ FONT_SOURCES: tuple[FontSource, ...] = (
         "grandifloraone",
         "GrandifloraOne-Regular.ttf",
         "592da2454a6626ee68558e220df28808b95f7dd140cd1ceb8a0d72b777f157ad",
+    ),
+    # 이모지용 흑백 글꼴. libass는 컬러 이모지(CBDT/COLR)를 못 그리므로 선 그림으로 대신합니다.
+    # 템플릿 글꼴이 아니라 이모지 구간에 자동으로 붙는 대체 글꼴입니다.
+    _google(
+        "Noto Emoji",
+        "notoemoji",
+        "NotoEmoji[wght].ttf",
+        "de6c18832938afc99caf132b39d6a30a19bac7f2e812e28db2535b4608d27551",
     ),
     # ---- Google Fonts 밖의 무료 상업용 글꼴. 굵고 둥근 "썸네일 글씨"들입니다.
     FontSource(

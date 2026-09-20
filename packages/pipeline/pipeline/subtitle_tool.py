@@ -651,7 +651,12 @@ def cmd_sheet(args: argparse.Namespace) -> int:
         chosen = [t for templates in templates_by_category().values() for t in templates]
     try:
         document, height = sheet_document(
-            chosen, width=args.width, columns=args.columns, text=args.text, title=args.title
+            chosen,
+            width=args.width,
+            columns=args.columns,
+            text=args.text,
+            title=args.title,
+            layout=args.layout,
         )
     except ValueError as exc:
         raise ToolError(str(exc)) from None
@@ -783,7 +788,13 @@ def build_parser() -> argparse.ArgumentParser:
     sheet.add_argument("--text", help="모든 템플릿에 같은 예문을 씁니다. 비우면 템플릿별 예문")
     sheet.add_argument("--title", default="자막 템플릿", help="시트 제목")
     sheet.add_argument("--width", type=int, default=DEFAULT_WIDTH)
-    sheet.add_argument("--columns", type=int, default=2)
+    sheet.add_argument("--columns", type=int, default=2, help="grid 배치의 열 수")
+    sheet.add_argument(
+        "--layout",
+        choices=("flow", "grid"),
+        default="flow",
+        help="flow는 글자 폭을 재서 빽빽하게(기본), grid는 같은 크기 칸에 하나씩",
+    )
     sheet.add_argument("--background", default="#141414", help="배경색 #RRGGBB")
     sheet.add_argument("--ass", type=Path, help="시트 ASS 파일도 함께 저장")
     _add_fonts_dir(sheet)

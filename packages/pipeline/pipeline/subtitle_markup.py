@@ -38,3 +38,33 @@ def split_markup(text: str) -> list[tuple[str, bool]]:
     if cursor < len(text):
         parts.append((text[cursor:].replace(CLOSE, ""), False))
     return [(piece, accent) for piece, accent in parts if piece] or [("", False)]
+
+
+# 0x2600~0x27BF 블록은 한글 글꼴에 있는 기호(★☆♡♥♪✳✦✧)와 이모지가 섞여 있습니다.
+# 이 블록에서는 여기 적힌 것만 이모지로 봅니다. 나머지는 템플릿 글꼴로 그립니다.
+_SYMBOL_BLOCK_EMOJI = frozenset(
+    "☀☁☂☃☔⚡⚽⚾⛄⛅⛈⛔⛪⛲⛳⛵⛺⛽✅✈✉✊✋✌✏✒✔✖✨❄❇❌❎❓❔❕❗❣❤➕➖➗➡⤴⤵"
+)
+_OTHER_EMOJI = frozenset("⭐⭕⌚⌛⏰⬆⬇⬅©®™")
+
+
+def is_emoji(char: str) -> bool:
+    """이모지로 볼 글자. 한글 글꼴에 있는 기호(★☆♡ 등)는 이모지로 보지 않습니다."""
+    code = ord(char)
+    if 0x1F000 <= code <= 0x1FAFF:
+        return True
+    if code == 0xFE0F:  # 이모지 표시 선택자. 앞 글자에 붙어 다닙니다.
+        return True
+    return char in _SYMBOL_BLOCK_EMOJI or char in _OTHER_EMOJI
+
+
+def split_emoji(text: str) -> list[tuple[str, bool]]:
+    """(글자 조각, 이모지인지) 목록. 이모지 구간에 다른 글꼴을 붙이는 데 씁니다."""
+    parts: list[tuple[str, bool]] = []
+    for char in text:
+        emoji = is_emoji(char)
+        if parts and parts[-1][1] == emoji:
+            parts[-1] = (parts[-1][0] + char, emoji)
+        else:
+            parts.append((char, emoji))
+    return parts or [("", False)]

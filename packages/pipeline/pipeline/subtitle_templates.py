@@ -46,8 +46,8 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from pipeline.editing import Cue
 from pipeline.subtitle_files import plain_ass
-from pipeline.subtitle_fonts import FONT_FAMILIES
-from pipeline.subtitle_markup import split_markup, strip_markup
+from pipeline.subtitle_fonts import EMOJI_FONT, FONT_FAMILIES
+from pipeline.subtitle_markup import split_emoji, split_markup, strip_markup
 from pipeline.subtitle_metrics import measure_text
 from pipeline.subtitles import text_width
 
@@ -321,7 +321,7 @@ class SubtitleTemplate(BaseModel):
         """
         decorated = self.decorate(text)
         if not accent or not self.accent_color:
-            return plain_ass(strip_markup(decorated))
+            return self._with_emoji_font(strip_markup(decorated))
         base = self.outline_color if self.hollow else self.primary_color
         pieces = []
         for piece, highlighted in split_markup(decorated):
@@ -330,10 +330,26 @@ class SubtitleTemplate(BaseModel):
                     "{"
                     + self._ass_color_tag(self.accent_color)
                     + "}"
-                    + plain_ass(piece)
+                    + self._with_emoji_font(piece)
                     + "{"
                     + self._ass_color_tag(base)
                     + "}"
+                )
+            else:
+                pieces.append(self._with_emoji_font(piece))
+        return "".join(pieces)
+
+    def _with_emoji_font(self, text: str) -> str:
+        """이모지 구간에 흑백 이모지 글꼴을 붙입니다. libass는 컬러 이모지를 못 그립니다.
+
+        글꼴 대체에 맡기면 어떤 글꼴이 걸릴지 알 수 없어(픽셀 글꼴의 이모지가 나오기도
+        합니다) 구간마다 명시합니다. 글꼴 이름은 검증돼 있어 명령에 넣어도 안전합니다.
+        """
+        pieces = []
+        for piece, emoji in split_emoji(text):
+            if emoji:
+                pieces.append(
+                    f"{{\\fn{EMOJI_FONT}}}" + plain_ass(piece) + f"{{\\fn{self.font_name}}}"
                 )
             else:
                 pieces.append(plain_ass(piece))
@@ -1018,7 +1034,7 @@ BUILTIN_TEMPLATES: dict[str, SubtitleTemplate] = {
             name="solid-shadow",
             label="입체 그림자",
             description="노란 굵은 글자 뒤에 진갈색 그림자를 길게. 입체 스티커.",
-            sample="이건 꼭 사야만 함..",
+            sample="이건 꼭 사야만 함.. 💗",
             category="vlog",
             font_name="Gasoek One",
             font_size=84,
@@ -1304,7 +1320,7 @@ BUILTIN_TEMPLATES: dict[str, SubtitleTemplate] = {
             name="ssurround-peach",
             label="써라운드 피치",
             description="카페24 써라운드 살구색 글자에 흰 선과 주황 테두리.",
-            sample="[[딸기]]말차라떼",
+            sample="[[딸기]]말차라떼 🍓🍵",
             category="cute",
             font_name="Cafe24 Ssurround",
             font_size=84,
@@ -1721,10 +1737,13 @@ def sheet_document(
     title: str = "자막 템플릿",
     grouped: bool = True,
     stars: int = SHEET_BACKGROUND_STARS,
+    layout: Literal["grid", "flow"] = "grid",
 ) -> tuple[pysubs2.SSAFile, int]:
     """템플릿마다 예문 한 줄을 격자에 놓은 ASS 문서와 필요한 화면 높이를 돌려줍니다.
 
     한 프레임으로 렌더하면 인스타그램 소개 이미지 같은 한 장짜리 시트가 됩니다.
+    `layout="grid"`는 같은 크기 칸에 하나씩, `"flow"`는 글자 폭을 재서 한 줄에 들어가는
+    만큼 채워 넣습니다(참고 이미지처럼 빽빽하고 글자가 큽니다).
     템플릿마다 스타일을 만들고(두 겹이면 둘) `\\pos`로 칸 가운데에 둡니다. 글자
     크기는 칸에 맞춰 줄입니다. `grouped`면 카테고리가 바뀔 때 구분 줄을 넣고,
     `stars`만큼 흐린 별을 배경에 흩어 놓습니다(같은 자리에 늘 같게 나오도록 고정 씨앗).
@@ -1783,9 +1802,30 @@ def sheet_document(
     y = SHEET_HEADER
     column = 0
     current_category: str | None = None
+    placements: list[tuple[int, SubtitleTemplate, str, int, float, float]] = []
+    flow_row: list[tuple[int, SubtitleTemplate, str, int, float, float]] = []
+    flow_width = 0.0
+    flow_height = 0.0
+    usable = width - 2 * SHEET_PADDING
+    gap = 36
+
+    def flush_flow() -> None:
+        """모아 둔 한 줄을 가운데 정렬로 확정합니다."""
+        nonlocal y, flow_row, flow_width, flow_height
+        if not flow_row:
+            return
+        x = SHEET_PADDING + (usable - flow_width) / 2
+        for index, template, sample, fit, item_w, _ in flow_row:
+            placements.append((index, template, sample, fit, x + item_w / 2, y + flow_height / 2))
+            x += item_w + gap
+        y += flow_height
+        flow_row, flow_width, flow_height = [], 0.0, 0.0
+
     for index, template in enumerate(templates):
         if grouped and template.category != current_category:
-            if column:
+            if layout == "flow":
+                flush_flow()
+            elif column:
                 y += row_height
                 column = 0
             current_category = template.category
@@ -1803,14 +1843,46 @@ def sheet_document(
             y += SHEET_CATEGORY_HEIGHT
         sample = text or template.sample or template.label
         shown = strip_markup(template.decorate(sample))
+        if layout == "flow":
+            # 글자 폭을 재서 한 줄에 들어가는 만큼 채웁니다. 크기는 템플릿 값에 가깝게 둡니다.
+            fit = min(template.font_size, 48)
+            extra = 2 * (template.outline + template.outline2) + 2 * template.extrude + 16
+            size = measure_text(
+                shown, template.font_name, fit, letter_spacing=template.letter_spacing
+            )
+            item_w = size.width + extra
+            if item_w > usable:
+                fit = max(24, int(fit * usable / item_w))
+                size = measure_text(
+                    shown, template.font_name, fit, letter_spacing=template.letter_spacing
+                )
+                item_w = size.width + extra
+            item_h = size.line_height + 2 * (template.outline + template.outline2) + 28
+            if flow_row and flow_width + gap + item_w > usable:
+                flush_flow()
+            flow_width += (gap if flow_row else 0) + item_w
+            flow_height = max(flow_height, item_h)
+            flow_row.append((index, template, sample, fit, item_w, item_h))
+            continue
         fit = _fit_font_size(template, shown, cell_width, row_height)
+        x = SHEET_PADDING + cell_width * (column + 0.5)
+        cy = y + row_height / 2
+        placements.append((index, template, sample, fit, x, cy))
+        column += 1
+        if column == columns:
+            column = 0
+            y += row_height
+    if layout == "flow":
+        flush_flow()
+    elif column:
+        y += row_height
+
+    for index, template, sample, fit, x, cy in placements:
         style = template.style(SHEET_ROW_HEIGHT, font_size=fit)
         style.alignment = pysubs2.Alignment.MIDDLE_CENTER
         style.marginl = style.marginr = style.marginv = 0
         name = f"T{index}"
         add_styles(subs, name, template, style)
-        x = SHEET_PADDING + cell_width * (column + 0.5)
-        cy = y + row_height / 2
         lift = 1
         if template.rounded_box:
             events.append(
@@ -1841,13 +1913,7 @@ def sheet_document(
                     text=f"{{\\pos({x:.0f},{cy:.0f})}}" + body,
                 )
             )
-        column += 1
-        if column == columns:
-            column = 0
-            y += row_height
-    if column:
-        y += row_height
-    height = y + SHEET_PADDING
+    height = int(round(y)) + SHEET_PADDING
     height += height % 2
     subs.info["PlayResY"] = str(height)
 
