@@ -24,6 +24,9 @@ ASS는 알파를 반대로(0이 불투명) 두므로 여기서 바꿔 줍니다.
 쌓아 두께처럼 보이게 합니다. 단어별 강조(`accent_color`)는 글자 안의 `[[...]]` 표기를
 그 색으로 그립니다(pipeline.subtitle_markup).
 
+둥근 상자(`box_radius`)는 ASS 상자로는 못 그리므로 글자 폭을 재서(pipeline.subtitle_metrics)
+글자 뒤 층에 벡터 둥근 사각형을 그립니다. 글자 자체는 외곽선 없는 보통 글자가 됩니다.
+
 글로우는 ASS `\\blur` 명령입니다. 스타일에는 없고 이벤트 글자 앞에 붙는 명령이라
 `styled_document`가 넣습니다. 사용자 글자는 `plain_ass`로 명령을 막지만 이 명령은
 우리가 만드는 것이라 그대로 둡니다.
@@ -45,6 +48,7 @@ from pipeline.editing import Cue
 from pipeline.subtitle_files import plain_ass
 from pipeline.subtitle_fonts import FONT_FAMILIES
 from pipeline.subtitle_markup import split_markup, strip_markup
+from pipeline.subtitle_metrics import measure_text
 from pipeline.subtitles import text_width
 
 TEMPLATE_NAME = r"^[a-z0-9][a-z0-9-]{0,39}$"
@@ -139,6 +143,9 @@ class SubtitleTemplate(BaseModel):
     # 글자 주변을 번지게 하는 정도(ASS \blur). 외곽선 색이 번져 네온처럼 보입니다.
     glow: float = Field(default=0, ge=0, le=20)
     border_style: BorderStyle = "outline"
+    # 상자 모서리 반지름(px). 0이면 libass의 각진 상자, 0보다 크면 글자 뒤에 둥근 사각형을
+    # 그립니다. 상자 방식에서만 뜻이 있습니다. 여백은 `outline`, 테두리 두께는 `outline2`입니다.
+    box_radius: int = Field(default=0, ge=0, le=60)
     position: Position = "bottom"
     horizontal: Horizontal = "center"
     margin_horizontal: int = Field(default=50, ge=0, le=500)
@@ -205,6 +212,24 @@ class SubtitleTemplate(BaseModel):
         primary = parse_color(self.primary_color)
         if self.hollow:
             primary = pysubs2.Color(primary.r, primary.g, primary.b, 255)  # 완전 투명
+        if self.rounded_box:
+            # 상자는 따로 그리므로 글자는 외곽선·그림자 없는 보통 글자입니다.
+            return pysubs2.SSAStyle(
+                fontname=self.font_name,
+                fontsize=font_size or self.font_size,
+                bold=self.bold,
+                italic=self.italic,
+                primarycolor=primary,
+                outline=0,
+                shadow=0,
+                borderstyle=1,
+                alignment=alignment_for(self.position, self.horizontal),
+                marginl=self.margin_horizontal,
+                marginr=self.margin_horizontal,
+                marginv=self.margin_vertical(height),
+                spacing=self.letter_spacing,
+                angle=self.angle,
+            )
         return pysubs2.SSAStyle(
             fontname=self.font_name,
             fontsize=font_size or self.font_size,
@@ -223,6 +248,10 @@ class SubtitleTemplate(BaseModel):
             spacing=self.letter_spacing,
             angle=self.angle,
         )
+
+    @property
+    def rounded_box(self) -> bool:
+        return self.border_style != "outline" and self.box_radius > 0
 
     @property
     def layered(self) -> bool:
@@ -394,6 +423,7 @@ BUILTIN_TEMPLATES: dict[str, SubtitleTemplate] = {
             sample="배경이 복잡해도 잘 읽혀요",
             category="box",
             border_style="box",
+            box_radius=8,
             box_color="#00000099",
             outline=8,
             shadow=0,
@@ -710,6 +740,8 @@ BUILTIN_TEMPLATES: dict[str, SubtitleTemplate] = {
             font_size=52,
             primary_color="#3A2A3A",
             border_style="box-outline",
+            box_radius=14,
+            outline2=3,
             box_color="#FFD1E8",
             outline_color="#F06AA8",
             outline=3,
@@ -727,6 +759,7 @@ BUILTIN_TEMPLATES: dict[str, SubtitleTemplate] = {
             font_size=44,
             primary_color="#2A2A2A",
             border_style="box",
+            box_radius=12,
             box_color="#FFF3A6",
             outline=10,
             shadow=0,
@@ -741,6 +774,7 @@ BUILTIN_TEMPLATES: dict[str, SubtitleTemplate] = {
             font_size=44,
             primary_color="#2A2A2A",
             border_style="box",
+            box_radius=12,
             box_color="#FFD6EA",
             outline=10,
             shadow=0,
@@ -755,6 +789,7 @@ BUILTIN_TEMPLATES: dict[str, SubtitleTemplate] = {
             font_size=44,
             primary_color="#2A2A2A",
             border_style="box",
+            box_radius=12,
             box_color="#CFEBFF",
             outline=10,
             shadow=0,
@@ -770,6 +805,8 @@ BUILTIN_TEMPLATES: dict[str, SubtitleTemplate] = {
             bold=True,
             primary_color="#1B4DFF",
             border_style="box-outline",
+            box_radius=16,
+            outline2=3,
             box_color="#E6F3FF",
             outline_color="#6EB6FF",
             outline=3,
@@ -785,6 +822,8 @@ BUILTIN_TEMPLATES: dict[str, SubtitleTemplate] = {
             font_size=56,
             primary_color="#111111",
             border_style="box-outline",
+            box_radius=10,
+            outline2=3,
             box_color="#FFFFFF",
             outline_color="#111111",
             outline=2,
@@ -799,7 +838,8 @@ BUILTIN_TEMPLATES: dict[str, SubtitleTemplate] = {
             font_name="Do Hyeon",
             font_size=42,
             border_style="box",
-            box_color="#111111",
+            box_radius=10,
+            box_color="#262626",
             outline=8,
             shadow=0,
             letter_spacing=1,
@@ -814,6 +854,7 @@ BUILTIN_TEMPLATES: dict[str, SubtitleTemplate] = {
             font_size=48,
             primary_color="#1A1A1A",
             border_style="box",
+            box_radius=18,
             box_color="#9BE7FF",
             outline=8,
             shadow=0,
@@ -1323,6 +1364,8 @@ BUILTIN_TEMPLATES: dict[str, SubtitleTemplate] = {
             font_size=52,
             primary_color="#1B5E20",
             border_style="box-outline",
+            box_radius=14,
+            outline2=3,
             box_color="#E0FFF0",
             outline_color="#66BB6A",
             outline=3,
@@ -1405,14 +1448,36 @@ def styled_document(
     """
     subs = pysubs2.SSAFile()
     subs.info.update(PlayResX=str(width), PlayResY=str(height), WrapStyle="0")
-    add_styles(subs, "Default", template, template.style(height, font_size=font_size))
+    style = template.style(height, font_size=font_size)
+    add_styles(subs, "Default", template, style)
     for cue in cues:
+        lift = 0
+        if template.rounded_box:
+            anchor_x, anchor_y = _anchor_for(style, template, width, height)
+            subs.append(
+                pysubs2.SSAEvent(
+                    start=round(cue.start * 1000),
+                    end=round(cue.end * 1000),
+                    layer=0,
+                    style="Default-Box",
+                    text=rounded_box_text(
+                        template,
+                        cue.text,
+                        style.fontsize,
+                        anchor_x=anchor_x,
+                        anchor_y=anchor_y,
+                        vertical=template.position,
+                        horizontal=template.horizontal,
+                    ),
+                )
+            )
+            lift = 1
         for layer, text, suffix in template.event_text_layers(cue.text):
             subs.append(
                 pysubs2.SSAEvent(
                     start=round(cue.start * 1000),
                     end=round(cue.end * 1000),
-                    layer=layer,
+                    layer=layer + lift,
                     style=f"Default{suffix}",
                     text=text,
                 )
@@ -1422,12 +1487,38 @@ def styled_document(
         # 제목은 영상 전체 동안 보입니다. 자막이 없어도 제목만 보일 수 있습니다.
         # 장식·강조는 대사에만 붙입니다. 제목은 편집기에서 직접 적는 글자입니다.
         plain_title = template.model_copy(update={"prefix": "", "suffix": "", "accent_color": ""})
+        lift = 0
+        if template.rounded_box:
+            title_style = subs.styles["Title"]
+            opposite: Position = "bottom" if template.position == "top" else "top"
+            anchor_x = (title_style.marginl + width - title_style.marginr) / 2
+            anchor_y = float(
+                height - title_style.marginv if opposite == "bottom" else title_style.marginv
+            )
+            subs.append(
+                pysubs2.SSAEvent(
+                    start=0,
+                    end=round(duration * 1000),
+                    layer=0,
+                    style="Title-Box",
+                    text=rounded_box_text(
+                        plain_title,
+                        title,
+                        title_style.fontsize,
+                        anchor_x=anchor_x,
+                        anchor_y=anchor_y,
+                        vertical=opposite,
+                        horizontal="center",
+                    ),
+                )
+            )
+            lift = 1
         for layer, text, suffix in plain_title.event_text_layers(title):
             subs.append(
                 pysubs2.SSAEvent(
                     start=0,
                     end=round(duration * 1000),
-                    layer=layer,
+                    layer=layer + lift,
                     style=f"Title{suffix}",
                     text=text,
                 )
@@ -1435,10 +1526,111 @@ def styled_document(
     return subs
 
 
+def _ass_hex(color: str) -> str:
+    c = parse_color(color)
+    return f"&H{c.b:02X}{c.g:02X}{c.r:02X}&"
+
+
+def _ass_alpha(color: str) -> str:
+    return f"&H{parse_color(color).a:02X}&"
+
+
+def rounded_rect_path(width: float, height: float, radius: float) -> str:
+    """ASS 벡터 그리기 명령으로 된 둥근 사각형(왼쪽 위가 0,0). 모서리는 베지어 곡선입니다."""
+    r = max(0.0, min(radius, width / 2, height / 2))
+    k = 0.5523 * r  # 원호를 3차 베지어로 근사하는 상수
+    w, h = width, height
+
+    def f(v: float) -> str:
+        return f"{v:.1f}".rstrip("0").rstrip(".")
+
+    return (
+        f"m {f(r)} 0 l {f(w - r)} 0 "
+        f"b {f(w - r + k)} 0 {f(w)} {f(r - k)} {f(w)} {f(r)} "
+        f"l {f(w)} {f(h - r)} "
+        f"b {f(w)} {f(h - r + k)} {f(w - r + k)} {f(h)} {f(w - r)} {f(h)} "
+        f"l {f(r)} {f(h)} "
+        f"b {f(r - k)} {f(h)} 0 {f(h - r + k)} 0 {f(h - r)} "
+        f"l 0 {f(r)} "
+        f"b 0 {f(r - k)} {f(r - k)} 0 {f(r)} 0"
+    )
+
+
+def rounded_box_text(
+    template: SubtitleTemplate,
+    text: str,
+    font_size: int,
+    *,
+    anchor_x: float,
+    anchor_y: float,
+    vertical: Position,
+    horizontal: Horizontal,
+) -> str:
+    """글자 뒤에 놓는 둥근 상자 이벤트의 글자(명령 + 벡터 경로).
+
+    `anchor`는 글자가 정렬되는 점(libass가 글자 상자를 맞추는 점)입니다. 글자 폭·높이를
+    재서 그 둘레에 `outline`만큼 여백을 두고, `outline2`가 있으면 테두리를 두릅니다.
+    """
+    lines = strip_markup(template.decorate(text)).split("\n") or [""]
+    sizes = [
+        measure_text(
+            line,
+            template.font_name,
+            font_size,
+            letter_spacing=template.letter_spacing,
+            bold=template.bold,
+        )
+        for line in lines
+    ]
+    text_width = max(size.width for size in sizes)
+    text_height = sum(size.line_height for size in sizes)
+    pad = template.outline
+    width, height = text_width + 2 * pad, text_height + 2 * pad
+    left = {
+        "left": anchor_x - pad,
+        "center": anchor_x - width / 2,
+        "right": anchor_x - width + pad,
+    }[horizontal]
+    top = {
+        "top": anchor_y - pad,
+        "middle": anchor_y - height / 2,
+        "bottom": anchor_y - height + pad,
+    }[vertical]
+    border = template.outline2 if template.border_style == "box-outline" else 0
+    tags = (
+        f"\\pos({left:.0f},{top:.0f})\\an7\\p1\\shad0"
+        f"\\1c{_ass_hex(template.box_color)}\\1a{_ass_alpha(template.box_color)}"
+        f"\\3c{_ass_hex(template.outline_color)}\\bord{border:g}"
+    )
+    if template.angle:
+        tags += f"\\frz{template.angle:g}"
+    return "{" + tags + "}" + rounded_rect_path(width, height, template.box_radius)
+
+
+def _anchor_for(style: pysubs2.SSAStyle, template: SubtitleTemplate, width: int, height: int):
+    """스타일의 정렬·여백에서 libass가 글자를 맞추는 점을 구합니다."""
+    x = {
+        "left": float(style.marginl),
+        "center": (style.marginl + width - style.marginr) / 2,
+        "right": float(width - style.marginr),
+    }[template.horizontal]
+    y = {
+        "top": float(style.marginv),
+        "middle": height / 2,
+        "bottom": float(height - style.marginv),
+    }[template.position]
+    return x, y
+
+
 def add_styles(
     subs: pysubs2.SSAFile, name: str, template: SubtitleTemplate, style: pysubs2.SSAStyle
 ) -> None:
     """스타일을 등록합니다. 여러 겹이면 `<name>-Back`, `<name>-Extrude`도 함께 넣습니다."""
+    if template.rounded_box:
+        # 상자 그리기용 스타일. 색·크기는 이벤트 명령이 정하므로 정렬만 둡니다.
+        box = pysubs2.SSAStyle(outline=0, shadow=0, alignment=pysubs2.Alignment.TOP_LEFT)
+        box.marginl = box.marginr = box.marginv = 0
+        subs.styles[f"{name}-Box"] = box
     if not template.layered:
         subs.styles[name] = style
         return
@@ -1619,12 +1811,32 @@ def sheet_document(
         add_styles(subs, name, template, style)
         x = SHEET_PADDING + cell_width * (column + 0.5)
         cy = y + row_height / 2
+        lift = 1
+        if template.rounded_box:
+            events.append(
+                pysubs2.SSAEvent(
+                    start=0,
+                    end=1000,
+                    layer=1,
+                    style=f"{name}-Box",
+                    text=rounded_box_text(
+                        template,
+                        sample,
+                        fit,
+                        anchor_x=x,
+                        anchor_y=cy,
+                        vertical="middle",
+                        horizontal="center",
+                    ),
+                )
+            )
+            lift = 2
         for layer, body, suffix in template.event_text_layers(sample):
             events.append(
                 pysubs2.SSAEvent(
                     start=0,
                     end=1000,
-                    layer=layer + 1,
+                    layer=layer + lift,
                     style=f"{name}{suffix}",
                     text=f"{{\\pos({x:.0f},{cy:.0f})}}" + body,
                 )

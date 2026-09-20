@@ -93,6 +93,7 @@ r4-subtitles burn source.mp4 captions.srt result.mp4 --template mine.json
 | `accent_color` | 자막 글자 안의 `[[...]]` 부분을 그리는 색. 비우면 표기만 빼고 같은 색 | 빈 값 |
 | `glow` | 0~20. 글자 주변 번짐(ASS `\blur`). 외곽선 색이 번져 네온처럼 보입니다 | 0 |
 | `border_style` | `outline`(외곽선+그림자), `box`(상자), `box-outline`(상자+테두리) | `outline` |
+| `box_radius` | 상자 모서리 반지름(px). 0이면 libass의 각진 상자, 0보다 크면 글자 폭을 재서 글자 뒤에 둥근 사각형을 그립니다. 여백은 `outline`, 테두리 두께는 `outline2` | 0 |
 | `position`, `horizontal` | `bottom`/`middle`/`top`, `left`/`center`/`right` | `bottom` / `center` |
 | `margin_horizontal` | 좌우 여백 px | 50 |
 | `margin_vertical_ratio` | 화면 높이 대비 위·아래 여백 비율 | 0.13 |
@@ -104,6 +105,8 @@ r4-subtitles burn source.mp4 captions.srt result.mp4 --template mine.json
 자막 내용에서 `[[딸기]]말차라떼`처럼 감싼 부분은 템플릿의 `accent_color`로 그립니다(속 빈 글자는 선 색이 바뀝니다). 표기는 굽는 자막 전용이라 SRT·VTT 파일, 화면 제목, 편집기 표시에서는 괄호 없이 글자만 나갑니다. 표시 규칙이 긴 자막을 나눠 표기가 두 자막에 걸치면 앞 자막은 끝까지 강조하고 뒤 자막의 짝 없는 `]]`는 뺍니다. 규칙은 `packages/pipeline/pipeline/subtitle_markup.py`에 있습니다. 강조 색이 없는 템플릿에서는 표기만 빠집니다.
 
 글자 크기는 `--font-size`(또는 편집본의 `font_size`)를 주면 템플릿 값보다 우선합니다. 화면 제목은 자막의 반대쪽 끝(자막이 아래면 위)에 같은 모양으로 놓이되 장식은 붙지 않습니다.
+
+둥근 상자(`box_radius` > 0)는 ASS로는 못 그리므로 설치된 글꼴 파일을 fontTools로 열어 글자 폭을 재고(`packages/pipeline/pipeline/subtitle_metrics.py`) 그 둘레에 벡터 둥근 사각형을 그립니다. 글꼴 파일은 `R4_FONTS_DIR`이나 fontconfig에서 찾으며, 못 찾으면 글꼴별 폭 계수로 어림해 상자가 글자와 조금 어긋날 수 있습니다. 워커 이미지에는 글꼴과 fontTools가 모두 있습니다.
 
 상자 색은 libass 동작에 맞춰 넣습니다. libass는 BorderStyle 3(상자)을 **외곽선 색**으로 채우고 BorderStyle 4(상자+테두리)는 뒷색으로 채웁니다. `box_color`를 두고 방식에 따라 알맞은 자리에 넣으므로 JSON에서는 신경 쓰지 않아도 됩니다.
 

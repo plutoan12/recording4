@@ -379,3 +379,48 @@ def test_extrude_stacks_shadow_layers_behind_the_text():
         SubtitleTemplate(name="e", label="e", extrude=40)
     with pytest.raises(ValidationError):
         SubtitleTemplate(name="e", label="e", accent_color="red")
+
+
+def test_rounded_box_is_drawn_behind_the_text_and_sized_from_the_measured_text(monkeypatch):
+    from pipeline.subtitle_templates import rounded_rect_path
+
+    template = get_template("pink-cabinet")
+    assert template.rounded_box and template.box_radius > 0
+    # 글자 자체는 외곽선 없는 보통 글자가 되고 상자는 따로 그립니다.
+    style = template.style(1920)
+    assert style.borderstyle == 1 and style.outline == 0
+    document = styled_document(
+        [Cue(start=0, end=2, text="민주의 핑크 캐비닛")],
+        template,
+        width=1080,
+        height=1920,
+        duration=2,
+        title="제목",
+    )
+    kinds = [(e.layer, e.style) for e in document.events]
+    assert kinds == [(0, "Default-Box"), (1, "Default"), (0, "Title-Box"), (1, "Title")]
+    box = document.events[0].text
+    assert box.startswith("{\\pos(") and "\\p1" in box and "\\bord3" in box and " b " in box
+    assert "\\1c&HE8D1FF&" in box  # 상자 색 #FFD1E8 → BGR
+    # 상자는 글자보다 넓고, 글자의 정렬 점(아래 가운데) 위에 놓입니다.
+    x, y = map(int, box[6 : box.index(")")].split(","))
+    assert 0 < x < 540 and y < 1920 - style.marginv
+    path = rounded_rect_path(100, 40, 10)
+    assert path.startswith("m 10 0 l 90 0 b ") and path.count(" b ") == 4
+    # 반지름이 너무 크면 짧은 변의 절반으로 줄입니다.
+    assert rounded_rect_path(100, 40, 100).startswith("m 20 0 l 80 0")
+    # 각진 상자(반지름 0)는 예전처럼 libass 상자를 씁니다.
+    square = get_template("news-bar")
+    assert not square.rounded_box and square.style(1920).borderstyle == 3
+
+
+def test_text_measurement_falls_back_to_estimates_without_font_files(monkeypatch, tmp_path):
+    from pipeline import subtitle_metrics
+
+    monkeypatch.setenv("R4_FONTS_DIR", str(tmp_path))
+    monkeypatch.setattr("shutil.which", lambda name: None)
+    subtitle_metrics.font_file_for.cache_clear()
+    size = subtitle_metrics.measure_text("한글 ab", "Nope Font", 50, letter_spacing=2)
+    assert not size.measured and size.line_height == 60
+    assert size.width == pytest.approx((2 + 0.35 + 0.55 * 2) * 50 + 2 * 5)
+    subtitle_metrics.font_file_for.cache_clear()

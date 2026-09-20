@@ -9,7 +9,7 @@ type Violation = { index: number; kind: string; detail: string }
 type Template = { name: string; label: string; description: string; category: string; category_label: string; sample: string;
   font_name: string; font_size: number; bold: boolean; italic: boolean; primary_color: string; outline_color: string; box_color: string;
   outline: number; outline2: number; outline2_color: string; shadow: number; glow: number; angle: number;
-  hollow: boolean; extrude: number; extrude_color: string; accent_color: string;
+  hollow: boolean; extrude: number; extrude_color: string; accent_color: string; box_radius: number;
   border_style: 'outline' | 'box' | 'box-outline'; letter_spacing: number; prefix: string; suffix: string }
 
 // 워커가 libass로 굽는 모양을 CSS로 흉내 냅니다. 글꼴 이름은 Google Fonts 이름으로 바꾸고
@@ -51,7 +51,7 @@ function templatePreviewStyle(t: Template): React.CSSProperties {
     padding: t.border_style !== 'outline' ? `${Math.round(t.outline / 2)}px ${Math.round(t.outline)}px` : '2px 4px',
     background: t.border_style !== 'outline' ? cssColor(t.box_color) : undefined,
     border: t.border_style === 'box-outline' ? `${Math.max(1, stroke)}px solid ${cssColor(t.outline_color)}` : undefined,
-    borderRadius: t.border_style !== 'outline' ? 4 : undefined,
+    borderRadius: t.border_style !== 'outline' ? Math.max(4, Math.round(t.box_radius / 2.5)) : undefined,
     display: 'inline-block',
     transform: t.angle ? `rotate(${-t.angle}deg)` : undefined,
   }
