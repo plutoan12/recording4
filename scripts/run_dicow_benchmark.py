@@ -19,7 +19,10 @@ def main():
     p.add_argument("--image", default="recording4-stack-worker")
     p.add_argument("--quantize", action="store_true")
     p.add_argument("--ctc-weight", type=float, default=0.0)
+    p.add_argument("--device", choices=("cpu", "cuda"), default="cpu")
     args = p.parse_args()
+    if args.device == "cuda" and args.quantize:
+        p.error("CUDA evaluation uses float32; omit --quantize")
     # Do not mount the production runtime root (which contains credentials).
     if (args.audio_root / "production.env").exists():
         p.error("audio-root must be a dedicated audio-only directory")
@@ -33,7 +36,7 @@ def main():
         "--network",
         "none",
         "--memory",
-        "7g",
+        "24g" if args.device == "cuda" else "7g",
         "--cpus",
         "2",
         "--entrypoint",
@@ -45,6 +48,8 @@ def main():
         "-e",
         "PYTHONPATH=/deps:/scripts:/app/services/worker:/app/services/api:/app/packages/pipeline",
     ]
+    if args.device == "cuda":
+        command += ["--gpus", "all"]
     for source, destination in [
         (args.model, "/model"),
         (args.manifest, "/manifest.json"),
@@ -66,6 +71,8 @@ def main():
         "/results/results.json",
         "--ctc-weight",
         str(args.ctc_weight),
+        "--device",
+        args.device,
     ]
     if args.quantize:
         command.append("--quantize")

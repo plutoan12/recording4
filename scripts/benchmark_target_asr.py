@@ -34,9 +34,21 @@ def stno_mask(turns, target, frames, start=0.0, duration=None):
     return np.stack([~(own | others), own & ~others, ~own & others, own & others]).astype("float32")
 
 
-def run_fingerprint(item, model_revision, quantized, ctc_weight):
+def run_fingerprint(item, model_revision, quantized, ctc_weight, device="cpu"):
     config = dict(item=item, revision=model_revision, quantized=quantized, ctc_weight=ctc_weight)
+    # Preserve existing CPU evidence fingerprints, but never reuse them on GPU.
+    if device != "cpu":
+        config.update(device=device, dtype="float32")
     return hashlib.sha256(json.dumps(config, sort_keys=True).encode()).hexdigest()
+
+
+def validate_device(device, quantized, cuda_available):
+    if device not in ("cpu", "cuda"):
+        raise ValueError("Unsupported device")
+    if device == "cuda" and quantized:
+        raise ValueError("Dynamic INT8 is CPU-only; omit --quantize for CUDA")
+    if device == "cuda" and not cuda_available:
+        raise ValueError("CUDA requested but unavailable; no silent CPU fallback")
 
 
 def main():
@@ -50,7 +62,9 @@ def main():
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--quantize", action="store_true")
     parser.add_argument("--ctc-weight", type=float, default=0.0)
+    parser.add_argument("--device", choices=("cpu", "cuda"), default="cpu")
     args = parser.parse_args()
+    validate_device(args.device, args.quantize, torch.cuda.is_available())
     torch.set_num_threads(2)
     # HF local dynamic-module loading misses transitive relative imports in this
     # checkpoint. Seed the offline cache with its pinned, reviewed Python files.
@@ -74,6 +88,8 @@ def main():
         model = torch.ao.quantization.quantize_dynamic(
             model, {torch.nn.Linear}, dtype=torch.qint8, inplace=True
         )
+    elif args.device == "cuda":
+        model = model.to("cuda")
     model.generation_config.ctc_weight = args.ctc_weight
     print("model_ready", flush=True)
     # Required by the official model's CTC-aware decoder.
@@ -99,12 +115,12 @@ def main():
         prior = next((r for r in rows if r["id"] == item["id"]), None)
         if prior and (
             prior.get("run_fingerprint")
-            != run_fingerprint(item, revision, args.quantize, args.ctc_weight)
+            != run_fingerprint(item, revision, args.quantize, args.ctc_weight, args.device)
             or prior.get("sha256") != hashlib.sha256(Path(item["audio"]).read_bytes()).hexdigest()
         ):
             raise ValueError("Existing evidence differs; use a new output file to preserve it")
     for item in items:
-        fingerprint = run_fingerprint(item, revision, args.quantize, args.ctc_weight)
+        fingerprint = run_fingerprint(item, revision, args.quantize, args.ctc_weight, args.device)
         path = Path(item["audio"])
         previous = next((r for r in rows if r["id"] == item["id"]), None)
         if (
@@ -133,9 +149,9 @@ def main():
         )
         with torch.inference_mode():
             tokens = model.generate(
-                input_features=features.input_features.float(),
-                attention_mask=features.attention_mask,
-                stno_mask=torch.from_numpy(mask).unsqueeze(0).float(),
+                input_features=features.input_features.float().to(args.device),
+                attention_mask=features.attention_mask.to(args.device),
+                stno_mask=torch.from_numpy(mask).unsqueeze(0).float().to(args.device),
                 language=item["language"],
                 task="transcribe",
                 return_timestamps=False,
@@ -161,6 +177,8 @@ def main():
             model_revision=revision,
             run_fingerprint=fingerprint,
             target=item["target"],
+            device=args.device,
+            dtype="dynamic_int8" if args.quantize else "float32",
             generation_possibly_truncated=int(tokens[0, -1]) != tokenizer.eos_token_id,
         )
         rows = [r for r in rows if r["id"] != item["id"]]
