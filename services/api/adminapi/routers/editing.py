@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import base64
 import binascii
+import re
 import uuid
 from datetime import UTC, datetime
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 
@@ -38,9 +40,16 @@ from pipeline.subtitle_files import (
     encoding_choices,
     parse_subtitles,
 )
+from pipeline.subtitle_metrics import font_file_for
 from pipeline.subtitle_motion import ANIMATION_LABELS
-from pipeline.subtitle_templates import CATEGORY_LABELS, get_template, templates_by_category
-from pipeline.subtitles import check
+from pipeline.subtitle_templates import (
+    CATEGORY_LABELS,
+    TEMPLATE_NAME,
+    get_template,
+    styled_document,
+    templates_by_category,
+)
+from pipeline.subtitles import apply_rules, check
 from pipeline.time import as_utc
 
 router = APIRouter(tags=["editing"])
@@ -469,6 +478,79 @@ def subtitle_animations(user: CurrentUser) -> list[dict]:
     비우면 템플릿의 움직임을 쓰고, `none`이면 움직임을 뺍니다.
     """
     return [{"name": name, "label": label} for name, label in ANIMATION_LABELS.items()]
+
+
+class PreviewRequest(BaseModel):
+    template: str = Field(default="default", pattern=TEMPLATE_NAME)
+    animation: str | None = Field(default=None, pattern=r"^[a-z][a-z-]{0,19}$")
+    text: str | None = Field(default=None, max_length=200)
+    width: int = Field(default=540, ge=180, le=1080, multiple_of=2)
+    height: int = Field(default=960, ge=180, le=1920, multiple_of=2)
+    seconds: float = Field(default=3.0, gt=0, le=10)
+    font_size: int | None = Field(default=None, ge=20, le=120)
+
+
+_FONT_TAG = re.compile(r"\\fn([^\\}]+)")
+
+
+@router.post("/subtitle-preview")
+def subtitle_preview(payload: PreviewRequest, user: CurrentUser) -> dict:
+    """편집기의 정확 미리보기용 ASS 문서. 워커가 굽는 것과 같은 코드로 만듭니다.
+
+    브라우저는 이 ASS를 libass WASM(jassub)으로 그립니다. `fonts`는 문서가 쓰는 글꼴
+    이름이며 `/subtitle-fonts/{family}`로 받아 렌더러에 넣습니다. 글자 크기는 화면
+    크기에 맞춰 줄이지 않고 템플릿 값(1080x1920 기준)을 그대로 두므로, 화면을 그
+    비율로 주면 실제 영상과 같은 배치가 됩니다.
+    """
+    try:
+        template = get_template(payload.template)
+        if payload.animation:
+            template = template.with_animation(payload.animation)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from None
+    text = (payload.text or "").strip() or template.sample or template.label
+    cues = apply_rules([Cue(start=0, end=payload.seconds, text=text)], subtitle_rules())
+    document = styled_document(
+        cues,
+        template,
+        width=payload.width,
+        height=payload.height,
+        duration=payload.seconds,
+        font_size=payload.font_size,
+    )
+    ass = document.to_string("ass")
+    families = {style.fontname for style in document.styles.values()}
+    families.update(name.strip() for name in _FONT_TAG.findall(ass))
+    return {
+        "ass": ass,
+        "seconds": payload.seconds,
+        "width": payload.width,
+        "height": payload.height,
+        "fonts": sorted(families),
+    }
+
+
+_FONT_MEDIA = {".ttf": "font/ttf", ".otf": "font/otf", ".ttc": "font/collection"}
+_FAMILY = re.compile(r"^[^,{}\\\r\n\t/]{1,80}$")
+
+
+@router.get("/subtitle-fonts/{family}")
+def subtitle_font(family: str, user: CurrentUser) -> FileResponse:
+    """미리보기 렌더러에 넣을 글꼴 파일. 설치된 글꼴(R4_FONTS_DIR 또는 시스템)만 내려줍니다.
+
+    이름으로 파일을 찾으므로 경로를 받지 않습니다. 없으면 404이고 화면은 그 글꼴 없이
+    (다른 글꼴로 대체돼) 그립니다.
+    """
+    if not _FAMILY.match(family):
+        raise HTTPException(422, "글꼴 이름 형식이 아닙니다.")
+    path = font_file_for(family)
+    if path is None or not path.is_file():
+        raise HTTPException(404, f"설치되지 않은 글꼴입니다: {family}")
+    return FileResponse(
+        path,
+        media_type=_FONT_MEDIA.get(path.suffix.lower(), "application/octet-stream"),
+        headers={"Cache-Control": "private, max-age=86400"},
+    )
 
 
 @router.get("/clips/{clip_edit_id}/subtitles")

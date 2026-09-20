@@ -84,15 +84,58 @@ def convert_woff(
     except ImportError as exc:  # WOFF2는 brotli가 있어야 풉니다.
         raise RuntimeError(f"WOFF2 글꼴을 바꾸려면 brotli가 필요합니다: {exc}") from None
     font.flavor = None
-    if family and rename:
-        for name_id in (1, 2, 3, 4, 6, 16, 17):
-            font["name"].removeNames(nameID=name_id)
-    if family and not any(r.nameID == 1 for r in font["name"].names):
-        full = f"{family} {style}".strip()
-        postscript = full.replace(" ", "-")
-        for name_id, value in ((1, family), (2, style), (3, full), (4, full), (6, postscript)):
-            font["name"].setName(value, name_id, 3, 1, 0x409)
-            font["name"].setName(value, name_id, 1, 0, 0)
+    if family and (rename or not any(r.nameID == 1 for r in font["name"].names)):
+        _set_names(font, family, style)
+    buffer = io.BytesIO()
+    font.save(buffer)
+    return buffer.getvalue()
+
+
+def _set_names(font, family: str, style: str) -> None:  # noqa: ANN001
+    """name 테이블의 family·style·full·PostScript 이름을 `family`·`style`로 다시 씁니다."""
+    for name_id in (1, 2, 3, 4, 6, 16, 17):
+        font["name"].removeNames(nameID=name_id)
+    full = f"{family} {style}".strip()
+    postscript = full.replace(" ", "-")
+    records = (
+        (1, family),
+        (2, style),
+        (3, full),
+        (4, full),
+        (6, postscript),
+        (16, family),
+        (17, style),
+    )
+    for name_id, value in records:
+        font["name"].setName(value, name_id, 3, 1, 0x409)
+        font["name"].setName(value, name_id, 1, 0, 0)
+
+
+def normalize_names(data: bytes, family: str) -> bytes:
+    """TTF/OTF의 family 이름(nameID 1)이 `family`와 다르면 바꿉니다. 같으면 그대로입니다.
+
+    fontconfig는 typographic family(nameID 16)로도 찾지만 브라우저의 libass WASM(jassub)은
+    nameID 1만 봅니다. "Pretendard Black"(nameID 1)처럼 굵기가 붙은 이름은 "Pretendard"로
+    바꿔야 워커·명령줄·브라우저가 같은 이름으로 찾습니다. 굵기(style)는 그대로 둡니다.
+    글꼴이 아닌 데이터는 손대지 않고 돌려줍니다(이름 확인은 뒤에서 합니다).
+    """
+    try:
+        from fontTools.ttLib import TTFont
+    except ImportError:
+        return data
+    import io
+
+    try:
+        font = TTFont(io.BytesIO(data))
+        families = {str(r).strip() for r in font["name"].names if r.nameID == 1}
+    except Exception:  # noqa: BLE001 - 글꼴 파일이 아니면 그대로 둡니다.
+        return data
+    if family in families:
+        return data
+    by_id = {r.nameID: str(r).strip() for r in font["name"].names if str(r).strip()}
+    # typographic subfamily(17)가 굵기를 제대로 말합니다("Black"). 없으면 2("Regular").
+    style = by_id.get(17) or by_id.get(2) or "Regular"
+    _set_names(font, family, style)
     buffer = io.BytesIO()
     font.save(buffer)
     return buffer.getvalue()
@@ -127,7 +170,7 @@ def fetch(source: FontSource, out: Path, *, timeout: float) -> str:
     elif source.needs_conversion:
         installed = convert_woff(data, source.family, source.style, rename=source.rename)
     else:
-        installed = data
+        installed = normalize_names(data, source.family)
     # 이름 확인이 끝나기 전에는 제자리에 두지 않습니다. 실패한 파일이 남아 다음
     # 실행에서 "이미 있음"으로 통과하면 안 됩니다. 임시 파일도 **같은 파일 이름**을
     # 씁니다. name 테이블이 빈 글꼴(잘난체·지마켓 산스 OTF)은 fontconfig가 파일
@@ -139,13 +182,16 @@ def fetch(source: FontSource, out: Path, *, timeout: float) -> str:
         partial.replace(target)
     if sidecar is not None:
         (out / COLOR_EMOJI_MAP).write_bytes(sidecar)
-    if source.needs_conversion:
+    if installed != data:
+        # 원본과 다른 바이트를 설치했으므로 어느 원본에서 왔는지 옆 파일에 남깁니다.
         target.with_name(target.name + ".source-sha256").write_text(actual, encoding="utf-8")
     note = ""
     if source.color_emoji:
         note = " (COLR 층 겹침 글꼴로 변환, 표 JSON 포함)"
     elif source.needs_conversion:
         note = " (WOFF→변환)"
+    elif installed != data:
+        note = " (family 이름 정리)"
     return f"{source.family:<20} {source.filename:<28} {len(data) / 1024 / 1024:.1f}MB 받음{note}"
 
 

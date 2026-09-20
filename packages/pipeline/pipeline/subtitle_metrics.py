@@ -28,9 +28,14 @@ class TextSize:
     measured: bool  # False면 어림값입니다.
 
 
-def _fonts_dir() -> Path | None:
+def _fonts_dirs() -> list[Path]:
+    """글꼴 파일을 찾을 디렉터리. `R4_FONTS_DIR`이 먼저, 다음은 워커·API 이미지의 설치 자리."""
+    from pipeline.subtitle_fonts import DEFAULT_FONTS_DIR
+
     value = os.environ.get("R4_FONTS_DIR", "").strip()
-    return Path(value) if value else None
+    found = [Path(value)] if value else []
+    found.append(Path(DEFAULT_FONTS_DIR))
+    return [path for path in found if path.is_dir()]
 
 
 def _families_of(path: Path) -> set[str]:
@@ -51,8 +56,7 @@ def _families_of(path: Path) -> set[str]:
 @lru_cache(maxsize=64)
 def font_file_for(family: str) -> Path | None:
     """이 family 이름의 글꼴 파일. 로컬 디렉터리를 먼저, 다음에 fontconfig를 봅니다."""
-    directory = _fonts_dir()
-    if directory and directory.is_dir():
+    for directory in _fonts_dirs():
         for path in sorted(directory.iterdir()):
             if path.suffix.lower() in FONT_SUFFIXES and family in _families_of(path):
                 return path

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { downloadFile, importSubtitles, request, type EncodingChoice, type ImportResult, type SourceAsset } from './api'
 import { PublicationForm } from './PublicationForm'
+import { SubtitlePreview } from './SubtitlePreview'
 import type { WorkflowDraft } from './WorkflowPanel'
 
 type Word = { start: number; end: number; text: string }
@@ -286,7 +287,8 @@ export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWo
       </select></label>
       {burn && (() => { const chosen = templates.find(t => t.name === template); return chosen ? <div className="template-chosen">
         <TemplatePreview template={chosen} animation={animation || undefined} />
-        <p>{chosen.description} 영상에 굽는 자막의 모양이며 SRT·VTT 파일에는 영향이 없습니다. 화면의 미리보기는 CSS 근사이고 실제 렌더는 워커의 libass입니다.{chosen.accent_color && ' 자막 내용에서 [[이렇게]] 감싼 부분은 강조 색으로 그려지고, 파일에는 괄호 없이 나갑니다.'}{(animation || chosen.animation !== 'none') && ' 움직임은 자막마다 시작 시각에 맞춰 붙고 화면 제목에는 붙지 않습니다.'}</p>
+        <SubtitlePreview template={chosen.name} animation={animation || undefined} text={captions.find(c => c.text.trim())?.text.split('\n')[0]} />
+        <p>{chosen.description} 영상에 굽는 자막의 모양이며 SRT·VTT 파일에는 영향이 없습니다. 위 첫 줄은 CSS 근사이고, 아래 세로 화면은 워커와 같은 libass 렌더(정확 미리보기)입니다.{chosen.accent_color && ' 자막 내용에서 [[이렇게]] 감싼 부분은 강조 색으로 그려지고, 파일에는 괄호 없이 나갑니다.'}{(animation || chosen.animation !== 'none') && ' 움직임은 자막마다 시작 시각에 맞춰 붙고 화면 제목에는 붙지 않습니다.'}</p>
       </div> : null })()}
       {burn && templates.length > 0 && <details className="template-gallery"><summary>템플릿 전체 미리보기 ({templates.length}종)</summary>
         <div className="template-grid">{templates.map(t => <button type="button" key={t.name} className={t.name === template ? 'selected' : ''} onClick={() => setTemplate(t.name)} title={t.description}>

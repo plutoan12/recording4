@@ -84,3 +84,8 @@ button {
 @keyframes r4-motion-pulse { 0% { scale: 1 } 17% { scale: 1.05 } 35% { scale: 1 } 52% { scale: 1.05 } 70% { scale: 1 } 100% { scale: 1 } }
 @keyframes r4-motion-typewriter { 0% { clip-path: inset(0 100% 0 0) } 60% { clip-path: inset(0 0 0 0) } 100% { clip-path: inset(0 0 0 0) } }
 @media (prefers-reduced-motion: reduce) { .template-preview span { animation: none !important; } }
+
+/* 정확 미리보기(libass WASM). 9:16 캔버스를 작게 보여 줍니다. */
+.subtitle-preview { margin: .4rem 0; }
+.subtitle-preview canvas { display: block; width: 100%; max-width: 270px; aspect-ratio: 9 / 16; background: #141414; border-radius: 6px; }
+.subtitle-preview small { display: block; color: #666; margin-top: .2rem; }

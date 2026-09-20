@@ -453,3 +453,61 @@ def test_subtitle_templates_are_listed_and_a_clip_remembers_its_template(
     )
     bad = client.post("/clips", headers=auth_headers, json={**data, "subtitle_animation": "spin"})
     assert bad.status_code == 422 and "모르는 움직임" in bad.json()["detail"]
+
+
+def test_subtitle_preview_returns_the_worker_ass_and_its_fonts(client, auth_headers):
+    assert client.post("/subtitle-preview", json={}).status_code == 401
+    made = client.post(
+        "/subtitle-preview",
+        headers=auth_headers,
+        json={"template": "pop-jalnan", "text": "안녕 🍓", "seconds": 2},
+    )
+    assert made.status_code == 200, made.text
+    body = made.json()
+    assert body["width"] == 540 and body["height"] == 960 and body["seconds"] == 2
+    assert "PlayResX: 540" in body["ass"] and "\\fscx40" in body["ass"]  # 팝 움직임
+    assert "Jalnan" in body["fonts"] and any("Emoji" in f for f in body["fonts"])
+    # 움직임 덮어쓰기와 빈 예문(템플릿 예문 사용), 모르는 이름 거절.
+    plain = client.post(
+        "/subtitle-preview", headers=auth_headers, json={"template": "yellow", "animation": "fade"}
+    ).json()
+    assert "\\fad(" in plain["ass"] and "이거 진짜 맛있다" in plain["ass"]
+    assert (
+        client.post(
+            "/subtitle-preview", headers=auth_headers, json={"template": "nope"}
+        ).status_code
+        == 422
+    )
+    assert (
+        client.post(
+            "/subtitle-preview", headers=auth_headers, json={"animation": "spin"}
+        ).status_code
+        == 422
+    )
+    assert (
+        client.post("/subtitle-preview", headers=auth_headers, json={"width": 541}).status_code
+        == 422
+    )
+
+
+def test_subtitle_font_endpoint_serves_installed_fonts_by_family(
+    client, auth_headers, tmp_path, monkeypatch
+):
+    from adminapi.routers import editing as editing_router
+
+    font = tmp_path / "Jalnan.otf"
+    font.write_bytes(b"OTTO fake font bytes")
+    monkeypatch.setattr(
+        editing_router, "font_file_for", lambda family: font if family == "Jalnan" else None
+    )
+    assert client.get("/subtitle-fonts/Jalnan").status_code == 401
+    served = client.get("/subtitle-fonts/Jalnan", headers=auth_headers)
+    assert served.status_code == 200 and served.content == font.read_bytes()
+    assert served.headers["content-type"].startswith("font/otf")
+    assert client.get("/subtitle-fonts/Nope", headers=auth_headers).status_code == 404
+    # 경로가 아니라 이름만 받습니다.
+    assert client.get("/subtitle-fonts/..%2Fetc%2Fpasswd", headers=auth_headers).status_code in (
+        404,
+        422,
+    )
+    assert client.get("/subtitle-fonts/a%7Bb", headers=auth_headers).status_code == 422

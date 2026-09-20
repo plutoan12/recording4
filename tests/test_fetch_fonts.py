@@ -113,3 +113,52 @@ def test_convert_woff_fills_missing_names_so_libass_can_register_the_font(fetch_
     assert {r.toUnicode() for r in TTFont(io.BytesIO(again))["name"].names if r.nameID == 1} == {
         "Round Font"
     }
+
+
+def _tiny_font(names: dict) -> bytes:
+    import io
+
+    from fontTools.fontBuilder import FontBuilder
+    from fontTools.pens.ttGlyphPen import TTGlyphPen
+
+    builder = FontBuilder(1000, isTTF=True)
+    builder.setupGlyphOrder([".notdef", "A"])
+    builder.setupCharacterMap({65: "A"})
+    pen = TTGlyphPen(None)
+    pen.moveTo((0, 0))
+    pen.lineTo((0, 500))
+    pen.lineTo((500, 500))
+    pen.closePath()
+    builder.setupGlyf({".notdef": TTGlyphPen(None).glyph(), "A": pen.glyph()})
+    builder.setupHorizontalMetrics({".notdef": (500, 0), "A": (600, 0)})
+    builder.setupHorizontalHeader(ascent=800, descent=-200)
+    builder.setupOS2()
+    builder.setupPost()
+    builder.setupNameTable(names)
+    buffer = io.BytesIO()
+    builder.font.save(buffer)
+    return buffer.getvalue()
+
+
+def test_normalize_names_makes_name_id_1_the_template_family(fetch_fonts):
+    """jassub(libass WASM)는 nameID 1로만 글꼴을 찾습니다. 'Pretendard Black'은 'Pretendard'로."""
+    import io
+
+    from fontTools.ttLib import TTFont
+
+    heavy = _tiny_font(
+        {
+            "familyName": "Pretendard Black",
+            "styleName": "Regular",
+            "typographicFamily": "Pretendard",
+            "typographicSubfamily": "Black",
+        }
+    )
+    fixed = TTFont(io.BytesIO(fetch_fonts.normalize_names(heavy, "Pretendard")))
+    names = {r.nameID: r.toUnicode() for r in fixed["name"].names if r.platformID == 3}
+    assert names[1] == "Pretendard" and names[16] == "Pretendard"
+    assert names[2] == "Black" and names[4] == "Pretendard Black"
+    # 이미 맞는 이름이면 바이트 그대로, 글꼴이 아니면 손대지 않습니다.
+    plain = _tiny_font({"familyName": "Jua", "styleName": "Regular"})
+    assert fetch_fonts.normalize_names(plain, "Jua") == plain
+    assert fetch_fonts.normalize_names(b"not a font", "Jua") == b"not a font"
