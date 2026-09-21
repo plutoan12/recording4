@@ -10,7 +10,7 @@
 |---|---|---|
 | FFmpeg | 컷 편집, 크롭·패딩, H.264/AAC 인코딩, 자막·제목 합성 | [소스](https://github.com/FFmpeg/FFmpeg), [빌드별 LGPL/GPL 안내](https://ffmpeg.org/legal.html) |
 | faster-whisper 1.2.1 | 로컬 음성 인식, 원본 시각 대본 생성 | [GitHub](https://github.com/SYSTRAN/faster-whisper), MIT |
-| PySceneDetect 0.6.7.1 | 장면 경계 감지, 관리화면의 구간 선택 | [GitHub](https://github.com/Breakthrough/PySceneDetect), BSD-3-Clause |
+| PySceneDetect 0.6.7.1 | 장면 경계 감지, 관리화면의 구간 선택, 숏폼 구간 추천의 입력 | [GitHub](https://github.com/Breakthrough/PySceneDetect), BSD-3-Clause |
 | pysubs2 1.8.0 | 자막 타임라인, ASS 생성, 화면 제목 스타일 | [GitHub](https://github.com/tkarabela/pysubs2), MIT |
 | charset-normalizer 3.5.1 | 들여오는 자막 파일의 인코딩 판별(CP949·EUC-KR 등) | [GitHub](https://github.com/jawah/charset_normalizer), MIT |
 | Google Cloud Translate 3.20.2 | 공식 번역 SDK 어댑터 | [GitHub](https://github.com/googleapis/google-cloud-python/tree/main/packages/google-cloud-translate), Apache-2.0 |

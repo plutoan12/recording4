@@ -247,8 +247,10 @@ def import_subtitles(
 
 
 class AnalysisRequest(BaseModel):
-    kind: Literal["transcribe", "scenes"]
+    kind: Literal["transcribe", "scenes", "highlights"]
     language: str | None = Field(default=None, pattern=r"^[a-z]{2,3}$")
+    # 추천 구간의 목표 길이(초). `highlights`에서만 씁니다.
+    target: float | None = Field(default=None, ge=5, le=600)
 
 
 class DiarizeRequest(BaseModel):
@@ -280,7 +282,9 @@ def analyze(asset_id: uuid.UUID, payload: AnalysisRequest, user: CurrentUser, se
     return schedule(
         session,
         MediaTask(
-            source_asset_id=asset_id, kind=payload.kind, settings={"language": payload.language}
+            source_asset_id=asset_id,
+            kind=payload.kind,
+            settings={"language": payload.language, "target": payload.target},
         ),
     )
 

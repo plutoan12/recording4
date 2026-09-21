@@ -15,6 +15,7 @@ from adminapi.db import get_session_factory
 from adminapi.models import Artifact, MediaTask, SourceAsset, TranscriptSegment, utcnow
 from adminapi.storage import get_storage
 from pipeline.editing import Cue, EditSpec
+from pipeline.highlights import suggest
 from pipeline.speakers import SpeakerTurn, assign_speakers, speaker_totals
 from worker.analysis import (
     MissingDependency,
@@ -22,6 +23,7 @@ from worker.analysis import (
     align_text,
     detect_scenes,
     diarize,
+    speech_spans,
     sync_subtitles,
     transcribe,
 )
@@ -70,6 +72,7 @@ def run_media(task_id: str) -> dict:
         task = session.get(MediaTask, task_uuid)
         asset = session.get(SourceAsset, task.source_asset_id)
         source_key, spec, kind, attempt = asset.storage_key, task.settings, task.kind, task.attempt
+        duration = float(asset.duration_seconds or 0)
 
     try:
         storage = get_storage()
@@ -96,6 +99,18 @@ def run_media(task_id: str) -> dict:
                 result = {"storage_key": output_key, "subtitle_rules": asdict(rules)}
             elif kind == "scenes":
                 result = {"scenes": detect_scenes(source)}
+            elif kind == "highlights":
+                # 장면 경계와 발화 구간을 합쳐 숏폼으로 쓸 만한 구간을 추천합니다.
+                # 어느 쪽도 유료 호출이 아닙니다.
+                if duration <= 0:
+                    raise ValueError("원본 길이를 모릅니다. 파일 검사가 끝난 뒤에 실행하세요.")
+                found = suggest(
+                    detect_scenes(source),
+                    speech_spans(source),
+                    duration=duration,
+                    target=float(spec.get("target") or 45.0),
+                )
+                result = {"highlights": [item.model_dump() for item in found]}
             elif kind == "diarize":
                 # 누가 말했는지만 찾습니다. 대본 글자는 건드리지 않습니다.
                 turns = diarize(

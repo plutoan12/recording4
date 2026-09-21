@@ -1,3 +1,13 @@
+## 2026-09-21: 무음 자동 컷과 숏폼 구간 추천 (Claude)
+
+- 사용자 요청: FFmpeg·MoviePy·Auto-Editor·PySceneDetect 목록을 받고, 어디에 맞고 어디에 안 맞는지 정리한 뒤 **무음 자동 컷**과 **PySceneDetect 활용 넓히기**를 고름. [PR #36](https://github.com/plutoan12/recording4/pull/36) 후속 커밋. 담당: `pipeline/trimming.py`·`highlights.py`(신규), `pipeline/editing.py`, `worker/rendering.py`·`media_tasks.py`, `adminapi/models.py`·`routers/editing.py`, `migrations/versions/0008_highlights_media_task.py`, `apps/web`(ClipEditor.tsx, WorkflowPanel.tsx), 테스트·문서.
+- **무음 자동 컷**(`EditSpec.silence`, 기본값 없음=끔): 발화 구간 사이의 침묵을 빼고 이어 붙입니다. `select`/`aselect`+`setpts` 한 번의 FFmpeg 호출입니다. 자르면 시간축이 달라지므로 자막·단어 시각·스티커를 함께 옮깁니다(`trimmed_spec`). 말을 못 찾으면 자르지 않고, 0.5초 미만이 남으면 거부합니다.
+- **숏폼 구간 추천**(미디어 작업 `highlights`, 마이그레이션 0008): 장면 경계(PySceneDetect)와 발화 구간에 점수를 매겨 겹치지 않는 후보를 돌려줍니다. 편집기 **숏폼 구간 추천** 단추 → 결과가 버튼으로 나오고 누르면 구간이 잡힙니다.
+- **MoviePy는 넣지 않았습니다.** FFmpeg를 감싼 것이라 지금 구조에서 얻는 것이 없습니다. Auto-Editor도 의존성으로 넣지 않고 같은 일을 직접 구현했습니다(시간축 다시 매핑은 어차피 우리 몫입니다).
+- 검증: 새 테스트 28개. `python -m pytest -q` 618 passed, 12 skipped. 실패 1건은 변경 전에도 이 환경에서만 실패합니다. ruff 0.8.4·tsc·vite build 통과. `alembic heads`는 0008 하나입니다.
+- **재지 못한 것**: 이 세션에 FFmpeg가 없어 무음 컷을 실제로 렌더하지 못했습니다. 필터 문자열은 단위 테스트로 고정했고, **실제 렌더 검증은 CI에서 돕니다**(`test_real_render_cuts_the_silent_parts`: 9초 원본에서 3~5초만 남기고 길이를 ffprobe로 잽니다). CI가 빨간색이면 그 테스트를 먼저 보세요.
+- 남은 것: 무음 컷은 숏폼 편집(EditSpec) 경로에만 있습니다. 번역·더빙 경로에는 없습니다. 프레임률이 들쭉날쭉한 원본에서의 음성 어긋남은 재지 않았습니다. 추천의 비중은 조회수로 검증한 적이 없습니다.
+
 ## 2026-09-21: 문맥 배치·LLM 재번역을 기본으로 켬 (Claude)
 
 - 사용자 요청: "네가 켜"(앞서 "작업 양식에서 켜시면 됩니다"라고 한 데 대한 답). [PR #36](https://github.com/plutoan12/recording4/pull/36) 후속 커밋. 담당: `pipeline/translation_context.py`, `pipeline/workflow.py`, `worker/workflow_tasks.py`, `apps/web/WorkflowPanel.tsx`, 테스트·문서.

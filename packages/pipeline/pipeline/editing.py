@@ -40,6 +40,23 @@ class Cue(BaseModel):
         return self
 
 
+class TrimSettings(BaseModel):
+    """무음 자동 컷의 세기. 기본값은 잰 것이 아니라 정한 것입니다.
+
+    자르는 계산은 `pipeline.trimming`에 있습니다. 여기에는 값만 둡니다
+    (그쪽이 이 파일을 읽으므로 반대로 읽으면 순환 참조가 됩니다).
+    """
+
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+
+    # 말 앞뒤로 남길 여유. 딱 붙여 자르면 첫 소리가 잘립니다.
+    pad: float = Field(default=0.12, ge=0, le=2)
+    # 이보다 짧은 침묵은 자르지 않습니다. 숨 쉬는 자리까지 없애면 듣기 나쁩니다.
+    min_gap: float = Field(default=0.6, ge=0.05, le=10)
+    # 이보다 짧은 토막은 버립니다. 한 프레임짜리 조각이 남지 않게.
+    min_keep: float = Field(default=0.4, ge=0.05, le=10)
+
+
 class EditSpec(BaseModel):
     model_config = ConfigDict(allow_inf_nan=False, extra="forbid")
     start: float = Field(ge=0)
@@ -69,6 +86,9 @@ class EditSpec(BaseModel):
     cues: list[Cue] = Field(default_factory=list, max_length=3000)
     # 스티커(화살표·반짝이·말풍선·PNG). 시각은 자막과 같은 원본 시간축이며 구간에 맞춰 옮깁니다.
     stickers: list[Sticker] = Field(default_factory=list, max_length=20)
+    # 말이 없는 구간을 잘라내고 남은 토막을 이어 붙입니다. 비우면 자르지 않습니다.
+    # 자른 뒤에는 시간축이 달라지므로 자막·단어 시각·스티커를 함께 옮깁니다.
+    silence: TrimSettings | None = None
 
     @model_validator(mode="after")
     def valid_range(self):

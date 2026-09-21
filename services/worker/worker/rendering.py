@@ -6,6 +6,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+from collections.abc import Sequence
 from pathlib import Path
 
 from pipeline.editing import EditSpec, clip_cues
@@ -18,17 +19,32 @@ from pipeline.subtitle_stickers import (
 )
 from pipeline.subtitle_templates import SubtitleTemplate, resolve_template, styled_document
 from pipeline.subtitles import DEFAULT_RULES, SubtitleRules, apply_rules, pacing_rules
+from pipeline.trimming import (
+    Span,
+    keeps,
+    kept_seconds,
+    moved_cues,
+    moved_span,
+    select_expression,
+    trims,
+)
 
 __all__ = [
     "RenderError",
+    "clip_keeps",
     "ffmpeg_binary",
     "plain_ass",
     "render_clip",
     "stickers_dir",
     "subtitles_filter",
+    "trim_filters",
+    "trimmed_spec",
     "video_filter_args",
     "write_subtitles",
 ]
+
+# 자르고 나서 이보다 짧게 남으면 영상이라 보기 어렵습니다.
+MIN_TRIMMED_SECONDS = 0.5
 
 
 class RenderError(RuntimeError):
@@ -155,18 +171,87 @@ def video_filter(spec: EditSpec) -> str:
     return f"{frame},setsar=1,{subtitles_filter()},format=yuv420p"
 
 
+def clip_keeps(source: Path, spec: EditSpec, speech: Sequence[Span] | None = None) -> list[Span]:
+    """이 구간에서 남길 토막. `spec.silence`가 비어 있으면 통째로 하나입니다.
+
+    발화 구간을 주지 않으면 여기서 찾습니다(Silero VAD, 실패하면 FFmpeg
+    무음 감지). 테스트와 미리 재기는 직접 넣어 씁니다.
+    """
+    whole = [(0.0, spec.end - spec.start)]
+    settings = getattr(spec, "silence", None)
+    if settings is None:
+        return whole
+    if speech is None:
+        from worker.analysis import speech_spans
+
+        speech = speech_spans(source)
+    return keeps(speech, start=spec.start, end=spec.end, settings=settings)
+
+
+def trimmed_spec(spec: EditSpec, kept: Sequence[Span]) -> EditSpec:
+    """자른 뒤의 시간축으로 옮긴 편집 지시.
+
+    구간이 0초에서 시작하고 자막·스티커가 이미 옮겨져 있으므로, 뒤따르는
+    `clip_cues`·`clip_stickers`는 그대로 지나갑니다.
+    """
+    length = kept_seconds(kept)
+    if length < MIN_TRIMMED_SECONDS:
+        raise RenderError(
+            f"무음을 자르고 나면 {length:.1f}초만 남습니다. 구간을 넓히거나 컷을 약하게 하세요."
+        )
+    stickers = []
+    for sticker in clip_stickers(getattr(spec, "stickers", None) or [], spec.start, spec.end):
+        span = moved_span(sticker.start, sticker.end, kept)
+        if span:
+            stickers.append(sticker.model_copy(update={"start": span[0], "end": span[1]}))
+    return spec.model_copy(
+        update={
+            "start": 0.0,
+            "end": length,
+            "cues": moved_cues(clip_cues(spec.cues, spec.start, spec.end), kept),
+            "stickers": stickers,
+            "silence": None,
+        }
+    )
+
+
+def trim_filters(kept: Sequence[Span]) -> tuple[str, list[str]]:
+    """(영상 체인 앞머리, 음성 필터 인자). 자를 것이 없으면 빈 값입니다.
+
+    `select`는 남길 프레임만 통과시키고 `setpts`가 남은 프레임의 시각을 도로
+    0부터 세어 빈자리를 없앱니다. 식에 쉼표가 있어 작은따옴표로 묶습니다
+    (묶지 않으면 필터 인자 구분자로 읽힙니다).
+    """
+    if not trims(kept):
+        return "", []
+    expression = select_expression(kept)
+    return (
+        f"select='{expression}',setpts=N/FRAME_RATE/TB,",
+        ["-filter:a", f"aselect='{expression}',asetpts=N/SR/TB"],
+    )
+
+
 def render_clip(
-    source: Path, output: Path, spec: EditSpec, *, rules: SubtitleRules = DEFAULT_RULES
+    source: Path,
+    output: Path,
+    spec: EditSpec,
+    *,
+    rules: SubtitleRules = DEFAULT_RULES,
+    speech: Sequence[Span] | None = None,
 ) -> None:
     source, output = source.resolve(), output.resolve()
     if not source.is_file() or source == output:
         raise RenderError("유효한 원본과 별도 출력 경로가 필요합니다.")
     output.parent.mkdir(parents=True, exist_ok=True)
+    kept = clip_keeps(source, spec, speech)
+    prefix, audio_filters = trim_filters(kept)
+    # 자른 뒤에는 시간축이 달라집니다. 자막·스티커를 먼저 옮겨 놓고 그립니다.
+    shown = trimmed_spec(spec, kept) if trims(kept) else spec
     with tempfile.TemporaryDirectory(prefix="r4-render-") as directory:
         temp = Path(directory)
-        write_subtitles(temp / "captions.ass", spec, rules)
+        write_subtitles(temp / "captions.ass", shown, rules)
         try:
-            filters = video_filter_args(spec, base_chain=video_filter(spec))
+            filters = video_filter_args(shown, base_chain=prefix + video_filter(shown))
         except ValueError as exc:
             raise RenderError(str(exc)) from None
         command = [
@@ -185,6 +270,7 @@ def render_clip(
             *filters,
             "-map",
             "0:a:0?",
+            *audio_filters,
             "-c:v",
             "libx264",
             "-preset",

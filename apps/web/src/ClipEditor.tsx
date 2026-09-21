@@ -113,7 +113,7 @@ function TemplatePreview({ template, animation }: { template: Template; animatio
     : <span key={i}>{p.piece}</span>)}</span></div>
 }
 type Task = { id: string; source_asset_id: string; clip_edit_id: string | null; kind: string; state: string; error: string | null;
-  result: { artifact_id?: string; scenes?: {start: number; end: number}[]; sync?: {offset_seconds:number; framerate_scale:number; clamped:number} } }
+  result: { artifact_id?: string; scenes?: {start: number; end: number}[]; highlights?: {start:number; end:number; score:number; speech_ratio:number; scene_cuts:number}[]; sync?: {offset_seconds:number; framerate_scale:number; clamped:number} } }
 
 export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWorkflow: (draft:WorkflowDraft)=>void }) {
   const [assetId, setAssetId] = useState('')
@@ -123,6 +123,7 @@ export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWo
   const [mode, setMode] = useState('pad')
   const [focus, setFocus] = useState(0.5)
   const [burn,setBurn] = useState(true)
+  const [trimSilence,setTrimSilence] = useState(false)
   const [captionLanguage,setCaptionLanguage] = useState('ko')
   const [template,setTemplate] = useState('default')
   const [templates,setTemplates] = useState<Template[]>([])
@@ -275,6 +276,8 @@ export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWo
         <label>화면 제목<input maxLength={120} value={title} onChange={e => setTitle(e.target.value)} /></label>
       </div>
       <p>선택 길이: {(end-start).toFixed(2)}초 · 출력: 1080 × 1920</p>
+      <label><input type="checkbox" checked={trimSilence} onChange={e => setTrimSilence(e.target.checked)} /> 말 없는 구간 자동으로 잘라내기
+        <span className="hint">말을 찾아(VAD) 사이의 침묵을 빼고 이어 붙입니다. 0.6초보다 짧은 침묵은 그대로 두고, 말 앞뒤로 0.12초는 남깁니다. 자막·스티커 시각도 함께 옮깁니다. 말을 하나도 못 찾으면 자르지 않습니다.</span></label>
       <div className="editor-actions">
         <button disabled={busy} onClick={() => void act(async () => {
           await request(`/source-assets/${assetId}/analyze`, {method:'POST', body: JSON.stringify({kind:'transcribe'})})
@@ -283,6 +286,10 @@ export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWo
         <button disabled={busy} onClick={() => void act(async () => {
           await request(`/source-assets/${assetId}/analyze`, {method:'POST', body: JSON.stringify({kind:'scenes'})}); await refresh()
         })}>장면 감지</button>
+        <button disabled={busy} onClick={() => void act(async () => {
+          await request(`/source-assets/${assetId}/analyze`, {method:'POST', body: JSON.stringify({kind:'highlights'})})
+          setMessage('숏폼 후보 구간을 찾고 있습니다. 아래 결과에 나오면 눌러서 구간을 잡으세요.'); await refresh()
+        })}>숏폼 구간 추천</button>
         <button disabled={busy} onClick={() => void act(async () => {
           setCaptions(await request<Cue[]>(`/source-assets/${assetId}/transcript`))
         })}>대본 다시 읽기</button>
@@ -418,11 +425,11 @@ export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWo
           setMessage('저장된 대본의 문장 경계로 후보를 만들었습니다. AI 인기도 예측은 아닙니다.')
         })}>구간 후보 찾기</button>
         <button disabled={busy || end <= start || end-start > 180} onClick={() => void act(async () => {
-          await request('/clips', {method:'POST', body: JSON.stringify({source_asset_id:assetId, start, end, mode, focus_x:focus, title, burn_subtitles:burn, caption_language:captionLanguage, subtitle_template:template, subtitle_animation:animation || null, subtitle_preset:preset || null, subtitle_pacing:pacing || null, cues:captions, stickers})})
+          await request('/clips', {method:'POST', body: JSON.stringify({source_asset_id:assetId, start, end, mode, focus_x:focus, title, burn_subtitles:burn, caption_language:captionLanguage, subtitle_template:template, subtitle_animation:animation || null, subtitle_preset:preset || null, subtitle_pacing:pacing || null, cues:captions, stickers, silence: trimSilence ? {} : null})})
           setMessage('새 편집본의 렌더를 요청했습니다.'); await refresh()
         })}>숏폼 렌더</button>
       </div>
-      <button disabled={busy||end<=start||end-start>180} onClick={()=>{onWorkflow({source_asset_id:assetId,start,end,mode,focus_x:focus,title,burn_subtitles:burn,caption_language:captionLanguage,subtitle_template:template,subtitle_animation:animation||undefined,subtitle_preset:preset||undefined,subtitle_pacing:pacing||undefined,cues:captions,stickers});setMessage('아래 단계별 제작 화면에 선택 구간을 전달했습니다.')}}>선택 구간을 번역·더빙 단계로 보내기</button>
+      <button disabled={busy||end<=start||end-start>180} onClick={()=>{onWorkflow({source_asset_id:assetId,start,end,mode,focus_x:focus,title,burn_subtitles:burn,caption_language:captionLanguage,subtitle_template:template,subtitle_animation:animation||undefined,subtitle_preset:preset||undefined,subtitle_pacing:pacing||undefined,cues:captions,stickers,silence:trimSilence?{}:undefined});setMessage('아래 단계별 제작 화면에 선택 구간을 전달했습니다.')}}>선택 구간을 번역·더빙 단계로 보내기</button>
       {suggestions.map((s,i) => <button key={i} onClick={() => {setStart(s.start);setEnd(s.end);setTitle(s.title)}}>{s.start.toFixed(1)}–{s.end.toFixed(1)}초 · {s.title}</button>)}
     </>}
     {message && <p role="status">{message}</p>}
@@ -433,6 +440,10 @@ export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWo
         {t.result.sync.framerate_scale !== 1 && ` · 속도 ${t.result.sync.framerate_scale}배`}
         {t.result.sync.clamped > 0 && ` · 0초로 잘린 자막 ${t.result.sync.clamped}개`}</span>}
       {t.result.scenes?.map((s,i) => <button key={i} onClick={() => {setStart(s.start);setEnd(Math.min(s.end,s.start+180))}}>{s.start.toFixed(1)}–{s.end.toFixed(1)}초</button>)}
+      {t.result.highlights?.map((h,i) => <button key={i} title={`말 ${(h.speech_ratio*100).toFixed(0)}% · 장면 전환 ${h.scene_cuts}회`}
+        onClick={() => {setStart(h.start);setEnd(h.end)}}>{h.start.toFixed(1)}–{h.end.toFixed(1)}초 · {(h.score*100).toFixed(0)}점</button>)}
+      {t.kind === 'highlights' && t.state === 'succeeded' && !t.result.highlights?.length &&
+        <span> · 추천할 구간이 없습니다(말이 거의 없는 영상).</span>}
       {t.state === 'failed' && <button disabled={busy} onClick={() => void act(async () => {
         await request(`/media-tasks/${t.id}/retry`, {method:'POST'}); await refresh()
       })}>재시도</button>}
