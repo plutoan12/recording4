@@ -6,7 +6,7 @@ import subprocess
 
 import pytest
 
-from pipeline.editing import Cue, EditSpec, TrimSettings
+from pipeline.editing import Cue, EditSpec, ReframeSettings, TrimSettings
 from worker.rendering import render_clip
 
 
@@ -134,3 +134,58 @@ def test_real_render_cuts_the_silent_parts(tmp_path):
     assert whole == pytest.approx(9.0, abs=0.5)
     # 남길 토막은 2.9~5.1초, 곧 2.2초입니다.
     assert cut == pytest.approx(2.2, abs=0.4), f"자른 뒤 {cut:.2f}초 (원본 {whole:.2f}초)"
+
+
+def test_real_render_follows_a_moving_centre_and_denoises(tmp_path):
+    """crop 식과 음성 필터가 실제로 FFmpeg를 통과하는지 봅니다.
+
+    얼굴 위치는 직접 넣습니다. 여기서 보는 것은 **따라가는 쪽**이지 찾는 쪽이
+    아닙니다(찾는 쪽은 worker.analysis.face_track 에 따로 있습니다).
+    """
+    binary = os.environ.get("R4_FFMPEG_BINARY") or shutil.which("ffmpeg")
+    if not binary:
+        pytest.skip("FFmpeg required; CI installs it")
+    source = tmp_path / "source.mp4"
+    subprocess.run(
+        [
+            binary,
+            "-y",
+            "-v",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc2=size=640x360:rate=24",
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=frequency=440:sample_rate=48000",
+            "-t",
+            "4",
+            "-c:v",
+            "libx264",
+            "-c:a",
+            "aac",
+            str(source),
+        ],
+        check=True,
+    )
+    output = tmp_path / "out.mp4"
+    render_clip(
+        source,
+        output,
+        EditSpec(
+            start=0,
+            end=4,
+            mode="crop",
+            width=180,
+            height=320,
+            denoise="soft",
+            reframe=ReframeSettings(),
+            cues=[Cue(start=0.5, end=2.0, text="따라가기")],
+        ),
+        # 왼쪽에서 오른쪽으로 옮겨 갑니다.
+        faces=[(0.0, 0.2), (1.0, 0.4), (2.0, 0.6), (3.0, 0.8)],
+    )
+    assert output.stat().st_size > 1000
+    assert _probe_seconds(binary, output) == pytest.approx(4.0, abs=0.5)

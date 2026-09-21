@@ -1,3 +1,14 @@
+## 2026-09-21: 자동 리프레이밍과 음성 잡음 제거 (Claude)
+
+- 사용자 요청: faster-whisper·stable-ts·libass·Remotion·GL Transitions·MediaPipe·SAM2·DeepFilterNet·librosa·sidechaincompress·LosslessCut 목록을 받고, 정리한 뒤 **자동 리프레이밍·잡음 제거·전환·무음 컷 편집 화면** 넷을 고름. 이 커밋은 앞의 둘입니다. [PR #36](https://github.com/plutoan12/recording4/pull/36) 후속 커밋. 담당: `pipeline/reframe.py`(신규), `pipeline/editing.py`, `worker/analysis.py`·`rendering.py`, `apps/web`(ClipEditor.tsx, WorkflowPanel.tsx), `pyproject.toml`, 테스트·문서.
+- **자동 리프레이밍**(`EditSpec.reframe`, 기본 없음=끔): 얼굴을 따라 `crop`의 가로 중심이 움직입니다. 검출 → 떨지 않게 다듬기(`follow`) → 시간의 식(`crop_x`). 무음 컷과 같은 시간축을 씁니다(`clip_path`가 `trimming.moved`로 옮깁니다). `mode="crop"`에서만 돕니다.
+- 검출기: MediaPipe 우선, 없으면 OpenCV 내장 Haar로 내려갑니다. `face_track()`이 **어느 쪽을 썼는지 함께 돌려줍니다.** `mediapipe==1.0.1`을 `analysis` 추가 의존성에 넣었습니다(빼도 기능은 돕니다).
+- **음성 잡음 제거**(`EditSpec.denoise`: `soft`/`strong`): FFmpeg 내장 `afftdn`. 새 의존성 없음. `audio_filter_args()`가 무음 컷과 한 체인으로 잇고 **자르기를 먼저** 둡니다.
+- 이미 있던 것 확인: faster-whisper·stable-ts·libass는 이미 쓰고 있었습니다. **Remotion·SAM2는 넣지 않았습니다**(각각 두 번째 렌더 스택, GPU 필요·쓸 자리 좁음). sidechaincompress는 배경음악 기능이 아직 없어 순서가 맞지 않습니다.
+- 검증: 새 테스트 17개. 전체 632 passed, 13 skipped. 실패 1건은 변경 전에도 이 환경에서만 실패합니다. ruff 0.8.4·tsc·vite build 통과.
+- **재지 못한 것**: 이 세션에 FFmpeg도 MediaPipe도 없습니다. crop 식과 음성 필터는 **CI의 실제 렌더 테스트**가 봅니다(`test_real_render_follows_a_moving_centre_and_denoises`). 얼굴 검출 정확도는 실제 영상으로 재야 합니다.
+- 남은 것: 사용자가 고른 넷 중 **전환(xfade)**과 **무음 컷 편집 화면**이 남았습니다. 세로(y) 추적, 말하는 사람 고르기(지금은 가장 큰 얼굴), DeepFilterNet은 아직입니다.
+
 ## 2026-09-21: 무음 자동 컷과 숏폼 구간 추천 (Claude)
 
 - 사용자 요청: FFmpeg·MoviePy·Auto-Editor·PySceneDetect 목록을 받고, 어디에 맞고 어디에 안 맞는지 정리한 뒤 **무음 자동 컷**과 **PySceneDetect 활용 넓히기**를 고름. [PR #36](https://github.com/plutoan12/recording4/pull/36) 후속 커밋. 담당: `pipeline/trimming.py`·`highlights.py`(신규), `pipeline/editing.py`, `worker/rendering.py`·`media_tasks.py`, `adminapi/models.py`·`routers/editing.py`, `migrations/versions/0008_highlights_media_task.py`, `apps/web`(ClipEditor.tsx, WorkflowPanel.tsx), 테스트·문서.

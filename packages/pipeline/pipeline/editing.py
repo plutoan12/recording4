@@ -57,6 +57,22 @@ class TrimSettings(BaseModel):
     min_keep: float = Field(default=0.4, ge=0.05, le=10)
 
 
+class ReframeSettings(BaseModel):
+    """자동 리프레이밍의 세기. 기본값은 잰 것이 아니라 정한 것입니다.
+
+    경로를 만드는 계산은 `pipeline.reframe`에 있습니다(그쪽이 이 파일을
+    읽으므로 반대로 읽으면 순환 참조가 됩니다).
+    """
+
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+
+    # 이보다 작게 움직이면 화면을 움직이지 않습니다(화면 폭 대비 비율).
+    # 고개만 까딱일 때 화면이 따라 흔들리지 않게 합니다.
+    deadzone: float = Field(default=0.06, ge=0, le=0.5)
+    # 초당 따라갈 수 있는 최대 거리(화면 폭 대비 비율). 크면 홱 돌고 작으면 놓칩니다.
+    max_speed: float = Field(default=0.25, ge=0.01, le=2)
+
+
 class EditSpec(BaseModel):
     model_config = ConfigDict(allow_inf_nan=False, extra="forbid")
     start: float = Field(ge=0)
@@ -89,6 +105,12 @@ class EditSpec(BaseModel):
     # 말이 없는 구간을 잘라내고 남은 토막을 이어 붙입니다. 비우면 자르지 않습니다.
     # 자른 뒤에는 시간축이 달라지므로 자막·단어 시각·스티커를 함께 옮깁니다.
     silence: TrimSettings | None = None
+    # 세로로 자를 때 얼굴을 따라 중심을 움직입니다. 비우면 `focus_x` 고정입니다.
+    # `mode="crop"`에서만 씁니다(`pad`는 화면 전체를 남기므로 자를 것이 없습니다).
+    reframe: ReframeSettings | None = None
+    # 음성 잡음 제거. FFmpeg 내장 필터라 새 의존성이 없습니다. 비우면 건드리지
+    # 않습니다. `strong`은 잡음을 더 깎지만 목소리도 같이 깎일 수 있습니다.
+    denoise: Literal["soft", "strong"] | None = None
 
     @model_validator(mode="after")
     def valid_range(self):

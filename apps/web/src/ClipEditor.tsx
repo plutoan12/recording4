@@ -124,6 +124,8 @@ export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWo
   const [focus, setFocus] = useState(0.5)
   const [burn,setBurn] = useState(true)
   const [trimSilence,setTrimSilence] = useState(false)
+  const [autoFrame,setAutoFrame] = useState(false)
+  const [denoise,setDenoise] = useState('')
   const [captionLanguage,setCaptionLanguage] = useState('ko')
   const [template,setTemplate] = useState('default')
   const [templates,setTemplates] = useState<Template[]>([])
@@ -278,6 +280,17 @@ export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWo
       <p>선택 길이: {(end-start).toFixed(2)}초 · 출력: 1080 × 1920</p>
       <label><input type="checkbox" checked={trimSilence} onChange={e => setTrimSilence(e.target.checked)} /> 말 없는 구간 자동으로 잘라내기
         <span className="hint">말을 찾아(VAD) 사이의 침묵을 빼고 이어 붙입니다. 0.6초보다 짧은 침묵은 그대로 두고, 말 앞뒤로 0.12초는 남깁니다. 자막·스티커 시각도 함께 옮깁니다. 말을 하나도 못 찾으면 자르지 않습니다.</span></label>
+      <label><input type="checkbox" checked={autoFrame} onChange={e => setAutoFrame(e.target.checked)} disabled={mode !== 'crop'} /> 얼굴을 따라 화면 중심 움직이기
+        <span className="hint">{mode === 'crop'
+          ? '세로로 자를 때 얼굴 위치를 따라 좌우 중심이 움직입니다. 고개를 까딱하는 정도(화면 폭 6%)는 무시하고, 초당 화면 폭의 25%까지만 따라가 화면이 떨지 않습니다. 얼굴을 못 찾으면 아래 가로 중심 값을 그대로 씁니다. 사람이 여럿이면 가장 큰 얼굴을 따라갑니다.'
+          : '잘라내기(crop)에서만 씁니다. 여백 채우기(pad)는 화면 전체를 남기므로 따라갈 것이 없습니다.'}</span></label>
+      <label>음성 잡음 제거
+        <select value={denoise} onChange={e => setDenoise(e.target.value)}>
+          <option value="">쓰지 않음</option>
+          <option value="soft">약하게</option>
+          <option value="strong">강하게</option>
+        </select>
+        <span className="hint">FFmpeg 내장 필터라 추가 설치가 없습니다. 강하게는 잡음을 더 깎지만 목소리도 같이 깎일 수 있습니다.</span></label>
       <div className="editor-actions">
         <button disabled={busy} onClick={() => void act(async () => {
           await request(`/source-assets/${assetId}/analyze`, {method:'POST', body: JSON.stringify({kind:'transcribe'})})
@@ -425,11 +438,11 @@ export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWo
           setMessage('저장된 대본의 문장 경계로 후보를 만들었습니다. AI 인기도 예측은 아닙니다.')
         })}>구간 후보 찾기</button>
         <button disabled={busy || end <= start || end-start > 180} onClick={() => void act(async () => {
-          await request('/clips', {method:'POST', body: JSON.stringify({source_asset_id:assetId, start, end, mode, focus_x:focus, title, burn_subtitles:burn, caption_language:captionLanguage, subtitle_template:template, subtitle_animation:animation || null, subtitle_preset:preset || null, subtitle_pacing:pacing || null, cues:captions, stickers, silence: trimSilence ? {} : null})})
+          await request('/clips', {method:'POST', body: JSON.stringify({source_asset_id:assetId, start, end, mode, focus_x:focus, title, burn_subtitles:burn, caption_language:captionLanguage, subtitle_template:template, subtitle_animation:animation || null, subtitle_preset:preset || null, subtitle_pacing:pacing || null, cues:captions, stickers, silence: trimSilence ? {} : null, reframe: autoFrame && mode === 'crop' ? {} : null, denoise: denoise || null})})
           setMessage('새 편집본의 렌더를 요청했습니다.'); await refresh()
         })}>숏폼 렌더</button>
       </div>
-      <button disabled={busy||end<=start||end-start>180} onClick={()=>{onWorkflow({source_asset_id:assetId,start,end,mode,focus_x:focus,title,burn_subtitles:burn,caption_language:captionLanguage,subtitle_template:template,subtitle_animation:animation||undefined,subtitle_preset:preset||undefined,subtitle_pacing:pacing||undefined,cues:captions,stickers,silence:trimSilence?{}:undefined});setMessage('아래 단계별 제작 화면에 선택 구간을 전달했습니다.')}}>선택 구간을 번역·더빙 단계로 보내기</button>
+      <button disabled={busy||end<=start||end-start>180} onClick={()=>{onWorkflow({source_asset_id:assetId,start,end,mode,focus_x:focus,title,burn_subtitles:burn,caption_language:captionLanguage,subtitle_template:template,subtitle_animation:animation||undefined,subtitle_preset:preset||undefined,subtitle_pacing:pacing||undefined,cues:captions,stickers,silence:trimSilence?{}:undefined,reframe:autoFrame&&mode==='crop'?{}:undefined,denoise:denoise||undefined});setMessage('아래 단계별 제작 화면에 선택 구간을 전달했습니다.')}}>선택 구간을 번역·더빙 단계로 보내기</button>
       {suggestions.map((s,i) => <button key={i} onClick={() => {setStart(s.start);setEnd(s.end);setTitle(s.title)}}>{s.start.toFixed(1)}–{s.end.toFixed(1)}초 · {s.title}</button>)}
     </>}
     {message && <p role="status">{message}</p>}

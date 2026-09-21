@@ -10,6 +10,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from pipeline.editing import EditSpec, clip_cues
+from pipeline.reframe import Point, crop_x, follow
 from pipeline.subtitle_files import plain_ass
 from pipeline.subtitle_stickers import (
     add_sticker_events,
@@ -23,6 +24,7 @@ from pipeline.trimming import (
     Span,
     keeps,
     kept_seconds,
+    moved,
     moved_cues,
     moved_span,
     select_expression,
@@ -31,7 +33,9 @@ from pipeline.trimming import (
 
 __all__ = [
     "RenderError",
+    "audio_filter_args",
     "clip_keeps",
+    "clip_path",
     "ffmpeg_binary",
     "plain_ass",
     "render_clip",
@@ -45,6 +49,10 @@ __all__ = [
 
 # 자르고 나서 이보다 짧게 남으면 영상이라 보기 어렵습니다.
 MIN_TRIMMED_SECONDS = 0.5
+
+# 잡음 제거 세기. FFmpeg 내장 `afftdn`의 잡음 바닥(dB)입니다. 낮출수록 많이
+# 깎이고 목소리도 같이 깎입니다. 잰 값이 아니라 정한 값입니다.
+DENOISE = {"soft": "afftdn=nf=-20", "strong": "afftdn=nf=-35"}
 
 
 class RenderError(RuntimeError):
@@ -156,12 +164,15 @@ def subtitles_filter(filename: str = "captions.ass") -> str:
     return f"subtitles={filename}:fontsdir='{escaped}'"
 
 
-def video_filter(spec: EditSpec) -> str:
+def video_filter(spec: EditSpec, path: Sequence[Point] = ()) -> str:
+    """영상 필터 체인. `path`가 있으면 가로 중심이 그 경로를 따라갑니다."""
     w, h = spec.width, spec.height
     if spec.mode == "crop":
+        # 식에 쉼표가 있어 작은따옴표로 묶습니다(묶지 않으면 필터 구분자입니다).
+        x = f"'{crop_x(path, spec.focus_x)}'" if path else f"(iw-ow)*{spec.focus_x}"
         frame = (
             f"scale={w}:{h}:force_original_aspect_ratio=increase,"
-            f"crop={w}:{h}:(iw-ow)*{spec.focus_x}:(ih-oh)*{spec.focus_y}"
+            f"crop={w}:{h}:{x}:(ih-oh)*{spec.focus_y}"
         )
     else:
         frame = (
@@ -186,6 +197,31 @@ def clip_keeps(source: Path, spec: EditSpec, speech: Sequence[Span] | None = Non
 
         speech = speech_spans(source)
     return keeps(speech, start=spec.start, end=spec.end, settings=settings)
+
+
+def clip_path(
+    source: Path,
+    spec: EditSpec,
+    kept: Sequence[Span],
+    faces: Sequence[Point] | None = None,
+) -> list[Point]:
+    """가로 중심이 따라갈 경로. 쓰지 않으면 빈 목록입니다.
+
+    **무음 컷과 같은 시간축을 씁니다.** `crop`은 자르기(`select`) 뒤에 오므로
+    얼굴 시각도 잘린 뒤의 시각으로 옮겨야 합니다. 잘려 나간 자리의 점은
+    버립니다.
+    """
+    settings = getattr(spec, "reframe", None)
+    if settings is None or spec.mode != "crop":
+        return []
+    if faces is None:
+        from worker.analysis import face_track
+
+        faces = face_track(source, start=spec.start, end=spec.end)[0]
+    if trims(kept):
+        shifted = [(moved(at, kept), value) for at, value in faces]
+        faces = [(at, value) for at, value in shifted if at is not None]
+    return follow(faces, settings=settings)
 
 
 def trimmed_spec(spec: EditSpec, kept: Sequence[Span]) -> EditSpec:
@@ -216,7 +252,7 @@ def trimmed_spec(spec: EditSpec, kept: Sequence[Span]) -> EditSpec:
 
 
 def trim_filters(kept: Sequence[Span]) -> tuple[str, list[str]]:
-    """(영상 체인 앞머리, 음성 필터 인자). 자를 것이 없으면 빈 값입니다.
+    """(영상 체인 앞머리, 음성 필터 조각). 자를 것이 없으면 빈 값입니다.
 
     `select`는 남길 프레임만 통과시키고 `setpts`가 남은 프레임의 시각을 도로
     0부터 세어 빈자리를 없앱니다. 식에 쉼표가 있어 작은따옴표로 묶습니다
@@ -227,8 +263,21 @@ def trim_filters(kept: Sequence[Span]) -> tuple[str, list[str]]:
     expression = select_expression(kept)
     return (
         f"select='{expression}',setpts=N/FRAME_RATE/TB,",
-        ["-filter:a", f"aselect='{expression}',asetpts=N/SR/TB"],
+        [f"aselect='{expression}'", "asetpts=N/SR/TB"],
     )
+
+
+def audio_filter_args(spec: EditSpec, kept: Sequence[Span]) -> list[str]:
+    """`-filter:a` 인자. 무음 컷과 잡음 제거를 한 체인으로 잇습니다.
+
+    **자르기가 먼저입니다.** 버릴 구간까지 잡음을 깎는 것은 헛일이고, 잡음
+    제거가 이어 붙인 자리의 이음매를 뭉개는 편이 낫습니다.
+    """
+    chain = trim_filters(kept)[1]
+    level = getattr(spec, "denoise", None)
+    if level:
+        chain.append(DENOISE[level])
+    return ["-filter:a", ",".join(chain)] if chain else []
 
 
 def render_clip(
@@ -238,20 +287,22 @@ def render_clip(
     *,
     rules: SubtitleRules = DEFAULT_RULES,
     speech: Sequence[Span] | None = None,
+    faces: Sequence[Point] | None = None,
 ) -> None:
     source, output = source.resolve(), output.resolve()
     if not source.is_file() or source == output:
         raise RenderError("유효한 원본과 별도 출력 경로가 필요합니다.")
     output.parent.mkdir(parents=True, exist_ok=True)
     kept = clip_keeps(source, spec, speech)
-    prefix, audio_filters = trim_filters(kept)
-    # 자른 뒤에는 시간축이 달라집니다. 자막·스티커를 먼저 옮겨 놓고 그립니다.
+    prefix, _ = trim_filters(kept)
+    # 자른 뒤에는 시간축이 달라집니다. 자막·스티커·얼굴 경로를 먼저 옮깁니다.
     shown = trimmed_spec(spec, kept) if trims(kept) else spec
+    path = clip_path(source, spec, kept, faces)
     with tempfile.TemporaryDirectory(prefix="r4-render-") as directory:
         temp = Path(directory)
         write_subtitles(temp / "captions.ass", shown, rules)
         try:
-            filters = video_filter_args(shown, base_chain=prefix + video_filter(shown))
+            filters = video_filter_args(shown, base_chain=prefix + video_filter(shown, path))
         except ValueError as exc:
             raise RenderError(str(exc)) from None
         command = [
@@ -270,7 +321,7 @@ def render_clip(
             *filters,
             "-map",
             "0:a:0?",
-            *audio_filters,
+            *audio_filter_args(spec, kept),
             "-c:v",
             "libx264",
             "-preset",

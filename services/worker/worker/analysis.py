@@ -402,6 +402,100 @@ def word_timings(result) -> list[WordTiming]:  # noqa: ANN001
     return found
 
 
+# 얼굴을 볼 간격. 초당 4장이면 사람이 움직이는 속도를 따라가기에 충분하고
+# 1분 영상에서 240장이라 CPU로도 견딥니다. 잰 값이 아니라 정한 값입니다.
+FACE_FPS = 4.0
+
+
+def _largest_face(boxes: list[tuple[float, float, float, float]]) -> float | None:
+    """가장 큰 얼굴의 가로 중심(0~1). 누가 말하는지는 알 수 없어 크기로 고릅니다."""
+    if not boxes:
+        return None
+    x, _, w, _ = max(boxes, key=lambda box: box[2] * box[3])
+    return min(1.0, max(0.0, x + w / 2))
+
+
+def _mediapipe_boxes(frame, detector):  # noqa: ANN001
+    """MediaPipe 검출 결과를 (x, y, w, h) 비율 목록으로."""
+    import cv2
+
+    found = detector.process(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+    boxes = []
+    for detection in getattr(found, "detections", None) or []:
+        box = detection.location_data.relative_bounding_box
+        boxes.append((box.xmin, box.ymin, box.width, box.height))
+    return boxes
+
+
+def _open_face_detector():  # noqa: ANN202
+    """(검출 함수, 검출기 이름). MediaPipe가 있으면 그쪽, 없으면 OpenCV 내장입니다.
+
+    MediaPipe 쪽이 정확하지만 설치가 크고 판올림마다 API가 바뀝니다. OpenCV는
+    `scenedetect`가 이미 끌고 오는 의존성이고 모델이 패키지 안에 들어 있어
+    내려받을 것이 없습니다. **어느 쪽을 썼는지 결과에 적어 둡니다.**
+    """
+    try:
+        import mediapipe
+
+        detector = mediapipe.solutions.face_detection.FaceDetection(
+            model_selection=1, min_detection_confidence=0.5
+        )
+    except Exception:  # noqa: BLE001 - 없거나 API가 바뀌었으면 아래로 내려갑니다.
+        pass
+    else:
+        return (lambda frame: _mediapipe_boxes(frame, detector)), "mediapipe"
+
+    import cv2
+
+    cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
+
+    def detect(frame):  # noqa: ANN001, ANN202
+        height, width = frame.shape[:2]
+        grey = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        return [
+            (x / width, y / height, w / width, h / height)
+            for x, y, w, h in cascade.detectMultiScale(grey, 1.2, 5, minSize=(40, 40))
+        ]
+
+    return detect, "opencv-haar"
+
+
+def face_track(
+    source: Path, *, start: float = 0.0, end: float | None = None, fps: float = FACE_FPS
+) -> tuple[list[tuple[float, float]], str]:
+    """얼굴 가로 중심을 시각과 함께. (점 목록, 쓴 검출기) 순입니다.
+
+    시각은 **구간 시작을 0으로** 셉니다. 얼굴을 못 찾은 순간은 건너뜁니다
+    (`pipeline.reframe.follow`가 마지막 위치를 유지합니다).
+    """
+    try:
+        import cv2
+    except ImportError as exc:
+        raise MissingDependency(
+            "얼굴 검출 의존성이 없습니다. pip install '.[analysis]'를 실행하세요."
+        ) from exc
+    detect, name = _open_face_detector()
+    capture = cv2.VideoCapture(str(source))
+    if not capture.isOpened():
+        return [], name
+    points: list[tuple[float, float]] = []
+    try:
+        moment = start
+        step = 1.0 / max(fps, 0.1)
+        while end is None or moment < end:
+            capture.set(cv2.CAP_PROP_POS_MSEC, moment * 1000)
+            ok, frame = capture.read()
+            if not ok:
+                break
+            center = _largest_face(detect(frame))
+            if center is not None:
+                points.append((moment - start, center))
+            moment += step
+    finally:
+        capture.release()
+    return points, name
+
+
 def detect_scenes(source: Path, *, threshold: float = 27.0) -> list[dict]:
     try:
         from scenedetect import ContentDetector, detect

@@ -16,7 +16,13 @@ from pipeline.trimming import (
     select_expression,
     trims,
 )
-from worker.rendering import RenderError, clip_keeps, trim_filters, trimmed_spec
+from worker.rendering import (
+    RenderError,
+    audio_filter_args,
+    clip_keeps,
+    trim_filters,
+    trimmed_spec,
+)
 
 SPEECH = [(0.5, 2.0), (5.0, 7.0)]
 
@@ -111,16 +117,35 @@ def test_a_span_that_survives_only_in_part_keeps_its_remaining_edges():
     assert moved_span(3.0, 4.0, [(0.0, 2.0), (5.0, 7.0)]) is None
 
 
+KEPT = [(0.0, 2.0), (5.0, 7.0)]
+EXPRESSION = "between(t,0.000,2.000)+between(t,5.000,7.000)"
+
+
 def test_the_filter_expression_is_quoted_so_commas_are_not_separators():
-    prefix, audio = trim_filters([(0.0, 2.0), (5.0, 7.0)])
-    expression = "between(t,0.000,2.000)+between(t,5.000,7.000)"
-    assert select_expression([(0.0, 2.0), (5.0, 7.0)]) == expression
-    assert prefix == f"select='{expression}',setpts=N/FRAME_RATE/TB,"
-    assert audio == ["-filter:a", f"aselect='{expression}',asetpts=N/SR/TB"]
+    prefix, audio = trim_filters(KEPT)
+    assert select_expression(KEPT) == EXPRESSION
+    assert prefix == f"select='{EXPRESSION}',setpts=N/FRAME_RATE/TB,"
+    assert audio == [f"aselect='{EXPRESSION}'", "asetpts=N/SR/TB"]
 
 
 def test_nothing_to_cut_adds_no_filters():
     assert trim_filters([(0.0, 10.0)]) == ("", [])
+    assert audio_filter_args(EditSpec(start=0, end=10), [(0.0, 10.0)]) == []
+
+
+def test_denoise_runs_after_the_cut_in_one_audio_chain():
+    """버릴 구간까지 잡음을 깎는 것은 헛일입니다. 자르기가 먼저입니다."""
+    spec = EditSpec(start=0, end=10, denoise="strong")
+    assert audio_filter_args(spec, KEPT) == [
+        "-filter:a",
+        f"aselect='{EXPRESSION}',asetpts=N/SR/TB,afftdn=nf=-35",
+    ]
+    # 자를 것이 없으면 잡음 제거만 남습니다.
+    assert audio_filter_args(spec, [(0.0, 10.0)]) == ["-filter:a", "afftdn=nf=-35"]
+    assert audio_filter_args(EditSpec(start=0, end=10, denoise="soft"), [(0.0, 10.0)]) == [
+        "-filter:a",
+        "afftdn=nf=-20",
+    ]
 
 
 def spec(**extra) -> EditSpec:
