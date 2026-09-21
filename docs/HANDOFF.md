@@ -2,6 +2,7 @@
 
 - YouTube 자동 자막 트랙이 없어 패딩한 분석용 음원 사본에 캐시된 `Systran/faster-whisper-small`을 무료 CPU 실행했다. 한국어 감지 확률은 1.0, 32.64초·8개 세그먼트였다. 전사는 사람 정답이 아니므로 정확도 계산·화자 자동 수정에 사용하지 않는다.
 - 시각·음성 모델 불일치 및 미채점 15개 후보에 ASR 세그먼트, Sortformer 발화 구간, Light-ASD 활성 트랙을 시간으로 연결한 비공개 초안 `review-draft-small-ko-v2.json`을 `/Users/an-youwon/Projects/recording4-evaluation-private/active-speaker-youtube-20260920`에 저장했다. 후보 상태는 모두 `human_review_required`이며 기존 배정·운영 기본은 유지한다.
+- 같은 후보의 중앙 화면 15장을 묶은 비공개 `candidate-contact-sheet.png`도 생성했다. 여러 얼굴의 이동·가림·웃음은 확인할 수 있지만 화면만으로 발화자를 확정하지 않았고, 사람 음성 청취·주석 전에는 보정·자동 배정에 사용하지 않는다.
 - 최신 `d6d151e` GitHub Actions run **35608809724**는 Python·DER·UI 검사 성공(워커/스택은 조건상 생략)이다. 저장소에는 집계·절차 문서만 남기고 원시 음원·전사·토큰은 커밋하지 않았다. [상세](quality/active-speaker-youtube-2026-09-20/REPORT.md)
 - 남은 일: 후보 구간 사람 검수와 독립 화자 정답 작성, 그 뒤 같은 분모의 DER/CER·오배정/누락 비교. 사람 정답 전에는 정확도 개선이나 운영 채택을 말하지 않는다.
 
