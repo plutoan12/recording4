@@ -107,3 +107,8 @@ button {
 /* 선택 항목 아래의 설명. 무엇이 달라지는지 고를 때 보이게 둡니다. */
 .hint { display: block; font-size: .8rem; color: #555; font-weight: normal; margin-top: .2rem; }
 @media (prefers-color-scheme: dark) { .hint { color: #aaa; } }
+
+/* 무음 컷 토막 목록. 길어질 수 있어 스크롤을 둡니다. */
+.cut-list { margin: .5rem 0 1rem; }
+.cut-list ul { max-height: 220px; overflow-y: auto; margin: .4rem 0; padding-left: 1.2rem; }
+.cut-list li { padding: .1rem 0; }

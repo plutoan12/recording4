@@ -1,3 +1,12 @@
+## 2026-09-21: 무음 컷 목록을 사람이 고치기 (Claude)
+
+- 사용자가 고른 넷 중 **무음 컷 편집 화면**입니다. [PR #36](https://github.com/plutoan12/recording4/pull/36) 후속 커밋. 담당: `pipeline/editing.py`(`EditSpec.keep`), `worker/media_tasks.py`·`rendering.py`, `adminapi/models.py`·`routers/editing.py`, `migrations/versions/0009_silence_media_task.py`, `apps/web`(ClipEditor.tsx, WorkflowPanel.tsx, styles.css), 테스트·문서.
+- 무료 분석 작업 `silence`(마이그레이션 0009): 구간과 세기를 받아 남길 토막·전후 길이를 돌려줍니다. 렌더는 하지 않습니다. 실제 자르기와 **같은 함수**(`trimming.keeps`)를 씁니다.
+- `EditSpec.keep`: 사람이 고친 토막 목록. **자동 탐지보다 우선합니다.** 차례·겹침·구간 넘침을 모델에서 검사합니다. `trimmed_spec`이 옮긴 뒤에는 비웁니다(렌더가 다시 자르지 않게).
+- 편집기: [무음 구간 미리 재기] → 결과 줄의 [컷 불러오기] → 토막 체크박스 목록(남길 개수·초가 함께 보임) → 끈 토막은 영상에서 빠집니다. [컷 목록 비우기]로 자동 탐지로 되돌립니다.
+- 검증: 새 테스트 9개. 전체 641 passed, 13 skipped. 실패 1건은 변경 전에도 이 환경에서만 실패합니다. ruff 0.8.4·tsc·vite build 통과. `alembic heads`는 0009 하나입니다.
+- 남은 것: 사용자가 고른 넷 중 **전환(xfade)**이 남았습니다. 토막을 화면에서 미리 재생해 보는 기능은 없습니다(숫자와 목록만 보입니다).
+
 ## 2026-09-21: 자동 리프레이밍과 음성 잡음 제거 (Claude)
 
 - 사용자 요청: faster-whisper·stable-ts·libass·Remotion·GL Transitions·MediaPipe·SAM2·DeepFilterNet·librosa·sidechaincompress·LosslessCut 목록을 받고, 정리한 뒤 **자동 리프레이밍·잡음 제거·전환·무음 컷 편집 화면** 넷을 고름. 이 커밋은 앞의 둘입니다. [PR #36](https://github.com/plutoan12/recording4/pull/36) 후속 커밋. 담당: `pipeline/reframe.py`(신규), `pipeline/editing.py`, `worker/analysis.py`·`rendering.py`, `apps/web`(ClipEditor.tsx, WorkflowPanel.tsx), `pyproject.toml`, 테스트·문서.

@@ -113,7 +113,7 @@ function TemplatePreview({ template, animation }: { template: Template; animatio
     : <span key={i}>{p.piece}</span>)}</span></div>
 }
 type Task = { id: string; source_asset_id: string; clip_edit_id: string | null; kind: string; state: string; error: string | null;
-  result: { artifact_id?: string; scenes?: {start: number; end: number}[]; highlights?: {start:number; end:number; score:number; speech_ratio:number; scene_cuts:number}[]; sync?: {offset_seconds:number; framerate_scale:number; clamped:number} } }
+  result: { artifact_id?: string; scenes?: {start: number; end: number}[]; highlights?: {start:number; end:number; score:number; speech_ratio:number; scene_cuts:number}[]; silence?: {keeps:[number,number][]; before:number; after:number}; sync?: {offset_seconds:number; framerate_scale:number; clamped:number} } }
 
 export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWorkflow: (draft:WorkflowDraft)=>void }) {
   const [assetId, setAssetId] = useState('')
@@ -126,6 +126,8 @@ export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWo
   const [trimSilence,setTrimSilence] = useState(false)
   const [autoFrame,setAutoFrame] = useState(false)
   const [denoise,setDenoise] = useState('')
+  // 무음 컷에서 남길 토막. 자동으로 잰 뒤 사람이 켜고 끕니다.
+  const [cuts,setCuts] = useState<{span:[number,number]; keep:boolean}[]>([])
   const [captionLanguage,setCaptionLanguage] = useState('ko')
   const [template,setTemplate] = useState('default')
   const [templates,setTemplates] = useState<Template[]>([])
@@ -284,6 +286,25 @@ export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWo
         <span className="hint">{mode === 'crop'
           ? '세로로 자를 때 얼굴 위치를 따라 좌우 중심이 움직입니다. 고개를 까딱하는 정도(화면 폭 6%)는 무시하고, 초당 화면 폭의 25%까지만 따라가 화면이 떨지 않습니다. 얼굴을 못 찾으면 아래 가로 중심 값을 그대로 씁니다. 사람이 여럿이면 가장 큰 얼굴을 따라갑니다.'
           : '잘라내기(crop)에서만 씁니다. 여백 채우기(pad)는 화면 전체를 남기므로 따라갈 것이 없습니다.'}</span></label>
+      {trimSilence && <div className="cut-list">
+        <button type="button" disabled={busy || end <= start} onClick={() => void act(async () => {
+          await request(`/source-assets/${assetId}/analyze`, {method:'POST',
+            body: JSON.stringify({kind:'silence', start, end})})
+          setMessage('무음 구간을 재고 있습니다. 아래 결과에서 [컷 불러오기]를 누르세요.'); await refresh()
+        })}>무음 구간 미리 재기</button>
+        {cuts.length > 0 && <>
+          <p>남길 토막 {cuts.filter(c => c.keep).length}/{cuts.length}개 ·
+            {' '}{cuts.filter(c => c.keep).reduce((sum,c) => sum + c.span[1] - c.span[0], 0).toFixed(1)}초
+            {' '}(선택 구간 {(end-start).toFixed(1)}초)</p>
+          <ul>{cuts.map((c,i) => <li key={i}>
+            <label><input type="checkbox" checked={c.keep}
+              onChange={e => setCuts(cuts.map((x,j) => j === i ? {...x, keep: e.target.checked} : x))} />
+              {' '}{c.span[0].toFixed(2)}–{c.span[1].toFixed(2)}초 ({(c.span[1]-c.span[0]).toFixed(2)}초)</label>
+          </li>)}</ul>
+          <p className="hint">끈 토막은 영상에서 빠집니다. 여기서 고치면 다시 재도 그 값이 그대로 쓰입니다.
+            전부 켜면 자동으로 찾은 그대로입니다. <button type="button" onClick={() => setCuts([])}>컷 목록 비우기</button></p>
+        </>}
+      </div>}
       <label>음성 잡음 제거
         <select value={denoise} onChange={e => setDenoise(e.target.value)}>
           <option value="">쓰지 않음</option>
@@ -438,11 +459,11 @@ export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWo
           setMessage('저장된 대본의 문장 경계로 후보를 만들었습니다. AI 인기도 예측은 아닙니다.')
         })}>구간 후보 찾기</button>
         <button disabled={busy || end <= start || end-start > 180} onClick={() => void act(async () => {
-          await request('/clips', {method:'POST', body: JSON.stringify({source_asset_id:assetId, start, end, mode, focus_x:focus, title, burn_subtitles:burn, caption_language:captionLanguage, subtitle_template:template, subtitle_animation:animation || null, subtitle_preset:preset || null, subtitle_pacing:pacing || null, cues:captions, stickers, silence: trimSilence ? {} : null, reframe: autoFrame && mode === 'crop' ? {} : null, denoise: denoise || null})})
+          await request('/clips', {method:'POST', body: JSON.stringify({source_asset_id:assetId, start, end, mode, focus_x:focus, title, burn_subtitles:burn, caption_language:captionLanguage, subtitle_template:template, subtitle_animation:animation || null, subtitle_preset:preset || null, subtitle_pacing:pacing || null, cues:captions, stickers, silence: trimSilence ? {} : null, keep: cuts.length ? cuts.filter(c => c.keep).map(c => c.span) : null, reframe: autoFrame && mode === 'crop' ? {} : null, denoise: denoise || null})})
           setMessage('새 편집본의 렌더를 요청했습니다.'); await refresh()
         })}>숏폼 렌더</button>
       </div>
-      <button disabled={busy||end<=start||end-start>180} onClick={()=>{onWorkflow({source_asset_id:assetId,start,end,mode,focus_x:focus,title,burn_subtitles:burn,caption_language:captionLanguage,subtitle_template:template,subtitle_animation:animation||undefined,subtitle_preset:preset||undefined,subtitle_pacing:pacing||undefined,cues:captions,stickers,silence:trimSilence?{}:undefined,reframe:autoFrame&&mode==='crop'?{}:undefined,denoise:denoise||undefined});setMessage('아래 단계별 제작 화면에 선택 구간을 전달했습니다.')}}>선택 구간을 번역·더빙 단계로 보내기</button>
+      <button disabled={busy||end<=start||end-start>180} onClick={()=>{onWorkflow({source_asset_id:assetId,start,end,mode,focus_x:focus,title,burn_subtitles:burn,caption_language:captionLanguage,subtitle_template:template,subtitle_animation:animation||undefined,subtitle_preset:preset||undefined,subtitle_pacing:pacing||undefined,cues:captions,stickers,silence:trimSilence?{}:undefined,keep:cuts.length?cuts.filter(c=>c.keep).map(c=>c.span):undefined,reframe:autoFrame&&mode==='crop'?{}:undefined,denoise:denoise||undefined});setMessage('아래 단계별 제작 화면에 선택 구간을 전달했습니다.')}}>선택 구간을 번역·더빙 단계로 보내기</button>
       {suggestions.map((s,i) => <button key={i} onClick={() => {setStart(s.start);setEnd(s.end);setTitle(s.title)}}>{s.start.toFixed(1)}–{s.end.toFixed(1)}초 · {s.title}</button>)}
     </>}
     {message && <p role="status">{message}</p>}
@@ -455,6 +476,15 @@ export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWo
       {t.result.scenes?.map((s,i) => <button key={i} onClick={() => {setStart(s.start);setEnd(Math.min(s.end,s.start+180))}}>{s.start.toFixed(1)}–{s.end.toFixed(1)}초</button>)}
       {t.result.highlights?.map((h,i) => <button key={i} title={`말 ${(h.speech_ratio*100).toFixed(0)}% · 장면 전환 ${h.scene_cuts}회`}
         onClick={() => {setStart(h.start);setEnd(h.end)}}>{h.start.toFixed(1)}–{h.end.toFixed(1)}초 · {(h.score*100).toFixed(0)}점</button>)}
+      {t.result.silence && <>
+        <span> · {t.result.silence.before.toFixed(1)}초 → {t.result.silence.after.toFixed(1)}초
+          ({t.result.silence.keeps.length}토막)</span>
+        <button onClick={() => {
+          setCuts(t.result.silence!.keeps.map(span => ({span, keep: true})))
+          setTrimSilence(true)
+          setMessage('잰 토막을 불러왔습니다. 필요 없는 토막의 체크를 끄세요.')
+        }}>컷 불러오기</button>
+      </>}
       {t.kind === 'highlights' && t.state === 'succeeded' && !t.result.highlights?.length &&
         <span> · 추천할 구간이 없습니다(말이 거의 없는 영상).</span>}
       {t.state === 'failed' && <button disabled={busy} onClick={() => void act(async () => {

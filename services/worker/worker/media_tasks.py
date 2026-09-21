@@ -14,9 +14,10 @@ from adminapi.config import get_settings
 from adminapi.db import get_session_factory
 from adminapi.models import Artifact, MediaTask, SourceAsset, TranscriptSegment, utcnow
 from adminapi.storage import get_storage
-from pipeline.editing import Cue, EditSpec
+from pipeline.editing import Cue, EditSpec, TrimSettings
 from pipeline.highlights import suggest
 from pipeline.speakers import SpeakerTurn, assign_speakers, speaker_totals
+from pipeline.trimming import keeps, kept_seconds
 from worker.analysis import (
     MissingDependency,
     SyncOptions,
@@ -99,6 +100,25 @@ def run_media(task_id: str) -> dict:
                 result = {"storage_key": output_key, "subtitle_rules": asdict(rules)}
             elif kind == "scenes":
                 result = {"scenes": detect_scenes(source)}
+            elif kind == "silence":
+                # 자르기 전에 어디가 잘리는지 재 봅니다. 렌더는 하지 않습니다.
+                begin = float(spec.get("start") or 0.0)
+                finish = float(spec.get("end") or duration or 0.0)
+                if finish <= begin:
+                    raise ValueError("잴 구간이 비어 있습니다. 시작과 끝을 확인하세요.")
+                kept = keeps(
+                    speech_spans(source),
+                    start=begin,
+                    end=finish,
+                    settings=TrimSettings.model_validate(spec.get("settings") or {}),
+                )
+                result = {
+                    "silence": {
+                        "keeps": [[round(a, 3), round(b, 3)] for a, b in kept],
+                        "before": round(finish - begin, 3),
+                        "after": round(kept_seconds(kept), 3),
+                    }
+                }
             elif kind == "highlights":
                 # 장면 경계와 발화 구간을 합쳐 숏폼으로 쓸 만한 구간을 추천합니다.
                 # 어느 쪽도 유료 호출이 아닙니다.

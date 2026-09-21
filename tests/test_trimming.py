@@ -181,3 +181,71 @@ def test_the_trimmed_spec_starts_at_zero_with_everything_moved():
 def test_cutting_down_to_almost_nothing_is_refused():
     with pytest.raises(RenderError):
         trimmed_spec(spec(), [(0.0, 0.2)])
+
+
+def test_a_hand_picked_keep_list_wins_over_detection(tmp_path):
+    """사람이 화면에서 고친 토막을 기계가 다시 덮지 않습니다."""
+    source = tmp_path / "a.mp4"
+    source.write_bytes(b"x")
+    picked = EditSpec(start=10, end=20, silence=TrimSettings(), keep=[(0.0, 1.0), (4.0, 6.0)])
+    assert clip_keeps(source, picked, [(11.0, 19.0)]) == [(0.0, 1.0), (4.0, 6.0)]
+
+
+def test_a_keep_list_works_without_the_automatic_setting(tmp_path):
+    source = tmp_path / "a.mp4"
+    source.write_bytes(b"x")
+    picked = EditSpec(start=10, end=20, keep=[(0.0, 3.0)])
+    assert clip_keeps(source, picked, None) == [(0.0, 3.0)]
+
+
+@pytest.mark.parametrize(
+    "keep",
+    [
+        [],
+        [(2.0, 1.0)],
+        [(5.0, 7.0), (0.0, 2.0)],
+        [(0.0, 3.0), (2.0, 4.0)],
+        [(0.0, 11.0)],
+    ],
+)
+def test_an_unusable_keep_list_is_refused(keep):
+    with pytest.raises(ValueError):
+        EditSpec(start=10, end=20, keep=keep)
+
+
+def test_the_trimmed_spec_clears_the_keep_list():
+    """이미 옮겨 놓았으므로 렌더가 다시 자르면 안 됩니다."""
+    moved_spec = trimmed_spec(
+        EditSpec(start=10, end=20, keep=[(0.0, 2.0), (5.0, 7.0)]), [(0.0, 2.0), (5.0, 7.0)]
+    )
+    assert moved_spec.keep is None and moved_spec.silence is None
+
+
+def test_api_schedules_a_silence_measuring_task(client, auth_headers, session, user):
+    """자르기 전에 어디가 잘리는지 재 봅니다. 무료 분석 작업입니다."""
+    import uuid
+    from decimal import Decimal
+
+    from adminapi.models import MediaTask, SourceAsset
+
+    asset = SourceAsset(
+        storage_key=f"sources/{uuid.uuid4()}.mp4",
+        original_filename="a.mp4",
+        upload_state="verified",
+        duration_seconds=Decimal("180"),
+        width=1920,
+        height=1080,
+        created_by_id=user.id,
+    )
+    session.add(asset)
+    session.commit()
+    response = client.post(
+        f"/source-assets/{asset.id}/analyze",
+        headers=auth_headers,
+        json={"kind": "silence", "start": 10, "end": 40, "settings": {"min_gap": 1.0}},
+    )
+    assert response.status_code == 202, response.text
+    task = session.get(MediaTask, uuid.UUID(response.json()["id"]))
+    assert task.kind == "silence"
+    assert (task.settings["start"], task.settings["end"]) == (10, 40)
+    assert task.settings["settings"]["min_gap"] == 1.0

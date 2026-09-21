@@ -32,7 +32,7 @@ from adminapi.models import (
 from adminapi.outbox import enqueue
 from adminapi.storage import ObjectStorage, get_storage
 from adminapi.subtitle_rules import subtitle_rules
-from pipeline.editing import Cue, EditSpec, suggest_clips
+from pipeline.editing import Cue, EditSpec, TrimSettings, suggest_clips
 from pipeline.states import JobState
 from pipeline.subtitle_files import (
     MEDIA_TYPES,
@@ -247,10 +247,14 @@ def import_subtitles(
 
 
 class AnalysisRequest(BaseModel):
-    kind: Literal["transcribe", "scenes", "highlights"]
+    kind: Literal["transcribe", "scenes", "highlights", "silence"]
     language: str | None = Field(default=None, pattern=r"^[a-z]{2,3}$")
     # 추천 구간의 목표 길이(초). `highlights`에서만 씁니다.
     target: float | None = Field(default=None, ge=5, le=600)
+    # 무음 컷을 재 볼 구간과 세기. `silence`에서만 씁니다.
+    start: float | None = Field(default=None, ge=0)
+    end: float | None = Field(default=None, gt=0)
+    settings: TrimSettings | None = None
 
 
 class DiarizeRequest(BaseModel):
@@ -284,7 +288,13 @@ def analyze(asset_id: uuid.UUID, payload: AnalysisRequest, user: CurrentUser, se
         MediaTask(
             source_asset_id=asset_id,
             kind=payload.kind,
-            settings={"language": payload.language, "target": payload.target},
+            settings={
+                "language": payload.language,
+                "target": payload.target,
+                "start": payload.start,
+                "end": payload.end,
+                "settings": payload.settings.model_dump() if payload.settings else None,
+            },
         ),
     )
 

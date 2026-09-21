@@ -189,6 +189,10 @@ def clip_keeps(source: Path, spec: EditSpec, speech: Sequence[Span] | None = Non
     무음 감지). 테스트와 미리 재기는 직접 넣어 씁니다.
     """
     whole = [(0.0, spec.end - spec.start)]
+    chosen = getattr(spec, "keep", None)
+    if chosen:
+        # 사람이 화면에서 고친 토막입니다. 기계가 다시 덮지 않습니다.
+        return [(float(start), float(end)) for start, end in chosen]
     settings = getattr(spec, "silence", None)
     if settings is None:
         return whole
@@ -247,6 +251,7 @@ def trimmed_spec(spec: EditSpec, kept: Sequence[Span]) -> EditSpec:
             "cues": moved_cues(clip_cues(spec.cues, spec.start, spec.end), kept),
             "stickers": stickers,
             "silence": None,
+            "keep": None,
         }
     )
 

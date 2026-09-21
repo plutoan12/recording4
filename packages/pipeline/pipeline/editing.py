@@ -57,6 +57,11 @@ class TrimSettings(BaseModel):
     min_keep: float = Field(default=0.4, ge=0.05, le=10)
 
 
+# 사람이 정할 수 있는 토막 수의 상한. 자동 탐지 쪽 상한(`trimming.MAX_SEGMENTS`)과
+# 같은 이유입니다. FFmpeg 필터 문자열이 끝없이 길어지지 않게 합니다.
+MAX_KEEP = 200
+
+
 class ReframeSettings(BaseModel):
     """자동 리프레이밍의 세기. 기본값은 잰 것이 아니라 정한 것입니다.
 
@@ -111,6 +116,10 @@ class EditSpec(BaseModel):
     # 음성 잡음 제거. FFmpeg 내장 필터라 새 의존성이 없습니다. 비우면 건드리지
     # 않습니다. `strong`은 잡음을 더 깎지만 목소리도 같이 깎일 수 있습니다.
     denoise: Literal["soft", "strong"] | None = None
+    # 남길 토막을 **사람이 직접 정한 것**. 구간 시작을 0으로 센 (시작, 끝)입니다.
+    # 있으면 `silence`보다 우선합니다. 자동으로 찾은 결과를 화면에서 손본 값이
+    # 여기 들어옵니다. 사람이 고른 것을 기계가 다시 덮지 않습니다.
+    keep: list[tuple[float, float]] | None = Field(default=None, max_length=MAX_KEEP)
 
     @model_validator(mode="after")
     def valid_range(self):
@@ -118,7 +127,24 @@ class EditSpec(BaseModel):
             raise ValueError("숏폼 길이는 0초 초과, 180초 이하여야 합니다.")
         if self.height * 9 != self.width * 16:
             raise ValueError("출력 화면은 9:16이어야 합니다.")
+        if self.keep is not None:
+            self._valid_keep()
         return self
+
+    def _valid_keep(self) -> None:
+        """남길 토막은 차례대로, 겹치지 않고, 구간 안에 있어야 합니다."""
+        if not self.keep:
+            raise ValueError("남길 토막을 하나도 두지 않으면 영상이 비어 버립니다.")
+        length = self.end - self.start
+        previous = 0.0
+        for start, end in self.keep:
+            if end <= start:
+                raise ValueError("남길 토막의 끝은 시작보다 뒤여야 합니다.")
+            if start < previous:
+                raise ValueError("남길 토막은 앞에서 뒤로, 겹치지 않게 적어야 합니다.")
+            if end > length + 1e-6:
+                raise ValueError("남길 토막이 선택 구간을 넘습니다.")
+            previous = end
 
 
 def clip_cues(cues: list[Cue], start: float, end: float) -> list[Cue]:
