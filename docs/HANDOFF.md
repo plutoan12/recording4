@@ -1,3 +1,14 @@
+## 2026-09-21: 용어집을 번역에 연결 (Claude)
+
+- 사용자 요청: 번역 품질을 올리는 세 가지 안(문맥 배치·용어집·LLM 번역)의 비용을 비교한 뒤 "일단 용어집부터 연결하고". [PR #36](https://github.com/plutoan12/recording4/pull/36) 후속 커밋. 담당: `pipeline/glossary.py`(신규), `worker/providers.py`, `worker/workflow_tasks.py`, `adminapi/services/glossary.py`(신규), `adminapi/routers/glossaries.py`(신규), `adminapi/config.py`·`main.py`, `apps/web/GlossaryPanel.tsx`(신규)·`App.tsx`·`styles.css`, `scripts/verify_translate.py`, 테스트·문서.
+- 이미 있던 `glossaries` 테이블(`entries` JSON)을 실제로 씁니다. 마이그레이션은 필요 없습니다.
+- 넣는 방식: 용어가 걸린 문장만 `text/html`로 보내고 용어 자리를 `<span translate="no">번역 표기</span>`로 바꿉니다. 걸리지 않은 문장은 지금까지와 똑같이 `text/plain`입니다. 번역 뒤 표시를 걷어내고, 사라진 용어를 셉니다(`GoogleTranslator.missing_terms`).
+- 쓰는 곳: 관리화면 **용어집** 패널, `GET/PUT/DELETE /glossaries/{원문}/{목표}`, 워커 `translate:` 단계. `R4_GOOGLE_TRANSLATE_GLOSSARY`를 넣으면 Google 자체 용어집을 대신 씁니다.
+- 예산: Google이 표시 글자도 청구하므로 `paid_estimate`가 **보낼 글자 그대로** 셉니다. 원문 12자 문장에 용어 하나가 걸리면 48자로 잡힙니다(테스트로 고정).
+- 검증: 새 테스트 37개(핵심 모듈·공급자 요청 모양·API CRUD·워커 연결·예산). 전체 `python -m pytest -q` 553 passed, 11 skipped. 실패 1건(`test_caption_track_is_uploaded_once_for_track_only_video`)은 변경 전에도 이 환경에서만 실패하며(stash 후 재현 확인) CI에서는 통과합니다. `ruff check .`·`ruff format --check .`(0.8.4) 통과, `tsc -b --noEmit`·`vite build` 통과. `verify_translate.py --glossary`를 무료 경로로 돌려 용어가 표본의 어디에 걸리는지 확인했습니다.
+- **재지 못한 것**: Google이 실제로 `translate="no"`를 지키는지 확인하지 못했습니다. 문서에 있는 기능이지만 이 세션에는 Google 자격증명이 없습니다. 자격증명이 있는 컴퓨터에서 `python3 scripts/verify_translate.py --pairs docs/samples/ko-en.json --glossary 용어집.json --project <프로젝트> --allow-paid`로 재세요(표본 250자, 1센트 미만). 표시가 지켜지지 않으면 "빠진 용어"로 잡힙니다.
+- 남은 것: 넣는 표기는 글자 그대로라 어미·관사에 맞춰 변형되지 않고, 용어가 많으면 주변 어순이 어색해질 수 있습니다. 전사(whisper) 쪽에 용어집을 넣는 일(`initial_prompt`/`hotwords`)은 아직입니다. 사라진 용어 수를 작업 화면에 보여 주지는 않습니다(로그와 검증 스크립트에만 남습니다).
+
 ## 2026-09-21: 숏폼 자막 끊기와 품질 재기 (Claude)
 
 - 사용자 요청: "자막 부분에서 퀄리티를 어떻게 하면 다른 사이트처럼 올릴 수 있을까" → 제안 가운데 숏폼 분할과 단어 시각 활용부터 하기로 함. [PR #36](https://github.com/plutoan12/recording4/pull/36) 후속 커밋. 담당: `pipeline/subtitles.py`, `pipeline/editing.py`, `pipeline/subtitle_tool.py`, `worker/rendering.py`·`composition.py`, `adminapi/routers/editing.py`, `apps/web`(ClipEditor.tsx, SubtitlePreview.tsx, WorkflowPanel.tsx), 테스트·문서.

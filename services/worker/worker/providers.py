@@ -6,10 +6,19 @@ for contract tests. Persist returned remote ids before polling or retry decision
 
 from __future__ import annotations
 
+import logging
+import re
 from pathlib import Path
 from urllib.parse import quote, urlparse
 
 import httpx
+
+from pipeline.glossary import Glossary, missing, protect, restore
+
+logger = logging.getLogger(__name__)
+
+# Google 자체 용어집 리소스 이름. 용어집은 `global` 위치를 지원하지 않습니다.
+GLOSSARY_RESOURCE = re.compile(r"^projects/[^/]+/locations/[^/]+/glossaries/[^/]+$")
 
 
 class ProviderError(RuntimeError):
@@ -34,10 +43,75 @@ def video_terms(original: str, translated: str, source: str | None, target: str)
 
 
 class GoogleTranslator:
-    def __init__(self, project: str, *, client=None, allow_paid: bool = False):
-        self.project, self.client, self.allow_paid = project, client, allow_paid
+    """Google 번역. 용어집은 두 갈래 중 하나로 적용됩니다.
 
-    def translate(self, texts: list[str], target: str, source: str | None = None) -> list[str]:
+    `glossary_resource`가 설정되어 있으면 **Google 자체 용어집**을 씁니다.
+    어미 변화까지 Google이 처리하지만, 용어 파일을 Cloud Storage에 두고
+    `global`이 아닌 지역에 리소스를 만들어 두어야 합니다.
+
+    없으면 `translate()`에 넘긴 **우리 용어집**을 씁니다. 용어가 걸린 문장만
+    `text/html`로 바꿔 그 자리를 `translate="no"`로 감싸 보냅니다. 걸리지
+    않은 문장은 지금까지와 똑같이 `text/plain`으로 갑니다. 방식과 한계는
+    `pipeline.glossary`에 적어 두었습니다.
+
+    호출마다 `missing_terms`에 **번역문에서 사라진 용어**가 남습니다. 용어가
+    빠졌다고 번역을 버리지는 않습니다. 세어서 보여 주는 것까지가 몫입니다.
+    """
+
+    def __init__(
+        self,
+        project: str,
+        *,
+        client=None,
+        allow_paid: bool = False,
+        glossary_resource: str | None = None,
+    ):
+        if glossary_resource and not GLOSSARY_RESOURCE.match(glossary_resource):
+            raise ValueError(
+                "용어집 리소스 이름은 projects/…/locations/…/glossaries/… 형식이어야 합니다."
+            )
+        if glossary_resource and glossary_resource.split("/")[3] == "global":
+            raise ValueError("Google 용어집은 global 위치를 지원하지 않습니다. 지역을 고르세요.")
+        self.project, self.client, self.allow_paid = project, client, allow_paid
+        self.glossary_resource = glossary_resource
+        self.missing_terms: list[str] = []
+
+    @property
+    def parent(self) -> str:
+        if self.glossary_resource:
+            return "/".join(self.glossary_resource.split("/")[:4])
+        return f"projects/{self.project}/locations/global"
+
+    def _call(self, texts: list[str], target: str, source: str | None, *, html: bool) -> list[str]:
+        request = {
+            "parent": self.parent,
+            "contents": texts,
+            "target_language_code": target,
+            "mime_type": "text/html" if html else "text/plain",
+        }
+        if source:
+            request["source_language_code"] = source
+        if self.glossary_resource:
+            request["glossary_config"] = {"glossary": self.glossary_resource}
+        # Disable SDK automatic retries: the caller owns budget and retry policy.
+        response = self.client.translate_text(request=request, retry=None, timeout=60)
+        items = list(response.translations)
+        if self.glossary_resource:
+            # 용어집을 거친 결과는 별도 자리에 옵니다. 비어 있으면 원래 자리를 씁니다.
+            items = list(getattr(response, "glossary_translations", None) or items)
+        output = [item.translated_text for item in items]
+        if len(output) != len(texts):
+            raise ProviderError("번역 응답 수가 입력과 다릅니다.")
+        return output
+
+    def translate(
+        self,
+        texts: list[str],
+        target: str,
+        source: str | None = None,
+        *,
+        glossary: Glossary | None = None,
+    ) -> list[str]:
         require_paid(self.allow_paid)
         if not texts or sum(map(len, texts)) > 25000:
             raise ValueError("번역 배치는 비어 있지 않고 25,000자 이하여야 합니다.")
@@ -45,19 +119,38 @@ class GoogleTranslator:
             from google.cloud import translate_v3
 
             self.client = translate_v3.TranslationServiceClient()
-        request = {
-            "parent": f"projects/{self.project}/locations/global",
-            "contents": texts,
-            "target_language_code": target,
-            "mime_type": "text/plain",
-        }
-        if source:
-            request["source_language_code"] = source
-        # Disable SDK automatic retries: the caller owns budget and retry policy.
-        response = self.client.translate_text(request=request, retry=None, timeout=60)
-        output = [item.translated_text for item in response.translations]
-        if len(output) != len(texts):
-            raise ProviderError("번역 응답 수가 입력과 다릅니다.")
+        self.missing_terms = []
+        if self.glossary_resource:
+            glossary = None  # Google이 처리하므로 우리 표시는 넣지 않습니다.
+        marked = [protect(text, glossary) for text in texts]
+        output: list[str] = [""] * len(texts)
+
+        plain = [index for index, (_, terms) in enumerate(marked) if not terms]
+        if plain:
+            for index, translated in zip(
+                plain,
+                self._call([texts[i] for i in plain], target, source, html=False),
+                strict=True,
+            ):
+                output[index] = translated
+
+        # 용어가 걸린 문장만 HTML로 보냅니다. Google은 표시 글자도 세어 청구하므로
+        # 걸린 자리마다 28자(`<span translate="no">`+`</span>`)와 원문·번역 표기의
+        # 길이 차만큼 더 나옵니다. 예산 계산도 같은 글자를 셉니다(`paid_estimate`).
+        tagged = [index for index, (_, terms) in enumerate(marked) if terms]
+        if tagged:
+            for index, translated in zip(
+                tagged,
+                self._call([marked[i][0] for i in tagged], target, source, html=True),
+                strict=True,
+            ):
+                output[index] = restore(translated)
+                self.missing_terms += missing(output[index], marked[index][1])
+        if self.missing_terms:
+            logger.warning(
+                "번역문에서 빠진 용어 %d개: %s", len(self.missing_terms), self.missing_terms
+            )
+
         return [
             video_terms(original, translated, source, target)
             for original, translated in zip(texts, output, strict=True)

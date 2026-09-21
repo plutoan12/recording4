@@ -63,6 +63,11 @@ class Settings(BaseSettings):
     max_job_budget_usd: Decimal | None = Field(default=None, ge=0)
     max_monthly_budget_usd: Decimal | None = Field(default=None, ge=0)
     google_cloud_project: str | None = None
+    # Google 자체 용어집 리소스(projects/…/locations/…/glossaries/…). 설정하면
+    # 번역이 그쪽 용어집을 쓰고 우리 표시는 넣지 않습니다. 용어 파일을 Cloud
+    # Storage에 두어야 하고 `global` 위치는 지원되지 않습니다. 비워 두면
+    # glossaries 테이블의 용어집을 번역 전에 원문에 박아 넣습니다.
+    google_translate_glossary: str | None = None
     elevenlabs_api_key: str | None = None
     tts_model: str = "eleven_multilingual_v2"
     tts_model_version: str | None = None

@@ -15,6 +15,7 @@ import {
 } from './api'
 
 import { ClipEditor } from './ClipEditor'
+import { GlossaryPanel } from './GlossaryPanel'
 import { WorkflowPanel, type WorkflowDraft } from './WorkflowPanel'
 
 const REFRESH_MS = 5000
@@ -206,6 +207,8 @@ function Dashboard({ onSignOut }: { onSignOut: () => void }) {
 
       <ClipEditor assets={assets} onWorkflow={setWorkflowDraft} />
       <WorkflowPanel assets={assets} jobs={jobs} draft={workflowDraft} onCreated={refresh} />
+
+      <GlossaryPanel />
 
       <h2>작업</h2>
       <table>

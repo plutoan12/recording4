@@ -71,6 +71,13 @@ jobs:
       - name: 번역 자막 규칙 확인 (무료)
         run: python3 scripts/verify_translate.py --pairs docs/samples/ko-en.json
 
+      # 용어집이 표본의 어느 자리에 걸리는지는 번역 없이도 봅니다. 용어를
+      # 못 찾으면 실패합니다. Google이 표시를 지키는지는 여기서 알 수 없습니다.
+      - name: 번역 용어집 확인 (무료)
+        run: |
+          python3 scripts/verify_translate.py --pairs docs/samples/ko-en.json \
+            --glossary docs/samples/ko-en-glossary.json
+
   web:
     name: 관리화면 검사
     runs-on: ubuntu-latest

@@ -29,9 +29,11 @@ from adminapi.models import (
 )
 from adminapi.outbox import enqueue
 from adminapi.services.budget import reserve, settle
+from adminapi.services.glossary import active_glossary
 from adminapi.storage import get_storage
 from pipeline.budget import BudgetShortfall
 from pipeline.editing import Cue, clip_cues
+from pipeline.glossary import protect
 from pipeline.hashing import StageInputs
 from pipeline.states import JobState, StageRunState
 from pipeline.workflow import WorkflowOptions, rendered_cues, rendered_language
@@ -136,14 +138,28 @@ def voice_output(data, key, checksum):
     }
 
 
-def paid_estimate(name, data, options, settings):
+def translate_glossary(session, options, data, settings):
+    """번역에 쓸 우리 용어집.
+
+    Google 자체 용어집을 설정해 두었으면 그쪽이 처리하므로 우리 표시는 넣지
+    않습니다. 비용 계산과 실제 호출이 **같은 판단**을 하도록 한곳에 둡니다.
+    """
+    if settings.google_translate_glossary:
+        return None
+    return active_glossary(session, options.source_language, data.get("target"))
+
+
+def paid_estimate(name, data, options, settings, session=None):
     if name.startswith("translate:"):
         if options.translated_cues is not None or options.source_language == data.get("target"):
             return None
         rate = settings.translate_usd_per_1k_chars
         if not settings.google_cloud_project:
             raise Blocked("Google Cloud 프로젝트와 인증을 설정하세요.")
-        count = sum(len(c["text"]) for c in translation_batch(data))
+        # 용어집이 걸린 문장은 표시가 붙은 채로 나갑니다. Google은 표시 글자도
+        # 세어 청구하므로 **보낼 글자 그대로** 잽니다.
+        glossary = translate_glossary(session, options, data, settings) if session else None
+        count = sum(len(protect(c["text"], glossary)[0]) for c in translation_batch(data))
         units = Decimal(count) / 1000
     elif name.startswith("dub:"):
         rate = settings.tts_usd_per_1k_chars
@@ -268,8 +284,17 @@ def execute_step(name, options, data, asset, directory, stage_id, remote_id, sav
         elif options.source_language == data["target"]:
             texts = [c["text"] for c in batch]
         else:
-            texts = GoogleTranslator(settings.google_cloud_project, allow_paid=True).translate(
-                [c["text"] for c in batch], data["target"], options.source_language
+            with get_session_factory()() as session:
+                glossary = translate_glossary(session, options, data, settings)
+            texts = GoogleTranslator(
+                settings.google_cloud_project,
+                allow_paid=True,
+                glossary_resource=settings.google_translate_glossary,
+            ).translate(
+                [c["text"] for c in batch],
+                data["target"],
+                options.source_language,
+                glossary=glossary,
             )
         return {
             "translated": data.get("translated", [])
@@ -477,7 +502,7 @@ def run_job(job_id: str):
                 job.lease_token = job.lease_until = None
                 session.commit()
                 return {"status": "reused", "stage": name}
-            estimate = None if remote else paid_estimate(name, data, options, settings)
+            estimate = None if remote else paid_estimate(name, data, options, settings, session)
             if estimate is not None and not stage.outputs.get("invoked"):
                 hold_budgets(session, job, stage, estimate)
                 stage.estimated_cost = estimate

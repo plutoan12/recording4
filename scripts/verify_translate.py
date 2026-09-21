@@ -32,6 +32,7 @@ import sys
 from pathlib import Path
 
 from pipeline.editing import Cue
+from pipeline.glossary import Glossary, protect
 from pipeline.subtitles import apply_rules, check, normalize, rules_for, text_width
 
 
@@ -112,11 +113,24 @@ def fits_rules(
     return report, problems
 
 
-def translate(texts: list[str], target: str, source: str, project: str) -> list[str]:
-    """실제 Google 번역. 유료 호출입니다."""
+def translate(
+    texts: list[str], target: str, source: str, project: str, glossary: Glossary | None = None
+) -> tuple[list[str], list[str]]:
+    """실제 Google 번역. 유료 호출입니다. (번역문, 빠진 용어) 순입니다."""
     from worker.providers import GoogleTranslator
 
-    return GoogleTranslator(project, allow_paid=True).translate(texts, target, source)
+    translator = GoogleTranslator(project, allow_paid=True)
+    output = translator.translate(texts, target, source, glossary=glossary)
+    return output, translator.missing_terms
+
+
+def load_glossary(path: Path | None, source: str, target: str) -> Glossary | None:
+    """용어집 파일. `{"entries": {"원문": "번역 표기"}}` 형식이면 됩니다."""
+    if path is None:
+        return None
+    data = json.loads(path.read_text(encoding="utf-8"))
+    entries = data.get("entries", data) if isinstance(data, dict) else data
+    return Glossary(source_language=source, target_language=target, entries=entries)
 
 
 def main() -> int:
@@ -126,6 +140,7 @@ def main() -> int:
     parser.add_argument("--target", default="en")
     parser.add_argument("--project", default=None, help="Google Cloud 프로젝트")
     parser.add_argument("--allow-paid", action="store_true", help="실제 번역 호출을 허용합니다.")
+    parser.add_argument("--glossary", type=Path, default=None, help="용어집 JSON")
     # 품질 목표가 아니라 회귀 감시용 하한입니다. 표본이 작아 흔들립니다.
     parser.add_argument("--min-chrf", type=float, default=0.40)
     args = parser.parse_args()
@@ -138,6 +153,16 @@ def main() -> int:
     references = [item["reference"] for item in pairs]
 
     problems: list[str] = []
+    glossary = load_glossary(args.glossary, args.source, args.target)
+    if glossary is not None:
+        # 용어가 어디에 걸리는지는 번역 없이도 봅니다(무료).
+        wanted = [term for text in sources for term in protect(text, glossary)[1]]
+        print(
+            f"용어집 {len(glossary.entries)}개, 이 표본에서 걸리는 자리 {len(wanted)}곳: {wanted}\n"
+        )
+        if not wanted:
+            problems.append("표본에 용어집이 걸리는 자리가 없습니다. 표본이나 용어를 확인하세요.")
+
     if not args.allow_paid:
         print("유료 호출을 하지 않습니다(--allow-paid 없음). 참조 번역만 규칙에 넣어 봅니다.\n")
         report, found = fits_rules(references, args.target, spans(sources, args.source))
@@ -149,7 +174,14 @@ def main() -> int:
             print("--project가 필요합니다(Google Cloud 프로젝트).")
             return 2
         print(f"실제 번역 호출: {len(sources)}문장, {sum(map(len, sources))}자\n")
-        candidates = translate(sources, args.target, args.source, args.project)
+        candidates, gone = translate(sources, args.target, args.source, args.project, glossary)
+        if glossary is not None:
+            landed = [term for text in sources for term in protect(text, glossary)[1]]
+            print(f"용어 {len(landed) - len(gone)}/{len(landed)}곳이 번역문에 남았습니다.")
+            if gone:
+                print(f"  빠진 용어: {gone}")
+                problems.append(f"번역문에서 용어 {len(gone)}곳이 사라졌습니다: {gone}")
+            print()
         if len(candidates) != len(sources):
             problems.append(f"번역 문장 수가 다릅니다: 입력 {len(sources)}, 결과 {len(candidates)}")
 

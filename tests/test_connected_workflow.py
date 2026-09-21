@@ -283,7 +283,7 @@ def test_translation_provider_and_lipsync_reuses_remote_id(setup_flow, monkeypat
         def __init__(self, *args, **kwargs):
             pass
 
-        def translate(self, texts, target, source):
+        def translate(self, texts, target, source, *, glossary=None):
             return ["translated"]
 
     monkeypatch.setattr(wf, "GoogleTranslator", Translator)
@@ -806,7 +806,7 @@ def test_subtitles_only_languages_keep_audio_and_times(
         def __init__(self, *args, **kwargs):
             pass
 
-        def translate(self, inputs, target_code, source_code):
+        def translate(self, inputs, target_code, source_code, *, glossary=None):
             calls.append((source_code, target_code))
             assert inputs == [texts[source]]
             return [texts[target]]
