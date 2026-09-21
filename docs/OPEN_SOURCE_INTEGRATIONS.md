@@ -129,6 +129,24 @@ R4_EGOBLUR_BINARY=/opt/egoblur/bin/egoblur-gen1
 R4_EGOBLUR_FACE_MODEL=/srv/models/ego_blur_face.jit
 ```
 
+운영 Compose에서는 선택 백엔드의 파일을 이미지에 복사하지 않습니다. 호스트의
+비공개 디렉터리를 읽기 전용으로 마운트하는 예시는
+[`infra/compose.privacy.override.example.yml`](../infra/compose.privacy.override.example.yml)에
+있습니다. 컨테이너 안에서는 실행 파일을 `/opt/privacy/bin`에, 가중치를
+`/models/privacy` 아래에 배치합니다.
+
+```bash
+export R4_PRIVACY_TOOLS_DIR=/srv/recording4/privacy-tools
+export R4_PRIVACY_MODELS_DIR=/srv/recording4/privacy-models
+docker compose --env-file .runtime/recording4.env \
+  -f infra/compose.runtime.yml \
+  -f infra/compose.privacy.override.example.yml up -d worker
+```
+
+이 override를 사용해도 관리화면의 기본 백엔드는 `deface`이며, 선택한 백엔드의
+실행 파일과 가중치가 없으면 워커가 렌더를 성공 처리하지 않습니다. 실행 파일은
+호스트에서 별도로 설치·검증해야 하며, 모델 파일은 저장소에 커밋하지 않습니다.
+
 OpenScrub·EgoBlur를 선택했는데 실행 파일이나 가중치가 없으면 `RenderError`로
 중단합니다. 기본 운영 경로는 비교 검증이 끝날 때까지 deface로 유지합니다. EgoBlur
 가중치는 Project Aria의 Gen1 공개 모델이며 Aria Gen2/일반 영상의 품질을 자동으로

@@ -1,0 +1,16 @@
+# Optional privacy-backend override for infra/compose.runtime.yml.
+# Model files and executables stay outside Git and are mounted read-only.
+# Use this file only when the selected privacy backend is openscrub or egoblur.
+
+services:
+  worker:
+    environment:
+      R4_OPENSCRUB_BINARY: /opt/privacy/bin/openscrub
+      R4_OPENSCRUB_FACE_MODEL: /models/privacy/openscrub/centerface.onnx
+      R4_EGOBLUR_BINARY: /opt/privacy/bin/egoblur-gen1
+      R4_EGOBLUR_FACE_MODEL: /models/privacy/egoblur/ego_blur_face.jit
+    volumes:
+      - models:/home/appuser/.cache
+      - provider_secrets:/run/secrets:ro
+      - ${R4_PRIVACY_TOOLS_DIR:?Set R4_PRIVACY_TOOLS_DIR to a private tools directory}:/opt/privacy:ro
+      - ${R4_PRIVACY_MODELS_DIR:?Set R4_PRIVACY_MODELS_DIR to a private models directory}:/models/privacy:ro

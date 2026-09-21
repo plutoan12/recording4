@@ -1483,3 +1483,8 @@ CI가 토큰 없이도 이 경로를 점검합니다(`화자 분리 토큰 오�
 - Management UI can select the backend when face redaction is enabled. EgoBlur is blur rather than mosaic, and its Gen1 Aria domain does not prove quality on ordinary YouTube video.
 - Validation: Docker worker `16 passed` for privacy/editing tests. Full CI and the current branch commit still need confirmation after this change. No paid call, publication, or operational-default change.
 - Detailed provenance and limitations: [privacy model report](quality/privacy-tools-20260921/REPORT.md).
+## 2026-09-21 privacy backend 운영 마운트 예시
+
+- 선택형 OpenScrub/EgoBlur 실행 파일과 가중치를 이미지에 복사하지 않고 읽기 전용으로 주입하는 `infra/compose.privacy.override.example.yml`을 추가했다. `R4_PRIVACY_TOOLS_DIR`와 `R4_PRIVACY_MODELS_DIR`를 호스트 비공개 경로로 지정하면 컨테이너의 `/opt/privacy`와 `/models/privacy`에 마운트된다.
+- 기본 `deface` 경로와 관리화면 선택값은 바꾸지 않았다. 선택형 백엔드는 실행 파일·가중치가 없거나 변환이 실패하면 워커가 성공 처리하지 않는다. Compose 병합 검사를 실제로 통과했다.
+- 실행 파일 설치와 EgoBlur 전체 영상 품질·사람 검수는 아직 운영 승인 대상이 아니다. 모델 파일과 원시 영상·음성은 계속 비공개 평가 폴더에만 둔다.
