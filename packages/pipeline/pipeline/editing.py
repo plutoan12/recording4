@@ -63,6 +63,9 @@ class EditSpec(BaseModel):
     # 모션 프리셋 이름(pipeline.subtitle_presets). 움직임보다 먼저 쓰며, 비우면 템플릿
     # 값입니다. 빈 문자열이면 템플릿의 프리셋을 떼고 `subtitle_animation`을 씁니다.
     subtitle_preset: str | None = Field(default=None, pattern=r"^$|^[a-z][a-z0-9-]{1,39}$")
+    # 자막을 끊는 방식(pipeline.subtitles.PACING_LABELS). 비우면 서버 설정 그대로이고,
+    # `shortform`이면 말한 시각(Cue.words)에 맞춰 한 줄로 짧게 끊습니다.
+    subtitle_pacing: str | None = Field(default=None, pattern=r"^(broadcast|shortform)$")
     cues: list[Cue] = Field(default_factory=list, max_length=3000)
     # 스티커(화살표·반짝이·말풍선·PNG). 시각은 자막과 같은 원본 시간축이며 구간에 맞춰 옮깁니다.
     stickers: list[Sticker] = Field(default_factory=list, max_length=20)

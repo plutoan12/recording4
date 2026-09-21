@@ -17,7 +17,7 @@ from pipeline.subtitle_stickers import (
     overlay_filter_graph,
 )
 from pipeline.subtitle_templates import SubtitleTemplate, resolve_template, styled_document
-from pipeline.subtitles import DEFAULT_RULES, SubtitleRules, apply_rules
+from pipeline.subtitles import DEFAULT_RULES, SubtitleRules, apply_rules, pacing_rules
 
 __all__ = [
     "RenderError",
@@ -67,6 +67,13 @@ def write_subtitles(
             chosen = chosen.with_animation(animation)
     except ValueError as exc:
         raise RenderError(str(exc)) from None
+    # 끊는 방식을 고르면 그 규칙을 씁니다. 비우면 부르는 쪽이 준 규칙 그대로입니다.
+    pacing = getattr(spec, "subtitle_pacing", None)
+    if pacing:
+        try:
+            rules = pacing_rules(pacing, getattr(spec, "caption_language", None), rules)
+        except ValueError as exc:
+            raise RenderError(str(exc)) from None
     cues = (
         clip_cues(spec.cues, spec.start, spec.end) if getattr(spec, "burn_subtitles", True) else []
     )

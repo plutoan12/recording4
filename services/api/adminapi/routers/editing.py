@@ -62,7 +62,7 @@ from pipeline.subtitle_templates import (
     styled_document,
     templates_by_category,
 )
-from pipeline.subtitles import apply_rules, check
+from pipeline.subtitles import PACING_LABELS, apply_rules, check, pacing_rules
 from pipeline.time import as_utc
 
 router = APIRouter(tags=["editing"])
@@ -418,6 +418,10 @@ def create_clip(payload: ClipRequest, user: CurrentUser, session: SessionDep):
         raise HTTPException(422, "선택 구간이 원본 길이를 넘습니다.")
     spec = EditSpec.model_validate(payload.model_dump(exclude={"source_asset_id"}))
     try:
+        pacing_rules(spec.subtitle_pacing)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from None
+    try:
         template = get_template(spec.subtitle_template)
         if spec.subtitle_preset:
             template = template.with_preset(spec.subtitle_preset)
@@ -446,6 +450,7 @@ def create_clip(payload: ClipRequest, user: CurrentUser, session: SessionDep):
             "font_size": spec.font_size or template.font_size,
             "animation": template.animation,
             "preset": template.preset,
+            "pacing": spec.subtitle_pacing or "broadcast",
         },
     )
     session.add(clip)
@@ -610,6 +615,16 @@ def delete_subtitle_preset(name: str, user: CurrentUser) -> Response:
     return Response(status_code=204)
 
 
+@router.get("/subtitle-pacings")
+def subtitle_pacings(user: CurrentUser) -> list[dict]:
+    """자막을 끊는 방식. 이름을 `subtitle_pacing`으로 보냅니다.
+
+    `shortform`은 말한 시각(대본의 단어 시각)에 맞춰 한 줄로 짧게 끊습니다. 단어 시각이
+    없거나 사람이 글자를 고친 자막은 글자 수로 끊는 방식으로 자동으로 돌아갑니다.
+    """
+    return [{"name": name, "label": label} for name, label in PACING_LABELS.items()]
+
+
 @router.get("/subtitle-animations")
 def subtitle_animations(user: CurrentUser) -> list[dict]:
     """편집기가 고를 수 있는 자막 움직임. 이름을 `subtitle_animation`으로 보냅니다.
@@ -623,6 +638,7 @@ class PreviewRequest(BaseModel):
     template: str = Field(default="default", pattern=TEMPLATE_NAME)
     animation: str | None = Field(default=None, pattern=r"^[a-z][a-z-]{0,19}$")
     preset: str | None = Field(default=None, pattern=r"^$|^[a-z][a-z0-9-]{1,39}$")
+    pacing: str | None = Field(default=None, pattern=r"^(broadcast|shortform)$")
     text: str | None = Field(default=None, max_length=200)
     width: int = Field(default=540, ge=180, le=1080, multiple_of=2)
     height: int = Field(default=960, ge=180, le=1920, multiple_of=2)
@@ -653,7 +669,8 @@ def subtitle_preview(payload: PreviewRequest, user: CurrentUser) -> dict:
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from None
     text = (payload.text or "").strip() or template.sample or template.label
-    cues = apply_rules([Cue(start=0, end=payload.seconds, text=text)], subtitle_rules())
+    rules = pacing_rules(payload.pacing) if payload.pacing else subtitle_rules()
+    cues = apply_rules([Cue(start=0, end=payload.seconds, text=text)], rules)
     document = styled_document(
         cues,
         template,

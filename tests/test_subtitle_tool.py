@@ -20,7 +20,7 @@ from pipeline.subtitle_tool import (
     rules_from,
     shift_cues,
 )
-from pipeline.subtitles import DEFAULT_RULES, LANGUAGE_RULES
+from pipeline.subtitles import DEFAULT_RULES, LANGUAGE_RULES, text_width
 
 LONG = (
     "안녕하세요. 자막 파일과 자막 템플릿 도구를 시험합니다. "
@@ -399,3 +399,44 @@ def test_presets_pack_and_import_make_files_you_can_keep(tmp_path, capsys, monke
     assert "my-bob" in capsys.readouterr().out
     # 넣은 프리셋은 바로 영상 자막에 쓸 수 있습니다.
     assert main(["presets", "show", "my-bob"]) == EXIT_OK
+
+
+def _report_json(out: str) -> dict:
+    """읽은 파일 요약 줄 뒤에 붙는 JSON만 떼어 냅니다."""
+    return json.loads(out[out.index("{") :])
+
+
+def test_quality_summarises_a_file_and_shows_what_pacing_changes(srt, capsys):
+    assert main(["quality", str(srt), "--language", "ko"]) == EXIT_OK
+    plain = capsys.readouterr().out
+    assert "표시 시간" in plain and "읽기 속도" in plain and "화면에 떠 있는 시간" in plain
+
+    assert main(["quality", str(srt), "--json"]) == EXIT_OK
+    report = _report_json(capsys.readouterr().out)
+    assert report["count"] >= 1 and "duration" in report and "violations" in report
+
+    # 숏폼 규칙으로 다시 끊으면 자막이 늘고 짧아집니다.
+    assert main(["quality", str(srt), "--pacing", "shortform", "--shape", "--json"]) == EXIT_OK
+    short = _report_json(capsys.readouterr().out)
+    assert short["count"] > report["count"]
+    assert short["duration"]["median"] < report["duration"]["median"]
+
+    # 모르는 끊기 방식은 argparse가 먼저 막습니다(쓸 수 있는 값을 함께 보여 줍니다).
+    with pytest.raises(SystemExit):
+        main(["quality", str(srt), "--pacing", "tiktok"])
+
+
+def test_style_can_use_the_shortform_pacing(srt, tmp_path):
+    def burned(*extra: str) -> list[str]:
+        out = tmp_path / f"styled{len(extra)}.ass"
+        assert main(["style", str(srt), str(out), *extra]) == EXIT_OK
+        return [e.plaintext for e in pysubs2.load(str(out)).events if e.style == "Default"]
+
+    plain, short = burned(), burned("--pacing", "shortform")
+    assert len(short) > len(plain)
+    assert max(text_width(line.replace("\n", " ")) for line in short) < max(
+        text_width(line.replace("\n", " ")) for line in plain
+    )
+    # 자막 파일에는 단어 시각이 없어 글자 수로 나눕니다. 표시 시간이 모자라면 더 나누지
+    # 못해 두 줄이 남을 수 있고, 그것은 quality가 위반으로 보고합니다.
+    assert any("\n" not in line for line in short)

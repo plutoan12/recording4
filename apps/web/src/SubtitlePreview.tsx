@@ -23,7 +23,7 @@ function loadFont(family: string): Promise<Uint8Array | null> {
   return pending
 }
 
-export function SubtitlePreview({ template, animation, preset, text, seconds = 3, stickers = [] }: { template: string; animation?: string; preset?: string; text?: string; seconds?: number; stickers?: unknown[] }) {
+export function SubtitlePreview({ template, animation, preset, pacing, text, seconds = 3, stickers = [] }: { template: string; animation?: string; preset?: string; pacing?: string; text?: string; seconds?: number; stickers?: unknown[] }) {
   const stickersKey = JSON.stringify(stickers)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const [status, setStatus] = useState<'loading' | 'ready' | 'unavailable'>('loading')
@@ -39,7 +39,7 @@ export function SubtitlePreview({ template, animation, preset, text, seconds = 3
         const preview = await request<PreviewResponse>('/subtitle-preview', {
           method: 'POST',
           // 템플릿 글자 크기는 1080x1920 기준이라 그 크기로 만들고, 캔버스는 작게 그립니다(libass가 비율을 맞춥니다).
-          body: JSON.stringify({ template, animation: animation || null, preset: preset || null, text: text || null, width: 1080, height: 1920, seconds, stickers }),
+          body: JSON.stringify({ template, animation: animation || null, preset: preset || null, pacing: pacing || null, text: text || null, width: 1080, height: 1920, seconds, stickers }),
         })
         const loaded = await Promise.all(preview.fonts.map(async family => [family, await loadFont(family)] as const))
         if (cancelled || !canvasRef.current) return
@@ -73,7 +73,7 @@ export function SubtitlePreview({ template, animation, preset, text, seconds = 3
       if (instance) void instance.destroy()
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [template, animation, preset, text, seconds, stickersKey])
+  }, [template, animation, preset, pacing, text, seconds, stickersKey])
 
   return <div className="subtitle-preview">
     {status !== 'unavailable' && <canvas ref={canvasRef} aria-label="자막 정확 미리보기" />}

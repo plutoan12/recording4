@@ -1,3 +1,12 @@
+## 2026-09-21: 숏폼 자막 끊기와 품질 재기 (Claude)
+
+- 사용자 요청: "자막 부분에서 퀄리티를 어떻게 하면 다른 사이트처럼 올릴 수 있을까" → 제안 가운데 숏폼 분할과 단어 시각 활용부터 하기로 함. [PR #36](https://github.com/plutoan12/recording4/pull/36) 후속 커밋. 담당: `pipeline/subtitles.py`, `pipeline/editing.py`, `pipeline/subtitle_tool.py`, `worker/rendering.py`·`composition.py`, `adminapi/routers/editing.py`, `apps/web`(ClipEditor.tsx, SubtitlePreview.tsx, WorkflowPanel.tsx), 테스트·문서.
+- 끊는 방식 두 가지: `broadcast`(지금까지, 기본값)와 `shortform`(줄당 11폭·한 줄·0.6~2.5초). `pacing_rules()`로 고르고 `EditSpec.subtitle_pacing`·`GET /subtitle-pacings`·편집기 **자막 끊기** 선택·CLI `--pacing`으로 씁니다.
+- 숏폼은 대본의 단어 시각으로 끊습니다(`SubtitleRules.use_word_timings`). 단어 시각이 없거나 사람이 글자를 고치면 글자 수 방식으로 자동 복귀합니다. 꾸밈말이 자막 끝에 혼자 남으면 다음 자막으로 넘기고, 자막 끝은 다음 자막 시작까지 최대 0.4초 띄웁니다.
+- `quality` 명령과 `quality_report()`를 더했습니다. 자막 장수, 표시 시간·글자 폭·읽기 속도·자막 사이의 분포, 화면에 떠 있는 비율, 규칙 위반 비율을 냅니다.
+- 검증: 같은 문장을 두 방식으로 돌려 방송은 1장 5.2초, 숏폼은 4장 평균 1.3초로 나오는 것을 확인했고 워커 렌더까지 같은 결과를 확인했습니다. 기본값 경로는 기존 테스트 54개가 그대로 통과합니다.
+- 남은 것: 자막 파일만 주면 단어 시각이 없어 숏폼 효과가 절반입니다(글자 수로 나눔). 표시 시간이 모자라면 한 줄 규칙이어도 두 줄이 남을 수 있고 `quality`가 위반으로 보고합니다. 전사 모델 키우기와 용어집을 전사에 넣는 일은 다음 작업입니다.
+
 ## 2026-09-21: 프리셋을 영상에 넣고 파일로 가지기 (Claude)
 
 - 사용자 요청: "프리셋 127종 중에서 본인이 프리셋을 선택해서 영상에 프리셋을 넣거나 그 프리셋 파일을 갖을 수 있게 해야지". [PR #36](https://github.com/plutoan12/recording4/pull/36) 후속 커밋. 담당: `adminapi/routers/editing.py`, `pipeline/subtitle_presets.py`(읽어보기 글귀), `pipeline/subtitle_tool.py`, `apps/web`(ClipEditor.tsx, styles.css), 테스트·문서.

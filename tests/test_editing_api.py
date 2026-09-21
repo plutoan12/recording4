@@ -431,6 +431,7 @@ def test_subtitle_templates_are_listed_and_a_clip_remembers_its_template(
         "font_size": 64,
         "animation": "none",
         "preset": "",
+        "pacing": "broadcast",
     }
     task = session.get(MediaTask, uuid.UUID(created.json()["id"]))
     assert task.settings["subtitle_template"] == "yellow"
@@ -481,6 +482,23 @@ def test_subtitle_templates_are_listed_and_a_clip_remembers_its_template(
     )
     assert missing.status_code == 422 and "모르는 프리셋" in missing.json()["detail"]
 
+    # 자막 끊기: 숏폼을 고르면 편집본에 남고, 모르는 값은 규격에서 막습니다.
+    pacings = client.get("/subtitle-pacings", headers=auth_headers).json()
+    assert {p["name"] for p in pacings} == {"broadcast", "shortform"}
+    short = client.post(
+        "/clips", headers=auth_headers, json={**data, "subtitle_pacing": "shortform"}
+    )
+    assert short.status_code == 202, short.text
+    saved_pacing = session.get(ClipEdit, uuid.UUID(short.json()["clip_edit_id"]))
+    assert saved_pacing.subtitle_style["pacing"] == "shortform"
+    assert (
+        session.get(MediaTask, uuid.UUID(short.json()["id"])).settings["subtitle_pacing"]
+        == "shortform"
+    )
+    assert (
+        client.post("/clips", headers=auth_headers, json={**data, "subtitle_pacing": "tiktok"})
+    ).status_code == 422
+
 
 def test_subtitle_preview_returns_the_worker_ass_and_its_fonts(client, auth_headers):
     assert client.post("/subtitle-preview", json={}).status_code == 401
@@ -512,6 +530,19 @@ def test_subtitle_preview_returns_the_worker_ass_and_its_fonts(client, auth_head
         ).status_code
         == 422
     )
+    # 숏폼 끊기는 미리보기에서도 한 줄로 짧게 나옵니다.
+    long_text = "우리가 어제 말했던 그 영상 편집 진짜 잘 나왔어요"
+    wide = client.post(
+        "/subtitle-preview",
+        headers=auth_headers,
+        json={"template": "yellow", "text": long_text, "seconds": 5},
+    ).json()["ass"]
+    narrow = client.post(
+        "/subtitle-preview",
+        headers=auth_headers,
+        json={"template": "yellow", "text": long_text, "seconds": 5, "pacing": "shortform"},
+    ).json()["ass"]
+    assert narrow.count("Dialogue:") > wide.count("Dialogue:")
     assert (
         client.post(
             "/subtitle-preview", headers=auth_headers, json={"template": "nope"}

@@ -81,7 +81,15 @@ from pipeline.subtitle_templates import (
     styled_document,
     templates_by_category,
 )
-from pipeline.subtitles import DEFAULT_RULES, SubtitleRules, apply_rules, check, rules_for
+from pipeline.subtitles import (
+    DEFAULT_RULES,
+    PACING_LABELS,
+    SubtitleRules,
+    apply_rules,
+    check,
+    pacing_rules,
+    quality_report,
+)
 
 EXIT_OK = 0
 EXIT_VIOLATIONS = 1
@@ -115,6 +123,14 @@ def _add_output_format(parser: argparse.ArgumentParser) -> None:
 def _add_rules(parser: argparse.ArgumentParser) -> None:
     group = parser.add_argument_group("표시 규칙", "비우면 언어 기본값(한국어 지침)입니다.")
     group.add_argument("--language", help="목표 언어(ko, en 등). 언어별 기본 규칙을 고릅니다.")
+    group.add_argument(
+        "--pacing",
+        choices=tuple(PACING_LABELS),
+        help=(
+            "자막을 끊는 방식. shortform은 한 줄로 짧게 끊습니다. "
+            "대본의 단어 시각이 있을 때만 말한 자리에서 끊고, 파일 입력은 글자 수로 나눕니다."
+        ),
+    )
     group.add_argument("--max-chars", type=int, help="줄당 최대 글자 폭(한글 1, 라틴 0.5)")
     group.add_argument("--max-lines", type=int, help="자막당 최대 줄 수")
     group.add_argument("--max-cps", type=float, help="초당 최대 글자 폭")
@@ -361,7 +377,11 @@ def _broken_presets(presets) -> list[tuple[str, str]]:  # noqa: ANN001
 
 def rules_from(args: argparse.Namespace) -> SubtitleRules:
     """언어 기본값 위에 명시한 값만 덮습니다. 검증은 SubtitleRules가 합니다."""
-    base = rules_for(getattr(args, "language", None), DEFAULT_RULES)
+    pacing = getattr(args, "pacing", None)
+    try:
+        base = pacing_rules(pacing, getattr(args, "language", None), DEFAULT_RULES)
+    except ValueError as exc:
+        raise ToolError(str(exc)) from None
     overrides = {
         field: value
         for field, value in (
@@ -481,6 +501,34 @@ def cmd_check(args: argparse.Namespace) -> int:
             print(f"{v.index + 1}번 [{v.kind}] {v.detail}")
         print(f"위반 {len(violations)}건 / 자막 {len(cues)}개")
     return EXIT_VIOLATIONS if violations else EXIT_OK
+
+
+def cmd_quality(args: argparse.Namespace) -> int:
+    """자막 품질을 숫자로 요약합니다. 규칙을 바꾸기 전후를 견주는 데 씁니다."""
+    cues, notes, decoded = read_cues(args.file, args.encoding)
+    _report_read(args.file, notes, decoded, cues)
+    rules = rules_from(args)
+    shaped = apply_rules(cues, rules) if args.shape else cues
+    report = quality_report(shaped, rules)
+    if args.json:
+        print(json.dumps(report, ensure_ascii=False, indent=2))
+        return EXIT_OK
+    print(f"자막 {report['count']}개 (규칙 위반 {report['violation_ratio'] * 100:.0f}%)")
+    for key, label, unit in (
+        ("duration", "표시 시간", "초"),
+        ("width", "글자 폭", "자"),
+        ("cps", "읽기 속도", "자/초"),
+        ("gap", "자막 사이", "초"),
+    ):
+        values = report[key]
+        print(
+            f"  {label:<6} 최소 {values['min']:>6.2f} · 가운데 {values['median']:>6.2f}"
+            f" · 평균 {values['mean']:>6.2f} · 최대 {values['max']:>6.2f} {unit}"
+        )
+    print(f"  화면에 떠 있는 시간 비율 {report['coverage'] * 100:.0f}%")
+    for kind, count in sorted(report["violations"].items()):
+        print(f"  위반 {kind}: {count}건")
+    return EXIT_OK
 
 
 def cmd_convert(args: argparse.Namespace) -> int:
@@ -1088,6 +1136,18 @@ def build_parser() -> argparse.ArgumentParser:
     _add_encoding(chk)
     _add_rules(chk)
     chk.set_defaults(run=cmd_check)
+
+    quality = sub.add_parser(
+        "quality", help="자막 품질 요약(장수·표시 시간·읽기 속도·규칙 위반 비율)"
+    )
+    quality.add_argument("file", type=Path)
+    quality.add_argument(
+        "--shape", action="store_true", help="표시 규칙을 적용한 뒤의 값을 봅니다(전후 비교)."
+    )
+    quality.add_argument("--json", action="store_true", help="JSON으로 출력")
+    _add_encoding(quality)
+    _add_rules(quality)
+    quality.set_defaults(run=cmd_quality)
 
     conv = sub.add_parser("convert", help="SRT·VTT·ASS를 SRT 또는 VTT로 (글자·시각 그대로)")
     conv.add_argument("input", type=Path)

@@ -4,13 +4,16 @@ from __future__ import annotations
 
 import pytest
 
-from pipeline.editing import Cue
+from pipeline.editing import Cue, Word
 from pipeline.subtitles import (
     DEFAULT_RULES,
+    LANGUAGE_RULES,
     SubtitleRules,
     apply_rules,
     check,
     normalize,
+    pacing_rules,
+    quality_report,
     split_text,
     text_width,
     wrap_text,
@@ -254,3 +257,119 @@ def test_splitting_a_cue_splits_its_word_times_too():
     if len(shaped) > 1:
         assert all(part.words for part in shaped)
         assert [w.text for part in shaped for w in part.words] == ["가나다", "라마바", "사아자"]
+
+
+def _spoken(start: float, words: list[tuple[str, float, float]]) -> Cue:
+    """말한 시각이 붙은 자막 하나."""
+    return Cue(
+        start=start,
+        end=words[-1][2] + 0.4,
+        text=" ".join(w for w, _, _ in words),
+        words=[Word(start=s, end=e, text=w) for w, s, e in words],
+    )
+
+
+SPEECH = [
+    ("우리가", 0.0, 0.42),
+    ("어제", 0.46, 0.78),
+    ("말했던", 0.80, 1.22),
+    ("그", 1.30, 1.42),
+    ("영상", 1.45, 1.86),
+    ("편집", 1.90, 2.30),
+    ("진짜", 2.40, 2.78),
+    ("잘", 2.80, 2.95),
+    ("나왔어요.", 3.00, 3.62),
+]
+
+
+def test_pacing_picks_a_rule_set_and_leaves_the_default_alone():
+    assert pacing_rules(None) == DEFAULT_RULES
+    assert pacing_rules("broadcast", "ko") == DEFAULT_RULES
+    assert pacing_rules("broadcast", "en") == LANGUAGE_RULES["en"]
+    short = pacing_rules("shortform", "ko")
+    assert short.max_lines == 1 and short.max_chars_per_line == 11 and short.use_word_timings
+    assert pacing_rules("shortform", "en").max_chars_per_line == 14
+    # 모르는 언어는 한국어 숏폼 값입니다.
+    assert pacing_rules("shortform", "ja") == short
+    with pytest.raises(ValueError, match="모르는 자막 끊기"):
+        pacing_rules("tiktok")
+
+
+def test_shortform_cuts_where_the_words_were_actually_spoken():
+    shaped = apply_rules([_spoken(0.0, SPEECH)], pacing_rules("shortform", "ko"))
+    assert [c.text for c in shaped] == ["우리가 어제 말했던", "그 영상 편집 진짜", "잘 나왔어요."]
+    # 자막 시작은 그 말이 시작한 시각입니다.
+    assert [round(c.start, 2) for c in shaped] == [0.0, 1.3, 2.8]
+    # 끝은 다음 자막이 시작할 때까지 띄워 둡니다(깜빡이지 않게).
+    assert [round(c.end, 2) for c in shaped] == [1.3, 2.8, 4.02]
+    # 단어 시각은 조각마다 따라가므로 노래방·단어별 등장이 그대로 됩니다.
+    assert [w.text for w in shaped[1].words] == ["그", "영상", "편집", "진짜"]
+    # 줄바꿈 없이 한 줄입니다.
+    assert all("\n" not in c.text for c in shaped)
+
+
+def test_shortform_keeps_modifiers_with_the_word_they_modify():
+    # "그"와 "잘"은 뒤 말을 꾸미므로 자막 끝에 혼자 남기지 않습니다.
+    shaped = apply_rules([_spoken(0.0, SPEECH)], pacing_rules("shortform", "ko"))
+    assert not any(c.text.endswith(("그", "잘")) for c in shaped)
+
+
+def test_word_timings_are_ignored_unless_the_rules_ask_for_them():
+    cue = _spoken(0.0, SPEECH)
+    # 기본(방송) 규칙은 지금까지와 똑같이 글자 수로 나눕니다.
+    assert len(apply_rules([cue], DEFAULT_RULES)) == 1
+    # 사람이 글자를 고쳐 단어와 맞지 않으면 글자 수 방식으로 돌아갑니다.
+    edited = cue.model_copy(update={"text": "우리가 어제 말했던 그 영상 편집 아주 잘 나왔어요."})
+    shaped = apply_rules([edited], pacing_rules("shortform", "ko"))
+    assert shaped[0].words is None
+    # 단어가 하나뿐이어도 마찬가지입니다.
+    one = _spoken(0.0, [("안녕하세요.", 0.0, 0.9)])
+    assert len(apply_rules([one], pacing_rules("shortform", "ko"))) == 1
+
+
+def test_shortform_never_runs_past_the_cue_it_came_from():
+    cue = _spoken(10.0, [(w, s + 10, e + 10) for w, s, e in SPEECH])
+    shaped = apply_rules([cue], pacing_rules("shortform", "ko"))
+    assert shaped[0].start >= cue.start and shaped[-1].end <= cue.end
+    assert all(
+        later.start >= earlier.end for earlier, later in zip(shaped, shaped[1:], strict=False)
+    )
+
+
+def test_quality_report_shows_what_changed():
+    cue = _spoken(0.0, SPEECH)
+    broadcast = quality_report(apply_rules([cue], DEFAULT_RULES), DEFAULT_RULES)
+    short_rules = pacing_rules("shortform", "ko")
+    short = quality_report(apply_rules([cue], short_rules), short_rules)
+    assert broadcast["count"] == 1 and short["count"] == 3
+    # 숏폼은 자막이 짧아지고 장수가 늘어납니다.
+    assert short["duration"]["median"] < broadcast["duration"]["median"]
+    assert short["width"]["max"] < broadcast["width"]["max"]
+    assert broadcast["violations"] == {} and short["violations"] == {}
+    assert 0 <= short["coverage"] <= 1 and short["violation_ratio"] == 0.0
+    # 자막이 없으면 0으로 채웁니다(나누기 오류를 내지 않습니다).
+    empty = quality_report([], DEFAULT_RULES)
+    assert empty["count"] == 0 and empty["duration"]["mean"] == 0.0
+
+
+def test_worker_bakes_the_pacing_chosen_in_the_editor(tmp_path):
+    import pysubs2
+
+    from pipeline.editing import EditSpec
+    from worker.rendering import write_subtitles
+
+    cue = _spoken(10.0, [(w, s + 10, e + 10) for w, s, e in SPEECH])
+    path = tmp_path / "captions.ass"
+    write_subtitles(path, EditSpec(start=8, end=20, cues=[cue], caption_language="ko"))
+    assert len([e for e in pysubs2.load(str(path)).events if e.style == "Default"]) == 1
+    write_subtitles(
+        path,
+        EditSpec(start=8, end=20, cues=[cue], caption_language="ko", subtitle_pacing="shortform"),
+    )
+    events = [e for e in pysubs2.load(str(path)).events if e.style == "Default"]
+    assert [e.plaintext for e in events] == [
+        "우리가 어제 말했던",
+        "그 영상 편집 진짜",
+        "잘 나왔어요.",
+    ]
+    assert events[0].start == 2000

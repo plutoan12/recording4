@@ -42,6 +42,10 @@ class SubtitleRules:
     max_cps: float = 12.0
     min_duration: float = 1.0
     max_duration: float = 7.0
+    # 켜면 자막을 글자 수가 아니라 **말한 시각**(Cue.words)에 맞춰 끊습니다. 단어 시각이
+    # 없거나 사람이 글자를 고친 자막은 자동으로 글자 수 방식으로 돌아갑니다. 기본값은
+    # 꺼짐이라 기존 편집본의 렌더 결과가 바뀌지 않습니다.
+    use_word_timings: bool = False
 
     @property
     def capacity(self) -> float:
@@ -72,6 +76,54 @@ LANGUAGE_RULES: dict[str, SubtitleRules] = {
     # 지침대로 초당 20자(폭 10.0)입니다.
     "en": SubtitleRules(max_chars_per_line=19, max_cps=10.0),
 }
+
+
+# 자막을 끊는 방식. 방송 자막은 한 장을 길게 보여 주고, 숏폼은 말에 맞춰 잘게 끊습니다.
+Pacing = Literal["broadcast", "shortform"]
+PACING_LABELS: dict[str, str] = {
+    "broadcast": "방송 자막 (두 줄, 길게)",
+    "shortform": "숏폼 (한 줄, 말에 맞춰 짧게)",
+}
+
+# 숏폼 기본값. 넷플릭스 지침이 아니라 세로 숏폼 관행에서 왔습니다. 한 줄로 두고
+# 한 장에 세 어절쯤만 담아 말이 바뀔 때마다 자막도 바뀌게 합니다. 읽기 속도 한도를
+# 올린 것은 자막이 짧아 한눈에 읽히기 때문입니다. 짧은 자막이 많아지므로 최소 표시
+# 시간도 내립니다.
+SHORTFORM_RULES: dict[str, SubtitleRules] = {
+    "ko": SubtitleRules(
+        max_chars_per_line=11,
+        max_lines=1,
+        max_cps=16.0,
+        min_duration=0.6,
+        max_duration=2.5,
+        use_word_timings=True,
+    ),
+    "en": SubtitleRules(
+        max_chars_per_line=14,
+        max_lines=1,
+        max_cps=13.0,
+        min_duration=0.6,
+        max_duration=2.5,
+        use_word_timings=True,
+    ),
+}
+
+
+def pacing_rules(
+    pacing: str | None, language: str | None = None, base: SubtitleRules = DEFAULT_RULES
+) -> SubtitleRules:
+    """끊는 방식에 맞는 규칙. 비우거나 `broadcast`면 지금까지와 같습니다.
+
+    `shortform`은 설정값 대신 숏폼 기본값을 씁니다. 방송 자막 설정을 그대로 두고
+    숏폼만 다르게 끊기 위해서입니다.
+    """
+    if pacing == "shortform":
+        return SHORTFORM_RULES.get(language or "ko", SHORTFORM_RULES["ko"])
+    if pacing not in (None, "", "broadcast"):
+        raise ValueError(
+            f"모르는 자막 끊기입니다: {pacing}. 쓸 수 있는 것: {', '.join(PACING_LABELS)}"
+        )
+    return rules_for(language, base)
 
 
 def rules_for(language: str | None, base: SubtitleRules = DEFAULT_RULES) -> SubtitleRules:
@@ -236,6 +288,140 @@ def _group(tokens: list[str], parts: int, joiner: str) -> list[str]:
     return [joiner.join(g) for g in groups if g]
 
 
+# 문장이 끝나는 자리. 여기서 끊으면 말이 잘리지 않습니다.
+_TAIL = re.compile(r"[.!?…。！？]$")
+# 다음 자막이 시작할 때까지 띄워 두는 최대 시간(초). 자막이 깜빡이지 않게 합니다.
+_HOLD = 0.4
+
+
+def _spoken_words(cue: Cue) -> list[Word] | None:
+    """자막 글자와 맞는 단어 시각. 맞지 않으면 None(사람이 글자를 고친 자막입니다)."""
+    words = [w for w in (cue.words or []) if w.text.strip()]
+    if len(words) < 2:
+        return None
+    joined = _WHITESPACE.sub("", " ".join(w.text for w in words))
+    if joined != _WHITESPACE.sub("", cue.text):
+        return None
+    return words
+
+
+def _word_groups(words: list[Word], rules: SubtitleRules) -> list[list[Word]]:
+    """폭·시간 한도와 문장 끝을 보며 단어를 묶습니다."""
+    groups: list[list[Word]] = []
+    current: list[Word] = []
+    for word in words:
+        candidate = [*current, word]
+        text = " ".join(w.text for w in candidate)
+        over = text_width(text) > rules.capacity
+        long = candidate[-1].end - candidate[0].start > rules.max_duration
+        if current and (over or long):
+            groups.append(current)
+            current = [word]
+        else:
+            current = candidate
+        if _TAIL.search(current[-1].text):
+            groups.append(current)
+            current = []
+    if current:
+        groups.append(current)
+    return groups
+
+
+# 뒤 말을 꾸미는 짧은 말. 자막 끝에 혼자 남으면 문장이 끊겨 읽힙니다("그" / "영상 편집").
+_LEADING = frozenset(
+    {
+        "그",
+        "이",
+        "저",
+        "그런",
+        "이런",
+        "저런",
+        "안",
+        "못",
+        "더",
+        "덜",
+        "좀",
+        "또",
+        "잘",
+        "막",
+        "딱",
+        "제일",
+        "가장",
+        "그냥",
+        "다시",
+        "새",
+        "첫",
+        "한",
+        "두",
+        "세",
+    }
+)
+
+
+def _fix_dangling(groups: list[list[Word]], rules: SubtitleRules) -> list[list[Word]]:
+    """꾸밈말로 끝나는 묶음은 그 말을 다음 묶음에 넘깁니다. 한도를 넘으면 그대로 둡니다."""
+    for index in range(len(groups) - 1):
+        group, following = groups[index], groups[index + 1]
+        if len(group) < 2 or group[-1].text.strip(" ,.").strip() not in _LEADING:
+            continue
+        moved = [group[-1], *following]
+        joined = " ".join(w.text for w in moved)
+        if text_width(joined) > rules.capacity:
+            continue
+        if moved[-1].end - moved[0].start > rules.max_duration:
+            continue
+        groups[index] = group[:-1]
+        groups[index + 1] = moved
+    return [group for group in groups if group]
+
+
+def _merge_short(groups: list[list[Word]], rules: SubtitleRules) -> list[list[Word]]:
+    """너무 짧아 읽을 수 없는 묶음은 앞 묶음에 붙입니다. 한도를 넘지 않을 때만 붙입니다."""
+    out: list[list[Word]] = []
+    for group in groups:
+        if out:
+            previous = out[-1]
+            joined = " ".join(w.text for w in [*previous, *group])
+            span = group[-1].end - previous[0].start
+            if (
+                group[-1].end - group[0].start < rules.min_duration
+                and text_width(joined) <= rules.capacity
+                and span <= rules.max_duration
+            ):
+                out[-1] = [*previous, *group]
+                continue
+        out.append(group)
+    return out
+
+
+def _chunks_by_words(cue: Cue, rules: SubtitleRules) -> list[Cue] | None:
+    """말한 시각에 맞춰 자막을 나눕니다. 단어 시각이 없거나 한 묶음이면 None."""
+    words = _spoken_words(cue)
+    if words is None:
+        return None
+    groups = _merge_short(_fix_dangling(_word_groups(words, rules), rules), rules)
+    if len(groups) < 2:
+        return None
+    shaped: list[Cue] = []
+    for index, group in enumerate(groups):
+        start = min(max(cue.start, group[0].start), cue.end)
+        following = groups[index + 1][0].start if index + 1 < len(groups) else cue.end
+        limit = min(max(following, start), cue.end)
+        # 말이 끝나도 조금 더 띄워 둡니다. 다음 자막 시작은 넘지 않습니다.
+        end = min(limit, max(group[-1].end + _HOLD, start + rules.min_duration))
+        end = max(end, start + 0.05)
+        text = " ".join(w.text for w in group)
+        shaped.append(
+            Cue(
+                start=start,
+                end=end,
+                text="\n".join(wrap_text(text, rules)),
+                words=list(group),
+            )
+        )
+    return shaped
+
+
 def apply_rules(cues: list[Cue], rules: SubtitleRules = DEFAULT_RULES) -> list[Cue]:
     """자막을 표시 규칙에 맞게 다시 만듭니다. 줄바꿈은 개행 문자로 넣습니다."""
     shaped: list[Cue] = []
@@ -245,6 +431,10 @@ def apply_rules(cues: list[Cue], rules: SubtitleRules = DEFAULT_RULES) -> list[C
 
 
 def _shape(cue: Cue, rules: SubtitleRules) -> list[Cue]:
+    # 단어 시각이 있으면 말한 자리에서 끊습니다. 글자 수로 나누는 것보다 말과 잘 맞습니다.
+    spoken = _chunks_by_words(cue, rules) if rules.use_word_timings else None
+    if spoken is not None:
+        return spoken
     text = normalize(cue.text)
     duration = cue.end - cue.start
     # 나눌 수 있는 최대 조각 수. 읽을 수 없이 짧은 자막을 만들지 않습니다.
@@ -335,3 +525,50 @@ def check(cues: list[Cue], rules: SubtitleRules = DEFAULT_RULES) -> list[Violati
         if index + 1 < len(cues) and cues[index + 1].start < cue.end:
             found.append(Violation(index, "overlap", "다음 자막과 시간이 겹칩니다."))
     return found
+
+
+def quality_report(cues: list[Cue], rules: SubtitleRules = DEFAULT_RULES) -> dict:
+    """자막 품질을 숫자로 요약합니다. 규칙을 바꾸기 전후를 견주는 데 씁니다.
+
+    사람이 보기 좋은지는 결국 눈으로 봐야 하지만, 자막 장수·표시 시간·읽기 속도·
+    규칙 위반 비율이 크게 움직이면 그것만으로도 방향은 알 수 있습니다.
+    """
+    widths = [text_width(normalize(cue.text.replace("\n", " "))) for cue in cues]
+    spans = [cue.end - cue.start for cue in cues]
+    speeds = [w / s for w, s in zip(widths, spans, strict=True) if s > 0]
+    gaps = [b.start - a.end for a, b in zip(cues, cues[1:], strict=False)]
+    violations = check(cues, rules)
+    kinds: dict[str, int] = {}
+    for violation in violations:
+        kinds[violation.kind] = kinds.get(violation.kind, 0) + 1
+    covered = sum(spans)
+    total = (cues[-1].end - cues[0].start) if cues else 0.0
+    return {
+        "count": len(cues),
+        "violations": kinds,
+        # 규칙을 어긴 자막이 전체에서 차지하는 비율입니다.
+        "violation_ratio": round(len({v.index for v in violations}) / len(cues), 3)
+        if cues
+        else 0.0,
+        "duration": _summary(spans),
+        "width": _summary(widths),
+        "cps": _summary(speeds),
+        "gap": _summary(gaps),
+        # 자막이 떠 있는 시간이 전체에서 차지하는 비율. 낮으면 화면이 자주 빕니다.
+        "coverage": round(covered / total, 3) if total > 0 else 0.0,
+    }
+
+
+def _summary(values: list[float]) -> dict:
+    """가운데 값과 양 끝. 평균만 보면 한쪽으로 치우친 것을 놓칩니다."""
+    if not values:
+        return {"min": 0.0, "median": 0.0, "mean": 0.0, "max": 0.0}
+    ordered = sorted(values)
+    middle = len(ordered) // 2
+    median = ordered[middle] if len(ordered) % 2 else (ordered[middle - 1] + ordered[middle]) / 2
+    return {
+        "min": round(ordered[0], 2),
+        "median": round(median, 2),
+        "mean": round(sum(ordered) / len(ordered), 2),
+        "max": round(ordered[-1], 2),
+    }
