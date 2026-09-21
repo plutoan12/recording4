@@ -47,3 +47,23 @@ style guide(honorifics keep, names keep_original) 구조를 따로 구현한 것
 
 토큰 상한으로 묶음을 자르고 "입력과 정확히 같은 수의 구간을 내라"는 규칙을 프롬프트에
 두는 방식만 참고했습니다. 코드는 옮기지 않았습니다.
+
+## WyattBlue/auto-editor (Unlicense, 퍼블릭 도메인)
+
+`packages/pipeline/pipeline/cuts.py`의 `apply_margin`·`smooth`는 `src/lib/editutil.nim`의
+`mutMargin`·`smoothing`을 파이썬으로 옮긴 것입니다. 둘 다보다 짧은 구간 하나가 참↔거짓을
+영원히 오가는 것을 두 번 전 상태까지 견주어 막는 부분도 그 주석에서 왔습니다.
+
+    This is free and unencumbered software released into the public domain.
+
+    Anyone is free to copy, modify, publish, use, compile, sell, or distribute this
+    software, either in source code form or as a compiled binary, for any purpose,
+    commercial or non-commercial, and by any means.
+
+## carykh/jumpcutter (MIT) — 읽었으나 쓰지 않음
+
+프레임별 소리 크기를 파일에서 가장 큰 소리와 견주어 무음을 판정하는 방식을 봤지만
+**넣지 않았습니다.** 이 저장소는 실제 녹음에서 그 방식이 발화를 못 찾는 것을 이미
+쟀습니다(`worker.analysis.vad_spans` 주석). 발화 구간은 VAD가 찾고, auto-editor에서
+가져온 다듬기만 그 위에 겁니다.
+

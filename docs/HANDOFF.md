@@ -1,3 +1,16 @@
+## 2026-09-21: 숏폼 편집 확장 — 멀티 컷·무음 빼기·배속/페이드/배경음악·미리보기 (Claude)
+
+브랜치 `claude/claude-md-design-review-v8qdz4`, PR #17 위. 담당: `packages/pipeline/pipeline/{cuts,editing}.py`, `services/worker/worker/{rendering,media_tasks}.py`, `services/api/adminapi/{models}.py`·`routers/editing.py`, `migrations/versions/0010_silence_preview_media_task.py`, `apps/web/src/ClipEditor.tsx`, `tests/{test_video_editing,test_render_integration}.py`.
+
+- 멀티 컷: `EditSpec.segments`(구간별 배속 포함). 자막은 `concat_cues`가 이어 붙인 시간축으로 옮깁니다. 구간을 고르지 않으면 FFmpeg 명령이 예전 그대로라 기존 결과가 바뀌지 않습니다.
+- 무음 빼기: media task `silence`. VAD가 찾은 발화 구간에 auto-editor(퍼블릭 도메인)에서 옮긴 여백·다듬기를 겁니다. **제안이고 적용은 사람이** 누릅니다.
+- 배속·페이드·배경음악: `trim/atrim → concat → 화면 → 자막 → fade/afade → amix(normalize=0, 선택 sidechaincompress)`.
+- 미리보기: media task `preview`. 전체 합성 없이 결과의 한 순간을 PNG로 뽑습니다. `GET /media-tasks/{id}/preview-url`로 봅니다.
+- **실측(실제 FFmpeg)**: 2초 + 4초(2배속) → 4.0초, 소리 유지. 2초 음악을 6초에 되풀이. 소리 없는 원본도 통과. 미리보기 1080×1920.
+- 검증: pytest **592 통과 / 3 skip**(FFmpeg를 설치해 렌더 시험까지 실제로 돌림), ruff, tsc·vite build, alembic 왕복(머리 하나 `0010_silence_preview`).
+- **고침**: `write_subtitles`가 EditSpec이 아닌 흉내 낸 객체도 받아 왔는데 새 필드를 직접 읽어 깨졌습니다. `getattr`로 되돌렸습니다(그 시험이 잡았습니다).
+- 남은 것: 여백·최소 길이·배경음악 -18dB는 **정한 값**입니다. 실제 영상과 청취로 다시 맞춰야 합니다. 음악만 있는 파일은 업로드 확장자 제한에 걸려 영상 파일로 올려야 합니다.
+
 ## 2026-09-21: GitHub 저장소에서 자막 검수 (Claude)
 
 브랜치 `claude/claude-md-design-review-v8qdz4`, PR #17 위. 담당: `packages/pipeline/pipeline/review.py`, `services/worker/worker/{github,review_tasks,celery_app,dispatcher}.py`, `services/api/adminapi/{config,models}.py`, `routers/workflow.py`, `migrations/versions/0009_subtitle_reviews.py`, `apps/web/src/WorkflowPanel.tsx`, `tests/test_github_review.py`.

@@ -521,7 +521,7 @@ class MediaTask(Base, TimestampMixin):
         ),
         CheckConstraint(
             "kind in ('render','transcribe','scenes','align','diarize','sync',"
-            "'faces','highlights')",
+            "'faces','highlights','silence','preview')",
             name="ck_media_task_kind",
         ),
     )
