@@ -75,6 +75,7 @@ GitHub Actions는 배포와 작업 요청을 담당합니다. 실제 작업 실�
 | translated_segments | 작업 ID, 원문 세그먼트 ID, 번역문, 편집 버전, 더빙 음성 키 |
 | glossaries | 적용 범위, 언어쌍, 버전, 항목, 적용 시작 시각 |
 | translation_memory | 출발·목표 언어, 원문·용어집 버전·공급자 해시, 원문, 번역문. 같은 문장을 같은 방향으로 다시 사지 않기 위한 기억 |
+| subtitle_reviews | 작업 ID, 종류(내보내기·가져오기), 언어, 브랜치, 경로, 상태, PR 번호·주소, 결과. GitHub 저장소에서 한 자막 검수의 기록 |
 | voice_assignments | 작업 ID, 화자 ID, 공급자 음성 ID, 음성 설정, 버전 |
 | budgets | 적용 범위(월·작업), 통화, 한도, 기간, 누적 사용액 |
 | budget_reservations | 예산 ID, 단계 실행 ID, 예약 금액, 상태, 만료 시각 |

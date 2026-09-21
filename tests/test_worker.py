@@ -180,3 +180,19 @@ def test_dispatcher_skips_topics_without_task(session: Session) -> None:
     session.commit()
     assert dispatch_pending(session, lambda _n, _p: None) == 0
     assert session.query(OutboxMessage).one().published_at is None
+
+
+def test_every_dispatched_topic_has_a_task_the_worker_actually_imports():
+    """디스패처가 보내는 작업을 워커가 들이지 않으면 셀러리가 모르는 이름이라며 버립니다.
+
+    하이라이트 추천이 실제로 그랬습니다. `media.highlights`를 보내는데
+    `worker.highlight_tasks`가 celery 설정의 imports에 없었습니다.
+    """
+    from worker.celery_app import celery_app
+    from worker.dispatcher import TOPIC_TASKS
+
+    imported = set(celery_app.conf.imports)
+    missing = {
+        topic: task for topic, task in TOPIC_TASKS.items() if task.rsplit(".", 1)[0] not in imported
+    }
+    assert missing == {}

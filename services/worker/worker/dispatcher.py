@@ -25,6 +25,7 @@ TOPIC_TASKS: dict[str, str] = {
     "job.start": "worker.workflow_tasks.run_job",
     "job.step": "worker.workflow_tasks.run_job",
     "publication.run": "worker.publication_tasks.run_publication",
+    "review.run": "worker.review_tasks.run_review",
 }
 
 

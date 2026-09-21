@@ -98,6 +98,14 @@ class Settings(BaseSettings):
     # 하이라이트 추천(Claude). 실제 청구는 토큰 단위인데 여기는 글자 수로
     # 잡으므로 **넉넉한 상한**을 적습니다. 비어 있으면 추천이 돌지 않습니다.
     highlight_usd_per_1k_chars: Decimal | None = None
+    # GitHub 저장소에서 하는 자막 검수. 켜야 쓰기(브랜치·커밋·PR)가 됩니다. 토큰은 그
+    # 저장소의 contents·pull requests 쓰기 권한만 있으면 됩니다. **기본 브랜치에는 쓰지
+    # 않고 병합하지 않습니다.** 병합은 사람이 합니다.
+    github_review_enabled: bool = False
+    github_token: str | None = None
+    github_repository: str | None = None
+    github_base_branch: str = "main"
+    github_api_url: str = "https://api.github.com"
     youtube_upload_enabled: bool = False
     # 선택 가능한 자막 트랙 업로드. 영상에는 자막이 이미 구워져 있으므로 켜면
     # 시청자 화면에 자막이 두 벌 보일 수 있습니다. 확인한 뒤 켜세요.

@@ -246,6 +246,38 @@ class Glossary(Base, TimestampMixin):
     effective_from: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
+class SubtitleReview(Base, TimestampMixin):
+    """GitHub 저장소에서 하는 자막 검수. 작업 하나와 브랜치·PR 하나를 잇습니다.
+
+    `kind`는 내보내기(export)와 가져오기(import)입니다. 가져온 번역은 `result`에만
+    두고 작업에 자동으로 넣지 않습니다. 사람이 화면에서 확인하고 새 버전을 만듭니다.
+    """
+
+    __tablename__ = "subtitle_reviews"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=new_id)
+    job_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("jobs.id", ondelete="CASCADE"), index=True)
+    kind: Mapped[str] = mapped_column(String(16))
+    language: Mapped[str] = mapped_column(String(16))
+    branch: Mapped[str] = mapped_column(String(255))
+    path: Mapped[str] = mapped_column(String(512))
+    state: Mapped[str] = mapped_column(String(16), default="pending")
+    pull_number: Mapped[int | None] = mapped_column(Integer, default=None)
+    pull_url: Mapped[str | None] = mapped_column(String(512), default=None)
+    commit_sha: Mapped[str | None] = mapped_column(String(64), default=None)
+    result: Mapped[dict] = mapped_column(JSON, default=dict)
+    error: Mapped[str | None] = mapped_column(Text, default=None)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+
+    __table_args__ = (
+        CheckConstraint("kind in ('export','import')", name="ck_subtitle_review_kind"),
+        CheckConstraint(
+            "state in ('pending','running','succeeded','failed')", name="ck_subtitle_review_state"
+        ),
+    )
+
+
 class VoiceAssignment(Base, TimestampMixin):
     """화자별 음성 배정. 화자를 나누지 않는 작업도 기본 화자 하나로 둡니다."""
 

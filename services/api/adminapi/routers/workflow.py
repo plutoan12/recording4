@@ -23,11 +23,13 @@ from adminapi.models import (
     Job,
     Publication,
     StageRun,
+    SubtitleReview,
     utcnow,
 )
 from adminapi.outbox import enqueue
 from adminapi.services.budget import held_total, release, settle
 from pipeline.languages import LANGUAGES, catalogue
+from pipeline.review import branch_for, subtitle_path
 from pipeline.states import JobState, PublicationState, StageRunState, assert_transition
 from pipeline.style_review import style_warnings
 from pipeline.subtitle_files import MEDIA_TYPES, SubtitleFormat
@@ -47,6 +49,11 @@ def get_job(session, job_id):
 def ensure_idle(job):
     if job.lease_until and as_utc(job.lease_until) > utcnow():
         raise HTTPException(409, "단계가 실행 중입니다. 완료 후 다시 시도하세요.")
+
+
+def github_ready(s) -> bool:
+    """GitHub 저장소 검수가 돌 수 있는지. 셋 다 있어야 브랜치·커밋·PR을 만듭니다."""
+    return bool(s.github_review_enabled and s.github_token and s.github_repository)
 
 
 def translation_ready(s) -> bool:
@@ -75,6 +82,8 @@ def configuration(user: CurrentUser):
         ),
         "youtube_channel_id": s.youtube_channel_id,
         "youtube_captions_enabled": s.youtube_captions_enabled,
+        "github_review_configured": github_ready(s),
+        "github_repository": s.github_repository,
         # 언어와 번역 방향은 pipeline.languages 한 곳에서 옵니다. 화면은 이것만 봅니다.
         **catalogue(),
     }
@@ -144,6 +153,120 @@ def put_glossary(payload: GlossaryRequest, user: CurrentUser, session: SessionDe
     session.add(row)
     session.commit()
     return glossary_response(row, payload.source_language, payload.target_language)
+
+
+class ReviewRequest(BaseModel):
+    kind: Literal["export", "import"]
+
+
+def review_response(row, *, full: bool = False) -> dict:
+    """검수 행 하나. 목록에는 자막을 싣지 않습니다(5,000개까지 올 수 있습니다)."""
+    result = row.result or {}
+    data = {
+        "id": str(row.id),
+        "job_id": str(row.job_id),
+        "kind": row.kind,
+        "state": row.state,
+        "language": row.language,
+        "branch": row.branch,
+        "path": row.path,
+        "pull_number": row.pull_number,
+        "pull_url": row.pull_url,
+        "error": row.error,
+        "problems": result.get("problems", []),
+        "notes": result.get("notes", []),
+        "applicable": bool(result.get("applicable")),
+        "glossary_changed": bool(result.get("glossary_changed")),
+        "cue_count": result.get("cue_count", 0),
+    }
+    if full:
+        data["cues"] = result.get("cues", [])
+        data["glossary"] = result.get("glossary")
+        data["glossary_source"] = result.get("source_language") or "*"
+    return data
+
+
+def latest_export(session, job_id):  # noqa: ANN001
+    return session.scalar(
+        select(SubtitleReview)
+        .where(
+            SubtitleReview.job_id == job_id,
+            SubtitleReview.kind == "export",
+            SubtitleReview.state == "succeeded",
+        )
+        .order_by(SubtitleReview.created_at.desc())
+    )
+
+
+@router.post("/jobs/{job_id}/review", status_code=202)
+def start_review(job_id: uuid.UUID, payload: ReviewRequest, user: CurrentUser, session: SessionDep):
+    """자막 검수를 GitHub 저장소로 내보내거나, 거기서 고친 것을 가져옵니다.
+
+    가져온 번역은 작업에 자동으로 들어가지 않습니다. 화면에서 문제를 확인한 뒤
+    기존 "새 버전 만들기" 경로로 사람이 넣습니다. 병합도 사람이 합니다.
+    """
+    job = get_job(session, job_id)
+    ensure_idle(job)
+    settings = get_settings()
+    if not github_ready(settings):
+        raise HTTPException(
+            409, "GitHub 검수 설정(R4_GITHUB_REVIEW_ENABLED·토큰·저장소)을 먼저 켜세요."
+        )
+    options = WorkflowOptions.model_validate(job.workflow_config)
+    if payload.kind == "export":
+        if not rendered_cues(job.workflow_data or {}):
+            raise HTTPException(409, "아직 자막이 없습니다. 대본·번역 단계를 먼저 끝내세요.")
+        language = rendered_language(job.workflow_data, options) or job.target_language
+        row = SubtitleReview(
+            job_id=job.id,
+            kind="export",
+            language=language,
+            branch=branch_for(str(job.id)),
+            path=subtitle_path(str(job.id), language),
+        )
+    else:
+        exported = latest_export(session, job.id)
+        if exported is None:
+            raise HTTPException(409, "먼저 내보내기를 해서 검수 브랜치를 만드세요.")
+        row = SubtitleReview(
+            job_id=job.id,
+            kind="import",
+            language=exported.language,
+            branch=exported.branch,
+            path=exported.path,
+            pull_number=exported.pull_number,
+            pull_url=exported.pull_url,
+            result={"glossary_path": (exported.result or {}).get("glossary_path")},
+        )
+    session.add(row)
+    session.flush()
+    enqueue(
+        session,
+        topic="review.run",
+        payload={"review_id": str(row.id)},
+        dedupe_key=f"review.run:{row.id}",
+    )
+    session.commit()
+    return review_response(row)
+
+
+@router.get("/jobs/{job_id}/reviews")
+def reviews(job_id: uuid.UUID, user: CurrentUser, session: SessionDep):
+    rows = session.scalars(
+        select(SubtitleReview)
+        .where(SubtitleReview.job_id == job_id)
+        .order_by(SubtitleReview.created_at.desc())
+        .limit(20)
+    )
+    return [review_response(row) for row in rows]
+
+
+@router.get("/reviews/{review_id}")
+def review_detail(review_id: uuid.UUID, user: CurrentUser, session: SessionDep):
+    row = session.get(SubtitleReview, review_id)
+    if row is None:
+        raise HTTPException(404, "검수 요청을 찾을 수 없습니다.")
+    return review_response(row, full=True)
 
 
 @router.get("/jobs/{job_id}/workflow")

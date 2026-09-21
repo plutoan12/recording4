@@ -20,6 +20,8 @@ celery_app.conf.update(
         "worker.media_tasks",
         "worker.workflow_tasks",
         "worker.publication_tasks",
+        "worker.highlight_tasks",
+        "worker.review_tasks",
     ),
     # 늦은 확인. 워커가 죽으면 다른 워커가 다시 받습니다.
     task_acks_late=True,

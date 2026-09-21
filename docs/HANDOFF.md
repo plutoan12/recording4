@@ -1,3 +1,14 @@
+## 2026-09-21: GitHub 저장소에서 자막 검수 (Claude)
+
+브랜치 `claude/claude-md-design-review-v8qdz4`, PR #17 위. 담당: `packages/pipeline/pipeline/review.py`, `services/worker/worker/{github,review_tasks,celery_app,dispatcher}.py`, `services/api/adminapi/{config,models}.py`, `routers/workflow.py`, `migrations/versions/0009_subtitle_reviews.py`, `apps/web/src/WorkflowPanel.tsx`, `tests/test_github_review.py`.
+
+- 흐름: 관리화면 **GitHub로 내보내기** → 검수 브랜치에 SRT·용어집 커밋 + PR 열기 → 번역가가 GitHub에서 글자만 고침 → **가져오기** → 규칙 검사 → 문제 없으면 검수칸에 불러와 기존 "새 버전 만들기"로 적용.
+- 지키는 것: 기본 브랜치에 쓰지 않음, 병합하지 않음, 가져온 번역을 작업에 자동으로 넣지 않음. 자막 개수가 다르면 적용 불가, 시각이 바뀌면 문제로 보고.
+- 설정: `R4_GITHUB_REVIEW_ENABLED`(기본 꺼짐), `R4_GITHUB_TOKEN`, `R4_GITHUB_REPOSITORY`(owner/repo), `R4_GITHUB_BASE_BRANCH`, `R4_GITHUB_API_URL`. 토큰은 그 저장소의 contents·pull requests 쓰기 권한이면 됩니다.
+- **고침**: `worker.highlight_tasks`가 celery `imports`에 빠져 있었습니다. 하이라이트 추천은 운영에서 돌 수 없는 상태였습니다. 넣고 디스패처 주제 전수 시험을 두었습니다.
+- 검증: pytest 560 통과 / 8 skip, ruff, tsc·vite build, alembic 왕복(머리 하나 `0009_subtitle_reviews`).
+- 실제 GitHub 호출은 하지 않았습니다. 전부 `httpx.MockTransport`와 저장소 대역입니다. 포크에서 온 PR은 읽지 않습니다.
+
 ## 2026-09-21: 상호 번역·용어집·번역 기억·LLM 보정 (Claude)
 
 브랜치 `claude/claude-md-design-review-v8qdz4`, PR #17 위. 담당: `packages/pipeline/pipeline/{languages,glossary,batching,translation_jobs}.py`, `services/worker/worker/{providers,workflow_tasks}.py`, `services/api/adminapi/{config,models}.py`, `routers/{jobs,workflow}.py`, `migrations/versions/0008_translation_memory.py`, `apps/web/src/WorkflowPanel.tsx`, 테스트 5개, `THIRD_PARTY_NOTICES.md`.
