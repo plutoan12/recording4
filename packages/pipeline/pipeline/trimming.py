@@ -89,11 +89,6 @@ def keeps(
     return _cap(kept, MAX_SEGMENTS)
 
 
-def trims(kept: Sequence[Span]) -> bool:
-    """실제로 잘라 내는 것이 있는지."""
-    return len(kept) > 1
-
-
 def overlap_seconds(kept: Sequence[Span], wanted: float) -> float:
     """실제로 쓸 전환 길이. 토막보다 길게 겹칠 수는 없습니다.
 
@@ -101,7 +96,8 @@ def overlap_seconds(kept: Sequence[Span], wanted: float) -> float:
     거부하므로 **가장 짧은 토막의 절반**까지로 줄입니다. 그래도 너무 짧으면
     0을 돌려주고, 부르는 쪽은 전환 없이 딱 붙입니다.
     """
-    if not trims(kept) or wanted <= 0:
+    # 겹칠 이음매가 있어야 전환입니다. 토막이 하나면 이을 자리가 없습니다.
+    if len(kept) < 2 or wanted <= 0:
         return 0.0
     shortest = min(end - start for start, end in kept)
     usable = min(wanted, shortest / 2)
@@ -117,6 +113,15 @@ def kept_seconds(kept: Sequence[Span], overlap: float = 0.0) -> float:
 def _offset(index: int, kept: Sequence[Span], overlap: float) -> float:
     """토막 `index`의 내용이 결과 영상에서 시작하는 시각."""
     return sum(end - start for start, end in kept[:index]) - index * overlap
+
+
+def trims(kept: Sequence[Span], length: float) -> bool:
+    """실제로 잘라 내는 것이 있는지.
+
+    **토막 수로 세면 안 됩니다.** 말이 가운데 한 군데만 있으면 토막은 하나뿐인데
+    앞뒤 침묵은 잘라야 합니다. 남는 길이가 원래보다 짧은지로 봅니다.
+    """
+    return kept_seconds(kept) < length - 1e-6
 
 
 def moved(time: float, kept: Sequence[Span], overlap: float = 0.0) -> float | None:

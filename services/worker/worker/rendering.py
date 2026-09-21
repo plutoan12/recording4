@@ -228,7 +228,7 @@ def clip_path(
         from worker.analysis import face_track
 
         faces = face_track(source, start=spec.start, end=spec.end)[0]
-    if trims(kept):
+    if trims(kept, spec.end - spec.start):
         shifted = [(moved(at, kept, overlap), value) for at, value in faces]
         faces = [(at, value) for at, value in shifted if at is not None]
     return follow(faces, settings=settings)
@@ -316,14 +316,14 @@ def cut_with_transitions(
         raise RenderError("FFmpeg 전환 합성 실패: 전환 종류와 토막 길이를 확인하세요.")
 
 
-def trim_filters(kept: Sequence[Span]) -> tuple[str, list[str]]:
+def trim_filters(kept: Sequence[Span], length: float) -> tuple[str, list[str]]:
     """(영상 체인 앞머리, 음성 필터 조각). 자를 것이 없으면 빈 값입니다.
 
     `select`는 남길 프레임만 통과시키고 `setpts`가 남은 프레임의 시각을 도로
     0부터 세어 빈자리를 없앱니다. 식에 쉼표가 있어 작은따옴표로 묶습니다
     (묶지 않으면 필터 인자 구분자로 읽힙니다).
     """
-    if not trims(kept):
+    if not trims(kept, length):
         return "", []
     expression = select_expression(kept)
     return (
@@ -392,13 +392,13 @@ def transition_graph(
     return ";".join(parts), video, sound
 
 
-def audio_filter_args(spec: EditSpec, kept: Sequence[Span]) -> list[str]:
+def audio_filter_args(spec: EditSpec, kept: Sequence[Span], length: float) -> list[str]:
     """`-filter:a` 인자. 무음 컷과 잡음 제거를 한 체인으로 잇습니다.
 
     **자르기가 먼저입니다.** 버릴 구간까지 잡음을 깎는 것은 헛일이고, 잡음
     제거가 이어 붙인 자리의 이음매를 뭉개는 편이 낫습니다.
     """
-    chain = trim_filters(kept)[1]
+    chain = trim_filters(kept, length)[1]
     level = getattr(spec, "denoise", None)
     if level:
         chain.append(DENOISE[level])
@@ -419,9 +419,10 @@ def render_clip(
         raise RenderError("유효한 원본과 별도 출력 경로가 필요합니다.")
     output.parent.mkdir(parents=True, exist_ok=True)
     kept = clip_keeps(source, spec, speech)
+    length = spec.end - spec.start
     overlap = clip_overlap(spec, kept)
     # 자른 뒤에는 시간축이 달라집니다. 자막·스티커·얼굴 경로를 먼저 옮깁니다.
-    shown = trimmed_spec(spec, kept, overlap) if trims(kept) else spec
+    shown = trimmed_spec(spec, kept, overlap) if trims(kept, length) else spec
     path = clip_path(source, spec, kept, faces, overlap)
     with tempfile.TemporaryDirectory(prefix="r4-render-") as directory:
         temp = Path(directory)
@@ -429,11 +430,12 @@ def render_clip(
             # 전환은 토막을 따로 떠서 겹쳐야 하므로 먼저 한 번 굽습니다.
             media = temp / "cut.mp4"
             cut_with_transitions(source, spec, kept, overlap, media)
-            window, prefix, cut_audio = (0.0, shown.end), "", [(0.0, shown.end)]
+            window, prefix = (0.0, shown.end), ""
+            cut_audio, cut_length = [(0.0, shown.end)], shown.end
         else:
             media = source
-            window, cut_audio = (spec.start, spec.end - spec.start), kept
-            prefix, _ = trim_filters(kept)
+            window, cut_audio, cut_length = (spec.start, length), kept, length
+            prefix, _ = trim_filters(kept, length)
         write_subtitles(temp / "captions.ass", shown, rules)
         try:
             filters = video_filter_args(shown, base_chain=prefix + video_filter(shown, path))
@@ -455,7 +457,7 @@ def render_clip(
             *filters,
             "-map",
             "0:a:0?",
-            *audio_filter_args(spec, cut_audio),
+            *audio_filter_args(spec, cut_audio, cut_length),
             "-c:v",
             "libx264",
             "-preset",

@@ -35,14 +35,14 @@ def test_silence_between_speech_is_dropped_and_speech_is_padded():
     assert kept == [(0.4, 2.1), (4.9, 7.1)]
     # 10초가 3.9초로 줄었습니다.
     assert kept_seconds(kept) == pytest.approx(3.9)
-    assert trims(kept)
+    assert trims(kept, 10.0)
 
 
 def test_a_short_pause_is_left_alone():
     """숨 쉬는 자리까지 없애면 말이 붙어 듣기 나쁩니다."""
     kept = keeps([(0.0, 2.0), (2.3, 4.0)], start=0, end=4, settings=TrimSettings(pad=0))
     assert kept == [(0.0, 4.0)]
-    assert not trims(kept)
+    assert not trims(kept, 4.0)
 
 
 def test_a_scrap_too_short_to_keep_is_dropped():
@@ -125,27 +125,27 @@ EXPRESSION = "between(t,0.000,2.000)+between(t,5.000,7.000)"
 
 
 def test_the_filter_expression_is_quoted_so_commas_are_not_separators():
-    prefix, audio = trim_filters(KEPT)
+    prefix, audio = trim_filters(KEPT, 10.0)
     assert select_expression(KEPT) == EXPRESSION
     assert prefix == f"select='{EXPRESSION}',setpts=N/FRAME_RATE/TB,"
     assert audio == [f"aselect='{EXPRESSION}'", "asetpts=N/SR/TB"]
 
 
 def test_nothing_to_cut_adds_no_filters():
-    assert trim_filters([(0.0, 10.0)]) == ("", [])
-    assert audio_filter_args(EditSpec(start=0, end=10), [(0.0, 10.0)]) == []
+    assert trim_filters([(0.0, 10.0)], 10.0) == ("", [])
+    assert audio_filter_args(EditSpec(start=0, end=10), [(0.0, 10.0)], 10.0) == []
 
 
 def test_denoise_runs_after_the_cut_in_one_audio_chain():
     """버릴 구간까지 잡음을 깎는 것은 헛일입니다. 자르기가 먼저입니다."""
     spec = EditSpec(start=0, end=10, denoise="strong")
-    assert audio_filter_args(spec, KEPT) == [
+    assert audio_filter_args(spec, KEPT, 10.0) == [
         "-filter:a",
         f"aselect='{EXPRESSION}',asetpts=N/SR/TB,afftdn=nf=-35",
     ]
     # 자를 것이 없으면 잡음 제거만 남습니다.
-    assert audio_filter_args(spec, [(0.0, 10.0)]) == ["-filter:a", "afftdn=nf=-35"]
-    assert audio_filter_args(EditSpec(start=0, end=10, denoise="soft"), [(0.0, 10.0)]) == [
+    assert audio_filter_args(spec, [(0.0, 10.0)], 10.0) == ["-filter:a", "afftdn=nf=-35"]
+    assert audio_filter_args(EditSpec(start=0, end=10, denoise="soft"), [(0.0, 10.0)], 10.0) == [
         "-filter:a",
         "afftdn=nf=-20",
     ]
@@ -307,3 +307,17 @@ def test_the_trimmed_spec_uses_the_overlapped_length():
     moved_spec = trimmed_spec(spec, [(0.0, 2.0), (5.0, 7.0)], 0.3)
     assert moved_spec.end == pytest.approx(3.7)
     assert moved_spec.transition is None
+
+
+def test_cutting_only_the_ends_still_counts_as_cutting():
+    """말이 가운데 한 군데뿐이면 토막은 하나지만 앞뒤 침묵은 잘라야 합니다.
+
+    토막 수로 세면 이 경우를 놓칩니다(CI의 실제 렌더가 9초 그대로 나와서
+    잡았습니다). 남는 길이가 원래보다 짧은지로 봅니다.
+    """
+    kept = keeps([(3.0, 5.0)], start=0, end=9, settings=TrimSettings(pad=0.1))
+    assert kept == [(2.9, 5.1)]
+    assert trims(kept, 9.0)
+    prefix, audio = trim_filters(kept, 9.0)
+    assert prefix.startswith("select='between(t,2.900,5.100)'")
+    assert audio == ["aselect='between(t,2.900,5.100)'", "asetpts=N/SR/TB"]

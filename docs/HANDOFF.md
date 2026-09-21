@@ -1,3 +1,10 @@
+## 2026-09-21: 무음 컷이 앞뒤 침묵을 안 자르던 버그 (Claude)
+
+- CI가 `12ec3ee`부터 세 번 연속 빨간색이었습니다. 원인은 하나였고 **제 코드 버그**입니다. `trims()`가 "토막이 2개 이상"일 때만 자른다고 판단해서, 말이 가운데 한 군데만 있으면 토막이 하나라 **앞뒤 침묵을 그대로 두었습니다**(9초 영상이 9초 그대로).
+- 고침: `trims(kept, length)`가 **남는 길이가 원래보다 짧은지**로 봅니다. 토막 수로 세면 이 경우를 놓칩니다. `trim_filters`·`audio_filter_args`·`clip_path`·`render_clip`에 구간 길이를 넘깁니다. `overlap_seconds`는 이을 자리가 필요하므로 `len(kept) >= 2`를 그대로 씁니다.
+- 회귀 테스트를 더했습니다(`test_cutting_only_the_ends_still_counts_as_cutting`). 이 환경에 FFmpeg가 없어 제가 못 잡은 것을 **CI의 실제 렌더가 잡았습니다.** 그 테스트를 넣어 둔 것이 값을 했습니다.
+- 검증: 전체 649 passed, 14 skipped. 실패 1건은 변경 전에도 이 환경에서만 실패합니다. ruff 0.8.4 통과.
+
 ## 2026-09-21: 이음매 전환 (xfade) (Claude)
 
 - 사용자가 고른 넷 중 **마지막**입니다. [PR #36](https://github.com/plutoan12/recording4/pull/36) 후속 커밋. 담당: `pipeline/editing.py`(`TransitionSettings`), `pipeline/trimming.py`(겹침 반영), `worker/rendering.py`, `apps/web`(ClipEditor.tsx, WorkflowPanel.tsx), 테스트·문서.
