@@ -35,9 +35,7 @@ def _intervals(mask, frame_rate):
         if active and start is None:
             start = frame
         elif not active and start is not None:
-            intervals.append(
-                {"start": start / frame_rate, "end": frame / frame_rate}
-            )
+            intervals.append({"start": start / frame_rate, "end": frame / frame_rate})
             start = None
     return intervals
 
@@ -135,8 +133,12 @@ def compare(active, diarization, *, active_sha256, diarization_sha256):
         visual >= 2 and audio >= 2 for visual, audio in zip(visual_count, audio_count, strict=True)
     )
     unknown_frames = sum(visual_unknown)
-    visual_overlap_only = [visual >= 2 and audio < 2 for visual, audio in zip(visual_count, audio_count, strict=True)]
-    audio_overlap_only = [audio >= 2 and visual < 2 for visual, audio in zip(visual_count, audio_count, strict=True)]
+    visual_overlap_only = [
+        visual >= 2 and audio < 2 for visual, audio in zip(visual_count, audio_count, strict=True)
+    ]
+    audio_overlap_only = [
+        audio >= 2 and visual < 2 for visual, audio in zip(visual_count, audio_count, strict=True)
+    ]
     unknown_visual = list(visual_unknown)
     return {
         "schema": 1,
@@ -166,9 +168,7 @@ def compare(active, diarization, *, active_sha256, diarization_sha256):
             overlap_agreement, audio_overlap
         ),
         "review_intervals": {
-            "visual_overlap_without_audio_overlap": _intervals(
-                visual_overlap_only, frame_rate
-            ),
+            "visual_overlap_without_audio_overlap": _intervals(visual_overlap_only, frame_rate),
             "audio_overlap_without_visual_overlap": _intervals(audio_overlap_only, frame_rate),
             "visual_unscored": _intervals(unknown_visual, frame_rate),
         },

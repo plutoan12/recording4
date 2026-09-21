@@ -51,8 +51,18 @@ def test_disagreement_preserves_unknown_frames_and_lower_bounds(evidence, monkey
     assert result["audio_overlap_supported_by_visual_fraction_lower_bound"] == pytest.approx(2 / 3)
     assert result["accuracy_claim_allowed"] is False
     assert result["deploy_allowed"] is False
+    assert result["review_intervals"]["visual_overlap_without_audio_overlap"] == []
+
+
+def test_review_interval_marks_visual_only_overlap(evidence, monkeypatch):
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[1] / "scripts"))
+    from compare_active_speaker_diarization import compare
+
+    active, audio = copy.deepcopy(evidence)
+    audio["turns"] = [{"start": 0, "end": 5, "speaker": "speaker_0"}]
+    result = compare(active, audio, active_sha256="x", diarization_sha256="y")
     assert result["review_intervals"]["visual_overlap_without_audio_overlap"] == [
-        {"start": 2.0, "end": 2.5}
+        {"start": 2.0, "end": 3.0}
     ]
 
 
