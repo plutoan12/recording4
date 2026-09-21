@@ -139,12 +139,27 @@ FFmpeg에서는 `crop`의 x를 시간의 식(구간마다 직선)으로 넘깁�
 같은 시간축을 씁니다** — `crop`은 자르기(`select`) 뒤에 오므로 얼굴 시각도
 잘린 뒤의 시각으로 옮깁니다.
 
-### 검출기
+### 검출기 — 모델 파일이 있어야 합니다
 
-MediaPipe가 있으면 그쪽을, 없으면 **OpenCV 내장 검출기**로 내려갑니다
-(`scenedetect`가 이미 끌고 오는 의존성이라 설치할 것이 없습니다). 어느 쪽을
-썼는지는 `face_track()`이 함께 돌려줍니다. MediaPipe 쪽이 정확하므로
-`pip install '.[analysis]'`로 설치하는 편이 낫습니다.
+**MediaPipe 1.0에는 얼굴 모델이 들어 있지 않습니다.** 모델을 품고 있던 옛
+`mediapipe.solutions` API는 사라졌고, 지금의 Tasks API는 `.tflite`를 따로 받아
+경로를 넘겨야 합니다.
+
+```bash
+python3 scripts/fetch_face_model.py --out .models   # 230KB, 고정 URL·SHA-256
+# 워커에 R4_FACE_MODEL=<받은 경로>
+```
+
+워커 이미지에는 `libegl1`·`libgles2`도 필요합니다(MediaPipe가 공유 라이브러리를
+열 때 씁니다). `infra/Dockerfile.worker`에 들어 있습니다.
+
+모델이 없으면 OpenCV 검출기로 내려갑니다. 다만 `scenedetect`가 끌고 오는 것은
+**opencv-headless**라 haarcascade XML이 없을 수 있고, 그러면 **쓸 수 있는
+검출기가 없습니다.** 그때는 `face_track()`이 `"none"`을 돌려주고 리프레이밍은
+`focus_x` 고정으로 돌아갑니다(지금까지와 같은 동작).
+
+어느 쪽을 썼는지는 `face_track()`이 이름으로 함께 돌려줍니다 — `mediapipe`,
+`opencv-haar`, `none`. **조용히 품질이 달라지지 않게 하려는 것입니다.**
 
 ### 아는 한계
 

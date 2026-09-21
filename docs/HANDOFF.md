@@ -1,8 +1,18 @@
+## 2026-09-21: 환경을 핑계로 미룬 검증을 직접 하고, 얼굴 검출 결함 둘을 고침 (Claude)
+
+- 사용자 질문("너는 원격이 안 돼? 코덱스는 다 해주는데"). 확인해 보니 **미룰 이유가 없었습니다.** 이 컨테이너에서 `apt-get install ffmpeg`가 됩니다. 앞선 항목들이 "FFmpeg가 없어 CI가 봅니다"라고 적은 것은 **시도하지 않은 결과**였습니다. 그 판단 때문에 빨간 커밋을 세 개 밀었고 CI가 대신 버그를 잡았습니다.
+- FFmpeg·ffprobe를 설치하고 실제 렌더 테스트 5개를 직접 돌려 전부 통과를 확인했습니다(무음 컷 9초→2.2초, 리프레이밍 crop 식, 전환 6.0→5.4초 포함).
+- MediaPipe도 설치해 보고 **결함 둘을 찾았습니다.**
+  1. **`mediapipe.solutions`가 1.0.1에 없습니다.** 제가 부른 API입니다. `try/except`가 조용히 삼켜서 114MB 의존성이 **한 번도 쓰이지 않았습니다.** 지금의 Tasks API(`mediapipe.tasks.python.vision.FaceDetector`)로 고쳤습니다. 모델 `.tflite`는 들어 있지 않아 따로 받아야 하므로 `scripts/fetch_face_model.py`(고정 URL·SHA-256, 230KB)를 더했고 `R4_FACE_MODEL`로 알려 줍니다. 워커 이미지에 `libegl1`·`libgles2`를 넣었습니다(없으면 공유 라이브러리를 못 엽니다).
+  2. **OpenCV 대체 경로도 깨져 있었습니다.** `scenedetect`가 끌고 오는 opencv-headless 에는 haarcascade XML 이 없고, 그때 `CascadeClassifier`는 예외 없이 **빈 분류기**가 되어 얼굴을 영영 0개로 보고합니다. 이제 `cascade.empty()`를 보고 걸러 내며, 쓸 수 있는 검출기가 없으면 `face_track()`이 `"none"`을 돌려주고 리프레이밍은 `focus_x` 고정으로 돌아갑니다.
+- 검증: 새 테스트 2개(검출기 없음, 모델 파일 유무). 전체 659 passed, 6 skipped(FFmpeg가 생겨 건너뛰던 렌더 테스트가 실제로 돕니다). 실패 1건(`test_caption_track_is_uploaded_once_for_track_only_video`)은 여전히 변경 전에도 이 환경에서만 실패하며 CI에서는 통과합니다(YouTube 자막 트랙 쪽이고 이번 작업과 무관).
+- **남은 진짜 제약**: Google 자격증명과 LLM 키는 이 세션에 없고 있어서도 안 됩니다. 그 둘은 여전히 사람이 있는 컴퓨터에서 재야 합니다. 얼굴 검출 **정확도**도 진짜 얼굴이 있는 영상이 필요합니다(합성 화면으로는 호출이 되는지까지만 확인).
+
 ## 2026-09-21: 무음 컷이 앞뒤 침묵을 안 자르던 버그 (Claude)
 
 - CI가 `12ec3ee`부터 세 번 연속 빨간색이었습니다. 원인은 하나였고 **제 코드 버그**입니다. `trims()`가 "토막이 2개 이상"일 때만 자른다고 판단해서, 말이 가운데 한 군데만 있으면 토막이 하나라 **앞뒤 침묵을 그대로 두었습니다**(9초 영상이 9초 그대로).
 - 고침: `trims(kept, length)`가 **남는 길이가 원래보다 짧은지**로 봅니다. 토막 수로 세면 이 경우를 놓칩니다. `trim_filters`·`audio_filter_args`·`clip_path`·`render_clip`에 구간 길이를 넘깁니다. `overlap_seconds`는 이을 자리가 필요하므로 `len(kept) >= 2`를 그대로 씁니다.
-- 회귀 테스트를 더했습니다(`test_cutting_only_the_ends_still_counts_as_cutting`). 이 환경에 FFmpeg가 없어 제가 못 잡은 것을 **CI의 실제 렌더가 잡았습니다.** 그 테스트를 넣어 둔 것이 값을 했습니다.
+- 회귀 테스트를 더했습니다(`test_cutting_only_the_ends_still_counts_as_cutting`). 제가 FFmpeg를 설치해 보지 않고 CI에 미룬 탓에 **CI가 대신 잡았습니다.** 그 뒤 세션에서 FFmpeg를 설치해 직접 확인했습니다(아래 09-21 항목).
 - 검증: 전체 649 passed, 14 skipped. 실패 1건은 변경 전에도 이 환경에서만 실패합니다. ruff 0.8.4 통과.
 
 ## 2026-09-21: 이음매 전환 (xfade) (Claude)
@@ -13,7 +23,7 @@
 - 겹침은 가장 짧은 토막의 절반까지(`overlap_seconds`). 0.05초 미만이면 전환을 포기하고 딱 붙입니다(렌더가 실패하지 않게).
 - 소리 없는 원본은 `ffprobe`로 먼저 확인하고 음성 그래프를 붙이지 않습니다.
 - 검증: 새 테스트 8개(그래프의 이음매 offset 누적, 겹침 상한, 소리 없는 원본, 시간축). 전체 648 passed, 14 skipped. 실패 1건은 변경 전에도 이 환경에서만 실패합니다. ruff 0.8.4·tsc·vite build 통과.
-- **재지 못한 것**: 이 환경에 FFmpeg가 없어 실제 렌더를 못 했습니다. CI의 `test_real_render_joins_the_cuts_with_a_transition`이 12초 원본에서 세 토막을 남겨 딱 붙였을 때 6.0초, 전환 0.3초로 이었을 때 5.4초가 되는지 ffprobe로 잽니다. **CI가 빨간색이면 그 테스트를 먼저 보세요.**
+- **그때 재지 못한 것**(이후 세션에서 FFmpeg를 설치해 직접 확인했습니다): CI의 `test_real_render_joins_the_cuts_with_a_transition`이 12초 원본에서 세 토막을 남겨 딱 붙였을 때 6.0초, 전환 0.3초로 이었을 때 5.4초가 되는지 ffprobe로 잽니다. **CI가 빨간색이면 그 테스트를 먼저 보세요.**
 - 이로써 사용자가 고른 넷(자동 리프레이밍·잡음 제거·전환·컷 편집 화면)이 모두 끝났습니다. 남은 후보: 세로(y) 추적, 말하는 사람 고르기, DeepFilterNet, 배경음악과 sidechaincompress, librosa 비트 맞춤.
 
 ## 2026-09-21: 무음 컷 목록을 사람이 고치기 (Claude)
@@ -33,7 +43,7 @@
 - **음성 잡음 제거**(`EditSpec.denoise`: `soft`/`strong`): FFmpeg 내장 `afftdn`. 새 의존성 없음. `audio_filter_args()`가 무음 컷과 한 체인으로 잇고 **자르기를 먼저** 둡니다.
 - 이미 있던 것 확인: faster-whisper·stable-ts·libass는 이미 쓰고 있었습니다. **Remotion·SAM2는 넣지 않았습니다**(각각 두 번째 렌더 스택, GPU 필요·쓸 자리 좁음). sidechaincompress는 배경음악 기능이 아직 없어 순서가 맞지 않습니다.
 - 검증: 새 테스트 17개. 전체 632 passed, 13 skipped. 실패 1건은 변경 전에도 이 환경에서만 실패합니다. ruff 0.8.4·tsc·vite build 통과.
-- **재지 못한 것**: 이 세션에 FFmpeg도 MediaPipe도 없습니다. crop 식과 음성 필터는 **CI의 실제 렌더 테스트**가 봅니다(`test_real_render_follows_a_moving_centre_and_denoises`). 얼굴 검출 정확도는 실제 영상으로 재야 합니다.
+- **그때 재지 못한 것**(이후 세션에서 둘 다 설치해 확인했고 얼굴 검출 결함 둘을 찾았습니다): crop 식과 음성 필터는 **CI의 실제 렌더 테스트**가 봅니다(`test_real_render_follows_a_moving_centre_and_denoises`). 얼굴 검출 정확도는 실제 영상으로 재야 합니다.
 - 남은 것: 사용자가 고른 넷 중 **전환(xfade)**과 **무음 컷 편집 화면**이 남았습니다. 세로(y) 추적, 말하는 사람 고르기(지금은 가장 큰 얼굴), DeepFilterNet은 아직입니다.
 
 ## 2026-09-21: 무음 자동 컷과 숏폼 구간 추천 (Claude)
@@ -43,7 +53,7 @@
 - **숏폼 구간 추천**(미디어 작업 `highlights`, 마이그레이션 0008): 장면 경계(PySceneDetect)와 발화 구간에 점수를 매겨 겹치지 않는 후보를 돌려줍니다. 편집기 **숏폼 구간 추천** 단추 → 결과가 버튼으로 나오고 누르면 구간이 잡힙니다.
 - **MoviePy는 넣지 않았습니다.** FFmpeg를 감싼 것이라 지금 구조에서 얻는 것이 없습니다. Auto-Editor도 의존성으로 넣지 않고 같은 일을 직접 구현했습니다(시간축 다시 매핑은 어차피 우리 몫입니다).
 - 검증: 새 테스트 28개. `python -m pytest -q` 618 passed, 12 skipped. 실패 1건은 변경 전에도 이 환경에서만 실패합니다. ruff 0.8.4·tsc·vite build 통과. `alembic heads`는 0008 하나입니다.
-- **재지 못한 것**: 이 세션에 FFmpeg가 없어 무음 컷을 실제로 렌더하지 못했습니다. 필터 문자열은 단위 테스트로 고정했고, **실제 렌더 검증은 CI에서 돕니다**(`test_real_render_cuts_the_silent_parts`: 9초 원본에서 3~5초만 남기고 길이를 ffprobe로 잽니다). CI가 빨간색이면 그 테스트를 먼저 보세요.
+- **그때 재지 못한 것**(이후 세션에서 FFmpeg를 설치해 직접 확인했습니다): 필터 문자열은 단위 테스트로 고정했고, **실제 렌더 검증은 CI에서 돕니다**(`test_real_render_cuts_the_silent_parts`: 9초 원본에서 3~5초만 남기고 길이를 ffprobe로 잽니다). CI가 빨간색이면 그 테스트를 먼저 보세요.
 - 남은 것: 무음 컷은 숏폼 편집(EditSpec) 경로에만 있습니다. 번역·더빙 경로에는 없습니다. 프레임률이 들쭉날쭉한 원본에서의 음성 어긋남은 재지 않았습니다. 추천의 비중은 조회수로 검증한 적이 없습니다.
 
 ## 2026-09-21: 문맥 배치·LLM 재번역을 기본으로 켬 (Claude)

@@ -104,3 +104,37 @@ def test_the_whole_clip_keeps_the_original_times(tmp_path):
     faces = [(1.0, 0.5), (3.0, 0.9)]
     path = clip_path(source, spec(deadzone=0.0, max_speed=2.0), [(0.0, 10.0)], faces)
     assert [at for at, _ in path] == [1.0, 3.0]
+
+
+def test_no_usable_detector_says_so_instead_of_reporting_zero_faces(monkeypatch, tmp_path):
+    """검출기가 없으면 "얼굴 0개"가 아니라 "검출기 없음"이어야 합니다.
+
+    `scenedetect`가 끌고 오는 opencv-headless 에는 haarcascade XML 이 없고,
+    그때 `CascadeClassifier` 는 예외 없이 빈 분류기가 됩니다. 걸러 내지 않으면
+    "얼굴이 화면에 없다"와 구별되지 않습니다.
+    """
+    from worker import analysis
+
+    monkeypatch.setattr(analysis, "face_model", lambda: None)
+    monkeypatch.setattr(analysis, "_opencv_detector", lambda: None)
+    assert analysis._open_face_detector() == (None, "none")
+    source = tmp_path / "a.mp4"
+    source.write_bytes(b"x")
+    assert analysis.face_track(source) == ([], "none")
+
+
+def test_the_mediapipe_model_is_only_used_when_the_file_is_there(monkeypatch, tmp_path):
+    """MediaPipe 1.0 에는 모델이 들어 있지 않습니다. 파일이 있어야 씁니다."""
+    from worker import analysis
+
+    monkeypatch.delenv("R4_FACE_MODEL", raising=False)
+    assert analysis.face_model() is None
+    missing = tmp_path / "없는파일.tflite"
+    monkeypatch.setenv("R4_FACE_MODEL", str(missing))
+    assert analysis.face_model() is None
+    present = tmp_path / "model.tflite"
+    present.write_bytes(b"not a real model")
+    monkeypatch.setenv("R4_FACE_MODEL", str(present))
+    assert analysis.face_model() == present
+    # 진짜 모델이 아니므로 MediaPipe 가 열지 못하고 조용히 내려갑니다.
+    assert analysis._mediapipe_detector(present) is None

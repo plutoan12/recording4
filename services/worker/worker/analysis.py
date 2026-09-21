@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import inspect
 import math
+import os
 import re
 import subprocess
 import tempfile
@@ -415,39 +416,75 @@ def _largest_face(boxes: list[tuple[float, float, float, float]]) -> float | Non
     return min(1.0, max(0.0, x + w / 2))
 
 
-def _mediapipe_boxes(frame, detector):  # noqa: ANN001
-    """MediaPipe 검출 결과를 (x, y, w, h) 비율 목록으로."""
-    import cv2
+def face_model() -> Path | None:
+    """MediaPipe 얼굴 모델 파일. `R4_FACE_MODEL`로 알려 줍니다.
 
-    found = detector.process(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
-    boxes = []
-    for detection in getattr(found, "detections", None) or []:
-        box = detection.location_data.relative_bounding_box
-        boxes.append((box.xmin, box.ymin, box.width, box.height))
-    return boxes
+    MediaPipe 1.0에는 모델이 **들어 있지 않습니다.** 모델을 품고 있던 옛
+    `mediapipe.solutions` API는 사라졌고, 지금의 Tasks API는 `.tflite`를 따로
+    받아 경로를 넘겨야 합니다(`scripts/fetch_face_model.py`).
+    """
+    value = os.environ.get("R4_FACE_MODEL", "").strip()
+    path = Path(value) if value else None
+    return path if path and path.is_file() else None
 
 
-def _open_face_detector():  # noqa: ANN202
-    """(검출 함수, 검출기 이름). MediaPipe가 있으면 그쪽, 없으면 OpenCV 내장입니다.
+def _mediapipe_detector(model: Path):  # noqa: ANN202
+    """MediaPipe Tasks 얼굴 검출. 쓸 수 없으면 `None`입니다.
 
-    MediaPipe 쪽이 정확하지만 설치가 크고 판올림마다 API가 바뀝니다. OpenCV는
-    `scenedetect`가 이미 끌고 오는 의존성이고 모델이 패키지 안에 들어 있어
-    내려받을 것이 없습니다. **어느 쪽을 썼는지 결과에 적어 둡니다.**
+    `libEGL`·`libGLESv2`가 없으면 라이브러리를 여는 데서 실패하므로(워커
+    이미지에 넣어 둡니다) 여기서 한 번 실제로 열어 보고 판단합니다.
     """
     try:
         import mediapipe
+        from mediapipe.tasks.python.core.base_options import BaseOptions
+        from mediapipe.tasks.python.vision import FaceDetector, FaceDetectorOptions
 
-        detector = mediapipe.solutions.face_detection.FaceDetection(
-            model_selection=1, min_detection_confidence=0.5
+        detector = FaceDetector.create_from_options(
+            FaceDetectorOptions(base_options=BaseOptions(model_asset_path=str(model)))
         )
-    except Exception:  # noqa: BLE001 - 없거나 API가 바뀌었으면 아래로 내려갑니다.
-        pass
-    else:
-        return (lambda frame: _mediapipe_boxes(frame, detector)), "mediapipe"
+    except Exception:  # noqa: BLE001 - 없거나 GL 라이브러리가 빠졌으면 내려갑니다.
+        return None
 
-    import cv2
+    def detect(frame):  # noqa: ANN001, ANN202
+        import cv2
+
+        height, width = frame.shape[:2]
+        image = mediapipe.Image(
+            image_format=mediapipe.ImageFormat.SRGB,
+            data=cv2.cvtColor(frame, cv2.COLOR_BGR2RGB),
+        )
+        found = detector.detect(image)
+        # Tasks API는 픽셀 좌표를 줍니다. 비율로 바꿔 화면 크기와 무관하게 씁니다.
+        return [
+            (
+                box.origin_x / width,
+                box.origin_y / height,
+                box.width / width,
+                box.height / height,
+            )
+            for box in (item.bounding_box for item in found.detections)
+        ]
+
+    return detect
+
+
+def _opencv_detector():  # noqa: ANN202
+    """OpenCV 얼굴 검출. 쓸 수 없으면 `None`입니다.
+
+    `scenedetect`가 끌고 오는 것은 **opencv-headless**라 haarcascade XML이
+    들어 있지 않습니다(`opencv-contrib-python`에는 있습니다). 파일이 없으면
+    `CascadeClassifier`는 예외 없이 **빈 분류기**가 되어 얼굴을 영영 0개로
+    보고합니다. 그러면 "검출기를 썼는데 얼굴이 없다"와 구별되지 않으므로
+    여기서 먼저 걸러 냅니다.
+    """
+    try:
+        import cv2
+    except ImportError:
+        return None
 
     cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
+    if cascade.empty():
+        return None
 
     def detect(frame):  # noqa: ANN001, ANN202
         height, width = frame.shape[:2]
@@ -457,7 +494,27 @@ def _open_face_detector():  # noqa: ANN202
             for x, y, w, h in cascade.detectMultiScale(grey, 1.2, 5, minSize=(40, 40))
         ]
 
-    return detect, "opencv-haar"
+    return detect
+
+
+def _open_face_detector():  # noqa: ANN202
+    """(검출 함수 또는 `None`, 검출기 이름). 모델이 있으면 MediaPipe입니다.
+
+    MediaPipe 쪽이 정확하지만 모델 파일과 GL 라이브러리가 있어야 합니다.
+    OpenCV는 받을 것이 없는 대신 정확도가 낮습니다. **어느 쪽을 썼는지 결과에
+    적어 둡니다**(조용히 품질이 달라지지 않게).
+    """
+    model = face_model()
+    if model is not None:
+        detect = _mediapipe_detector(model)
+        if detect is not None:
+            return detect, "mediapipe"
+    detect = _opencv_detector()
+    if detect is not None:
+        return detect, "opencv-haar"
+    # 쓸 수 있는 검출기가 없습니다. 얼굴을 0개로 보고하는 대신 **없다고**
+    # 말합니다. 리프레이밍은 `focus_x` 고정으로 돌아갑니다.
+    return None, "none"
 
 
 def face_track(
@@ -467,6 +524,9 @@ def face_track(
 
     시각은 **구간 시작을 0으로** 셉니다. 얼굴을 못 찾은 순간은 건너뜁니다
     (`pipeline.reframe.follow`가 마지막 위치를 유지합니다).
+
+    쓸 수 있는 검출기가 없으면 빈 목록과 `"none"`입니다. 그때 리프레이밍은
+    `focus_x` 고정으로 돌아갑니다(지금까지와 같은 동작입니다).
     """
     try:
         import cv2
@@ -475,6 +535,8 @@ def face_track(
             "얼굴 검출 의존성이 없습니다. pip install '.[analysis]'를 실행하세요."
         ) from exc
     detect, name = _open_face_detector()
+    if detect is None:
+        return [], name
     capture = cv2.VideoCapture(str(source))
     if not capture.isOpened():
         return [], name
