@@ -1,3 +1,13 @@
+## 2026-09-21: 모션 프리셋 93종과 프리셋 만들기 (Claude)
+
+- 사용자 요청: 인스타그램 모션 프리셋 팩(프리미어 프로용, "90도회전·꾸물꾸물자막·파도타는·글리치·블러+줌" 등) 스크린샷과 함께 "깃허브에서 이런 프리셋을 만들 수 있도록 하는 코드들 깔아줘". [PR #36](https://github.com/plutoan12/recording4/pull/36) 후속 커밋, 같은 브랜치. 담당: `pipeline/subtitle_presets.py`(신규), `pipeline/subtitle_motion.py`(`run_slots`·`state_before` 공개), `pipeline/subtitle_templates.py`, `pipeline/editing.py`, `pipeline/subtitle_tool.py`, `worker/rendering.py`·`composition.py`, `adminapi/routers/editing.py`, `apps/web`(ClipEditor.tsx, SubtitlePreview.tsx, WorkflowPanel.tsx), `.github/workflows/ci.yml`, 테스트·문서.
+- 엔진: 프리셋 = 동작(step) 목록. 동작 15종(`fade`·`scale`·`move`·`spin`·`flip`·`blur`·`shear`·`wipe`·`flash`·`shake`·`float`·`breathe`·`glow`·`reveal`·`wave`) × 구간 3종(`in`·`out`·`hold`)을 컴파일해 libass가 그리는 ASS 명령을 만듭니다. 반복 이동은 `\org` + `\frz` 궤도로 흉내 냅니다(`\pos`는 `\t` 불가).
+- 내장 93종: 기본 팩 41, 숏폼 팩 52. 참고 팩의 이름은 일반적인 동작 설명(아래 등장·파도 타는·퀵 줌 등)이라 같은 계열의 움직임을 우리 구현으로 새로 만들었습니다(그쪽 파일을 쓰지 않았습니다).
+- 쓰는 곳: 템플릿 항목 `preset`, `EditSpec.subtitle_preset`, `GET /subtitle-presets`, `POST /subtitle-preview`의 `preset`, 편집기 **모션 프리셋** 선택(정확 미리보기에 그대로 반영), CLI `presets list|show|export|new|check`·`--preset`·`reel --preset-pack`. 프리셋은 `subtitle_animation`보다 먼저 쓰입니다.
+- 내가 만들기: `r4-subtitles presets new mine.json --name my-move`로 뼈대를 만들고 값을 고쳐 `--preset mine.json`으로 쓰거나, `R4_PRESETS_DIR` 디렉터리에 넣으면 **내 프리셋** 팩으로 목록·편집기·API에 함께 나옵니다. 워커·API 컨테이너에도 같은 디렉터리를 붙여야 실제 렌더에 적용됩니다.
+- 검증: 이 환경에서 FFmpeg(libass)로 실제 렌더해 펼치기(`fill-up`)·3D 회전(`spin-3d`)·글리치(`glitch-down`)를 프레임으로 확인하고, 떠다님(`bob`)은 세로 중심이 772~800px로 움직이는 것을, 사라짐(`soul-out`)은 끝에서 위로 뜨며 사라지는 것을 픽셀로 측정했습니다. `presets check`로 93종이 모두 명령을 만드는지 확인합니다(CI에도 추가, 프리셋 팩 영상도 artifact로 올림).
+- 남은 것: 크기가 변하는 동작과 그라데이션 띠가 겹칠 때 잠깐 어긋나는 한계는 그대로입니다. `wipe`는 `\clip` 사각형이라 원형 마스크가 안 되고(블러-원형은 크기·번짐으로 흉내), 화면 제목·시트에는 붙지 않습니다. 브라우저에서 편집기 프리셋 선택 실사용 확인은 하지 않았습니다.
+
 ## 2026-09-20: 단어 시각 연결·글꼴 11종·정확 미리보기·스티커 (Claude)
 
 - 사용자 요청: "1 → 3 → 2 → 4 이 순서대로 추가해줘"(단어 타임스탬프 연결, 참고 팩 글꼴, libass WASM 미리보기, 스티커 오버레이). [PR #36](https://github.com/plutoan12/recording4/pull/36) 후속 커밋. 담당: `pipeline/editing.py`(Cue.words, EditSpec.stickers), `pipeline/alignment.py`, `pipeline/subtitles.py`, `pipeline/subtitle_motion.py`, `pipeline/subtitle_templates.py`, `pipeline/subtitle_fonts.py`, `pipeline/subtitle_metrics.py`, `pipeline/subtitle_stickers.py`(신규), `pipeline/subtitle_tool.py`, `scripts/fetch_fonts.py`, `migrations/versions/0007_transcript_words.py`, `adminapi/models.py`·`routers/editing.py`, `worker/analysis.py`·`media_tasks.py`·`rendering.py`·`composition.py`, `infra/Dockerfile.api`, `apps/web`(ClipEditor.tsx, SubtitlePreview.tsx 신규, api.ts, WorkflowPanel.tsx, vite.config.ts, styles.css, package.json jassub), 테스트·문서.

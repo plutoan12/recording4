@@ -51,14 +51,18 @@ def write_subtitles(
     """굽는 자막 ASS 파일을 씁니다.
 
     모양은 템플릿이 정합니다. 주지 않으면 `spec.subtitle_template`(없으면 default)을
-    쓰고, `spec.subtitle_animation`이 있으면 움직임을 그 값으로 바꿉니다. 줄바꿈과
+    쓰고, `spec.subtitle_preset`·`spec.subtitle_animation`이 있으면 그 값으로 바꿉니다.
+    줄바꿈과
     분할은 여기서 확정합니다. libass 자동 줄바꿈에 맡기지 않습니다.
     """
     if template is None:
         template = getattr(spec, "subtitle_template", None)
     animation = getattr(spec, "subtitle_animation", None)
+    preset = getattr(spec, "subtitle_preset", None)
     try:
         chosen = resolve_template(template)
+        if preset is not None:
+            chosen = chosen.with_preset(preset)
         if animation:
             chosen = chosen.with_animation(animation)
     except ValueError as exc:

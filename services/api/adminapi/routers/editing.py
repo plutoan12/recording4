@@ -42,6 +42,7 @@ from pipeline.subtitle_files import (
 )
 from pipeline.subtitle_metrics import font_file_for
 from pipeline.subtitle_motion import ANIMATION_LABELS
+from pipeline.subtitle_presets import PACK_LABELS, presets_by_pack
 from pipeline.subtitle_stickers import STICKER_LABELS, Sticker, add_sticker_events
 from pipeline.subtitle_templates import (
     CATEGORY_LABELS,
@@ -407,6 +408,8 @@ def create_clip(payload: ClipRequest, user: CurrentUser, session: SessionDep):
     spec = EditSpec.model_validate(payload.model_dump(exclude={"source_asset_id"}))
     try:
         template = get_template(spec.subtitle_template)
+        if spec.subtitle_preset:
+            template = template.with_preset(spec.subtitle_preset)
         if spec.subtitle_animation:
             template = template.with_animation(spec.subtitle_animation)
     except ValueError as exc:
@@ -431,6 +434,7 @@ def create_clip(payload: ClipRequest, user: CurrentUser, session: SessionDep):
             "template": template.name,
             "font_size": spec.font_size or template.font_size,
             "animation": template.animation,
+            "preset": template.preset,
         },
     )
     session.add(clip)
@@ -465,7 +469,7 @@ def subtitle_templates(user: CurrentUser) -> list[dict]:
         {
             **t.model_dump(),
             "category_label": CATEGORY_LABELS[t.category],
-            "animation_label": ANIMATION_LABELS[t.animation],
+            "animation_label": t.animation_label,
         }
         for templates in templates_by_category().values()
         for t in templates
@@ -491,6 +495,28 @@ def stickers(user: CurrentUser) -> list[dict]:
     ]
 
 
+@router.get("/subtitle-presets")
+def subtitle_presets(user: CurrentUser) -> list[dict]:
+    """편집기가 고를 수 있는 모션 프리셋. 이름을 `subtitle_preset`으로 보냅니다.
+
+    프리셋은 동작(등장·사라짐·계속)을 겹쳐 만든 움직임 한 벌로, 고르면 템플릿과
+    `subtitle_animation`보다 먼저 쓰입니다. 빈 문자열이면 템플릿 값으로 돌아갑니다.
+    팩(`pack`)으로 묶어 보여 주면 됩니다.
+    """
+    return [
+        {
+            "name": preset.name,
+            "label": preset.label,
+            "pack": pack,
+            "pack_label": PACK_LABELS[pack],
+            "summary": preset.summary,
+            "description": preset.description,
+        }
+        for pack, presets in presets_by_pack().items()
+        for preset in presets
+    ]
+
+
 @router.get("/subtitle-animations")
 def subtitle_animations(user: CurrentUser) -> list[dict]:
     """편집기가 고를 수 있는 자막 움직임. 이름을 `subtitle_animation`으로 보냅니다.
@@ -503,6 +529,7 @@ def subtitle_animations(user: CurrentUser) -> list[dict]:
 class PreviewRequest(BaseModel):
     template: str = Field(default="default", pattern=TEMPLATE_NAME)
     animation: str | None = Field(default=None, pattern=r"^[a-z][a-z-]{0,19}$")
+    preset: str | None = Field(default=None, pattern=r"^$|^[a-z][a-z0-9-]{1,39}$")
     text: str | None = Field(default=None, max_length=200)
     width: int = Field(default=540, ge=180, le=1080, multiple_of=2)
     height: int = Field(default=960, ge=180, le=1920, multiple_of=2)
@@ -526,6 +553,8 @@ def subtitle_preview(payload: PreviewRequest, user: CurrentUser) -> dict:
     """
     try:
         template = get_template(payload.template)
+        if payload.preset is not None:
+            template = template.with_preset(payload.preset) if payload.preset else template
         if payload.animation:
             template = template.with_animation(payload.animation)
     except ValueError as exc:

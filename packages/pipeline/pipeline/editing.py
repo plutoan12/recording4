@@ -60,6 +60,9 @@ class EditSpec(BaseModel):
     # 자막 움직임(pipeline.subtitle_motion.ANIMATION_LABELS의 이름). 비우면 템플릿 값,
     # 적으면 그 값이 템플릿보다 우선합니다. `none`이면 움직임을 뺍니다.
     subtitle_animation: str | None = Field(default=None, pattern=r"^[a-z][a-z-]{0,19}$")
+    # 모션 프리셋 이름(pipeline.subtitle_presets). 움직임보다 먼저 쓰며, 비우면 템플릿
+    # 값입니다. 빈 문자열이면 템플릿의 프리셋을 떼고 `subtitle_animation`을 씁니다.
+    subtitle_preset: str | None = Field(default=None, pattern=r"^$|^[a-z][a-z0-9-]{1,39}$")
     cues: list[Cue] = Field(default_factory=list, max_length=3000)
     # 스티커(화살표·반짝이·말풍선·PNG). 시각은 자막과 같은 원본 시간축이며 구간에 맞춰 옮깁니다.
     stickers: list[Sticker] = Field(default_factory=list, max_length=20)

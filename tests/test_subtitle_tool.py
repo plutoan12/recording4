@@ -314,3 +314,54 @@ def test_stickers_list_and_style_with_stickers(srt, tmp_path, capsys):
     assert "스티커" in capsys.readouterr().err
     # 이미지 스티커는 디렉터리가 있어야 굽습니다(FFmpeg 전에 잡힙니다).
     assert main(["burn", str(srt), str(srt), str(tmp_path / "o.mp4")]) == EXIT_ERROR
+
+
+def test_presets_list_show_export_and_make_a_new_one(tmp_path, capsys, monkeypatch):
+    assert main(["presets", "list"]) == EXIT_OK
+    listed = capsys.readouterr().out
+    assert "[기본 팩]" in listed and "[숏폼 팩]" in listed
+    assert "from-below" in listed and "아래 등장" in listed
+    assert "R4_PRESETS_DIR 없음" in listed
+
+    assert main(["presets", "show", "blur-zoom"]) == EXIT_OK
+    shown = json.loads(capsys.readouterr().out)
+    assert shown["label"] == "블러 + 줌" and shown["steps"][0]["kind"] == "blur"
+
+    mine = tmp_path / "mine.json"
+    assert main(["presets", "export", "from-below", str(mine)]) == EXIT_OK
+    assert json.loads(mine.read_text(encoding="utf-8"))["name"] == "from-below"
+
+    fresh = tmp_path / "fresh.json"
+    assert (
+        main(["presets", "new", str(fresh), "--name", "my-move", "--label", "내 움직임"]) == EXIT_OK
+    )
+    made = json.loads(fresh.read_text(encoding="utf-8"))
+    assert made["pack"] == "user" and made["steps"][0]["direction"] == "up"
+
+    # 디렉터리에 넣으면 목록에 함께 나오고 이름으로 쓸 수 있습니다.
+    monkeypatch.setenv("R4_PRESETS_DIR", str(tmp_path))
+    assert main(["presets", "list"]) == EXIT_OK
+    assert "my-move" in capsys.readouterr().out
+    assert main(["presets", "check"]) == EXIT_OK
+    assert "문제가 있습니다" in capsys.readouterr().out
+    monkeypatch.delenv("R4_PRESETS_DIR")
+
+    assert main(["presets", "show", "없는프리셋"]) == EXIT_ERROR
+
+
+def test_style_applies_a_preset_by_name_or_json_file(srt, tmp_path):
+    out = tmp_path / "styled.ass"
+    assert main(["style", str(srt), str(out), "--preset", "from-below"]) == EXIT_OK
+    text = pysubs2.load(str(out)).events[0].text
+    assert "\\move(" in text and "\\alpha&HFF&" in text
+
+    mine = tmp_path / "mine.json"
+    assert main(["presets", "export", "quick-zoom", str(mine)]) == EXIT_OK
+    assert main(["style", str(srt), str(out), "--preset", str(mine)]) == EXIT_OK
+    assert "\\fscx58" in pysubs2.load(str(out)).events[0].text
+    # 프리셋은 움직임보다 먼저 쓰입니다.
+    assert main(["style", str(srt), str(out), "--preset", "quick-zoom", "--animation", "fade"]) == (
+        EXIT_OK
+    )
+    assert "\\fscx58" in pysubs2.load(str(out)).events[0].text
+    assert main(["style", str(srt), str(out), "--preset", "없는프리셋"]) == EXIT_ERROR

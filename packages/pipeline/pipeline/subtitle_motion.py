@@ -31,6 +31,8 @@ __all__ = [
     "animate_runs",
     "motion_offset",
     "motion_tags",
+    "run_slots",
+    "state_before",
     "tokens",
 ]
 
@@ -255,6 +257,25 @@ def _words(items: list[str]) -> list[list[int]]:
     if current:
         words.append(current)
     return words
+
+
+def run_slots(ass_text: str, unit: str = "char") -> tuple[list[str], list[int]]:
+    """(토큰 목록, 조각마다 명령을 붙일 토큰 번호). 조각은 글자 하나 또는 단어 하나입니다.
+
+    모션 프리셋이 글자·단어마다 다른 시각을 줄 때 씁니다. 명령 묶음(`{...}`)·공백·
+    줄바꿈에는 붙이지 않습니다.
+    """
+    items = tokens(ass_text)
+    if unit == "word":
+        slots = [next(i for i in word if not _is_override(items[i])) for word in _words(items)]
+    else:
+        slots = [index for index, token in enumerate(items) if _visible(token)]
+    return items, slots
+
+
+def state_before(items: list[str], index: int, prefix: str) -> str:
+    """`\\r` 뒤에 다시 적을 명령(층의 명령 + 이 조각 앞까지 나온 명령 묶음)."""
+    return _state_before(items, index, prefix)
 
 
 def animate_runs(

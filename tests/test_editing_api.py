@@ -425,7 +425,12 @@ def test_subtitle_templates_are_listed_and_a_clip_remembers_its_template(
     created = client.post("/clips", headers=auth_headers, json=data)
     assert created.status_code == 202, created.text
     clip = session.get(ClipEdit, uuid.UUID(created.json()["clip_edit_id"]))
-    assert clip.subtitle_style == {"template": "yellow", "font_size": 64, "animation": "none"}
+    assert clip.subtitle_style == {
+        "template": "yellow",
+        "font_size": 64,
+        "animation": "none",
+        "preset": "",
+    }
     task = session.get(MediaTask, uuid.UUID(created.json()["id"]))
     assert task.settings["subtitle_template"] == "yellow"
 
@@ -454,6 +459,27 @@ def test_subtitle_templates_are_listed_and_a_clip_remembers_its_template(
     bad = client.post("/clips", headers=auth_headers, json={**data, "subtitle_animation": "spin"})
     assert bad.status_code == 422 and "모르는 움직임" in bad.json()["detail"]
 
+    # 모션 프리셋은 팩별로 내려주고, 고르면 움직임보다 먼저 편집본에 기록됩니다.
+    presets = client.get("/subtitle-presets", headers=auth_headers).json()
+    names = {p["name"] for p in presets}
+    assert {"from-below", "blur-zoom", "karaoke"} <= names
+    assert {p["pack_label"] for p in presets} == {"기본 팩", "숏폼 팩"}
+    assert next(p for p in presets if p["name"] == "from-below")["label"] == "아래 등장"
+    with_preset = client.post(
+        "/clips", headers=auth_headers, json={**data, "subtitle_preset": "blur-zoom"}
+    )
+    assert with_preset.status_code == 202, with_preset.text
+    saved = session.get(ClipEdit, uuid.UUID(with_preset.json()["clip_edit_id"]))
+    assert saved.subtitle_style["preset"] == "blur-zoom"
+    assert (
+        session.get(MediaTask, uuid.UUID(with_preset.json()["id"])).settings["subtitle_preset"]
+        == "blur-zoom"
+    )
+    missing = client.post(
+        "/clips", headers=auth_headers, json={**data, "subtitle_preset": "nope-nope"}
+    )
+    assert missing.status_code == 422 and "모르는 프리셋" in missing.json()["detail"]
+
 
 def test_subtitle_preview_returns_the_worker_ass_and_its_fonts(client, auth_headers):
     assert client.post("/subtitle-preview", json={}).status_code == 401
@@ -472,6 +498,19 @@ def test_subtitle_preview_returns_the_worker_ass_and_its_fonts(client, auth_head
         "/subtitle-preview", headers=auth_headers, json={"template": "yellow", "animation": "fade"}
     ).json()
     assert "\\fad(" in plain["ass"] and "이거 진짜 맛있다" in plain["ass"]
+    # 프리셋은 움직임보다 먼저 쓰입니다(아래에서 올라오는 `\\move`).
+    moved = client.post(
+        "/subtitle-preview",
+        headers=auth_headers,
+        json={"template": "yellow", "preset": "from-below", "animation": "fade"},
+    ).json()
+    assert "\\move(" in moved["ass"]
+    assert (
+        client.post(
+            "/subtitle-preview", headers=auth_headers, json={"template": "yellow", "preset": "nope"}
+        ).status_code
+        == 422
+    )
     assert (
         client.post(
             "/subtitle-preview", headers=auth_headers, json={"template": "nope"}

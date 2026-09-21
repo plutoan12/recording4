@@ -167,6 +167,7 @@ def render_final(
             # 영상은 기본 템플릿에 화면 높이에 맞춘 글자 크기입니다.
             subtitle_template=clip.subtitle_template if clip else "default",
             subtitle_animation=clip.subtitle_animation if clip else None,
+            subtitle_preset=clip.subtitle_preset if clip else None,
             font_size=clip.font_size if clip else max(20, height // 24),
             # 스티커 시각은 원본 시간축이라 여기서 구간 시작이 0초가 되게 옮깁니다.
             stickers=clip_stickers(clip.stickers, start, start + duration) if clip else [],

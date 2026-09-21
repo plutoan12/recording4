@@ -135,6 +135,77 @@ r4-subtitles reel motion.gif --category motion --width 540 --height 540 --fonts-
 r4-subtitles style in.srt out.ass --template karaoke-yellow           # 움직임이 든 ASS
 ```
 
+### 모션 프리셋
+
+움직임 12종은 종류마다 코드가 정해져 있습니다. **모션 프리셋**은 그 대신 동작(step) 목록을 데이터로 적어 둔 것이라, 코드를 고치지 않고 JSON만 써서 새 움직임을 만들 수 있습니다. 시중의 "모션 프리셋 팩"처럼 한 벌씩 골라 쓰는 방식입니다. 구현은 `packages/pipeline/pipeline/subtitle_presets.py`이고, 내장 93종이 두 팩에 들어 있습니다.
+
+| 팩 | 수 | 성격 | 보기 |
+|---|---|---|---|
+| `basic` 기본 팩 | 41 | 어디에나 쓰는 등장·흔들림·클릭 | 아래 등장, 90도 회전, 파도 타는, 쾅! 클릭, 둥둥 뜨는, 타자기 |
+| `short` 숏폼 팩 | 52 | 숏폼 편집에서 자주 쓰는 타이틀·글리치·줌·사라짐 | 타이틀 등장1, 글리치 아래, 블러 + 줌, 퀵 줌, 영혼 탈출, 쫀득 모찌 |
+
+프리셋은 템플릿의 `preset` 항목이고, 편집기의 **모션 프리셋** 선택(`/clips`의 `subtitle_preset`), 명령줄 `--preset`으로도 줍니다. 프리셋을 고르면 `animation`보다 **먼저** 쓰입니다(둘 다 주면 프리셋이 이깁니다). 비우면 템플릿 값으로 돌아갑니다.
+
+#### 동작 종류
+
+동작 하나는 "무엇을(`kind`) 언제(`phase`, `ms`, `delay`) 얼마나(`amount`) 어느 쪽으로(`direction`)"입니다. `phase`는 `in`(등장, 자막 시작부터), `out`(사라짐, 자막 끝에서 거꾸로), `hold`(보이는 내내)입니다.
+
+| `kind` | 하는 일 | `amount`의 뜻 | ASS 명령 |
+|---|---|---|---|
+| `fade` | 투명해졌다 또렷해짐 | (쓰지 않음) | `\alpha` + `\t` |
+| `scale` | 크기가 변함. `direction`으로 가로·세로만도 가능 | 시작(끝) 크기 % | `\fscx`/`\fscy` + `\t` |
+| `move` | 한 방향에서 들어오거나 그 방향으로 나감 | 거리 px | `\move` |
+| `spin` | 평면 회전 | 시작(끝) 각도 ° | `\frz` + `\t` |
+| `flip` | 3D 회전(가로축·세로축) | 시작(끝) 각도 ° | `\frx`/`\fry` + `\t` |
+| `blur` | 번졌다 또렷해짐 | 시작(끝) 번짐 | `\blur` + `\t` |
+| `shear` | 기울었다 펴짐 | 기울기 | `\fax`/`\fay` + `\t` |
+| `wipe` | 한쪽에서 펼쳐지거나 차오름 | (쓰지 않음) | `\clip` + `\t` |
+| `flash` | 흰색으로 번쩍였다 제 색으로 | (쓰지 않음) | `\1c` + `\t` |
+| `shake` | 계속 흔들림. `direction`이 없으면 각도, 있으면 자리 | 각도 ° 또는 거리 px | `\frz` 반복 |
+| `float` | 계속 떠다님 | 거리 px | `\org` + `\frz` 반복 |
+| `breathe` | 계속 커졌다 작아짐 | 커지는 % | `\fscx`/`\fscy` 반복 |
+| `glow` | 계속 번쩍임 | 더할 번짐 | `\blur` 반복 |
+| `reveal` | 글자·단어마다 등장(`reveal`: `type`·`pop`·`karaoke`·`glitch`) | 글리치의 튐 정도 | 조각마다 `\r` + `\t` |
+| `wave` | 글자·단어마다 시작을 늦춘 같은 흔들림(물결) | 크기 % 또는 각도 ° | 조각마다 `\r` + `\t` 반복 |
+
+공통 항목은 `ms`(등장·사라짐은 길이, 계속은 한 주기), `delay`(시작을 늦춤), `ease`(`linear`·`in`·`out`·`in-out`), `overshoot`(제자리를 지나쳤다 돌아오는 정도 %), `unit`(`char`·`word`), `stagger`(조각 사이 간격 ms)입니다.
+
+#### 지켜야 하는 규칙
+
+- ASS는 이벤트 하나에 `\move`를 한 번만 씁니다. 프리셋에도 `move` 동작은 하나만 둡니다.
+- 조각별 동작(`reveal`·`wave`)도 하나만 둡니다. 글자마다 명령이 두 번 붙으면 서로 덮어씁니다.
+- `hold` 동작은 **등장이 끝난 뒤** 시작합니다. 그러지 않으면 등장 명령과 같은 값을 건드려 싸웁니다.
+- `\pos`는 `\t`로 바꿀 수 없어 **반복해서 떠다니는 움직임**(`float`, 자리 `shake`)은 `\org`을 글자에서 4000px 떨어진 곳에 두고 `\frz`를 아주 조금 흔듭니다. 반지름이 크면 호가 거의 직선이라 위아래로 뜨는 것처럼 보이고 기울기는 눈에 띄지 않습니다.
+- `wipe`는 글자 사각형을 알아야 해서 자막에만 쓸 수 있습니다(화면 제목·시트에는 빠집니다). `\clip`은 사각형이라 원형 마스크는 못 만듭니다.
+- 계속되는 동작이 만드는 `\t` 수는 한계가 있어, 자막이 길면 주기를 늘려 맞춥니다.
+
+#### 내가 만들기
+
+```bash
+r4-subtitles presets list                              # 팩별 목록
+r4-subtitles presets show blur-zoom                    # 내용을 JSON으로
+r4-subtitles presets export from-below mine.json       # 내보내서 고치기
+r4-subtitles presets new mine.json --name my-move --label "내 움직임"
+r4-subtitles presets check                             # 모든 프리셋이 명령을 만드는지
+r4-subtitles preview out.mp4 --preset mine.json --seconds 2 --fonts-dir .fonts
+r4-subtitles reel presets.mp4 --preset-pack short --seconds 1.6 --fonts-dir .fonts
+```
+
+```json
+{
+  "name": "my-move",
+  "label": "내 움직임",
+  "pack": "user",
+  "steps": [
+    { "kind": "move", "phase": "in", "direction": "up", "amount": 80, "ms": 320, "ease": "out" },
+    { "kind": "fade", "phase": "in", "ms": 200 },
+    { "kind": "breathe", "phase": "hold", "ms": 900, "amount": 5 }
+  ]
+}
+```
+
+JSON을 `R4_PRESETS_DIR` 디렉터리에 넣으면 **내 프리셋** 팩으로 목록·편집기·API에 함께 나오고 이름으로 쓸 수 있습니다(같은 이름이면 내 것이 이깁니다). 워커·API 컨테이너에도 같은 디렉터리를 붙여야 실제 렌더에 적용됩니다. 파일 경로를 `--preset mine.json`처럼 바로 줄 수도 있습니다.
+
 ### 그라데이션
 
 ASS에는 그라데이션이 없습니다. `gradient_color`가 있으면 앞 층 글자를 24개 띠로 나눠, 띠마다 색을 조금씩 바꾼 같은 글자를 `\clip`(사각형)으로 잘라 겹칩니다(`gradient_strips`). 띠는 겹치지 않으므로 반투명 겹침이 생기지 않고, 첫 띠와 끝 띠는 화면 끝까지 늘려 외곽선·그림자가 잘리지 않습니다. 띠의 위치는 글자 폭·높이를 재서 정하며(`text_block`, 글꼴 메트릭) 글꼴을 못 찾으면 어림값이라 조금 어긋날 수 있습니다. libass는 같은 층·같은 시간의 이벤트를 겹치지 않게 위로 쌓으므로 띠에 `\pos`를 붙여 자리를 고정합니다. 이동하는 움직임(슬라이드·바운스)에서는 `\clip`도 `\t`로 함께 움직여 띠가 글자를 따라가고, 크기가 변하는 움직임(팝·줌·맥박)에서는 변하는 동안 잠깐 어긋날 수 있습니다. 속 빈 글자는 선 색(`\3c`)이 흐릅니다. 입체 돌출·바깥 테두리 층은 단색 그대로입니다.
@@ -153,6 +224,7 @@ ASS에는 그라데이션이 없습니다. `gradient_color`가 있으면 앞 층
 | `color`, `outline_color`, `outline` | 채움 색(`#RRGGBB[AA]`), 외곽선 색·두께. `circle`은 `color`가 선 색 | 노랑 / 검정 / 2 |
 | `angle` | 기울기(도) | 0 |
 | `animation`, `animation_ms` | 움직임(글자 단위 움직임 제외). 팝·바운스·슬라이드·페이드·줌·흔들림·맥박 | `none` |
+| `preset` | 모션 프리셋 이름. 주면 `animation`보다 먼저 씁니다 | (없음) |
 
 내장 도형은 ASS 드로잉(`\p1`)으로 자막 문서에 들어가므로 자막과 같은 libass 경로로 그려지고, 움직임도 같은 명령으로 붙으며 편집기 정확 미리보기에 그대로 나옵니다(`stickers list`로 목록, `r4-subtitles preview one.mp4 --sticker '{"kind":"arrow-down","animation":"bounce"}'`). 이미지 스티커는 libass가 못 그리므로 영상 합성 단계에서 FFmpeg `overlay`로 얹습니다(`-filter_complex`, 시각은 `enable=between`). 이미지는 워커의 `R4_STICKERS_DIR`(명령줄은 `--stickers-dir`)에 미리 넣어 두며, 업로드 화면은 없습니다. 이미지에는 움직임이 붙지 않고 정확 미리보기에도 나오지 않습니다. `GET /stickers`가 종류와(디렉터리가 API에도 있으면) 이미지 목록을 돌려줍니다.
 

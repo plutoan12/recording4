@@ -61,6 +61,14 @@ from pipeline.subtitle_motion import (
     motion_offset,
     motion_tags,
 )
+from pipeline.subtitle_presets import (
+    MotionPreset,
+    PresetBox,
+    preset_offset,
+    preset_runs,
+    preset_tags,
+    resolve_preset,
+)
 from pipeline.subtitles import text_width
 
 TEMPLATE_NAME = r"^[a-z0-9][a-z0-9-]{0,39}$"
@@ -147,6 +155,18 @@ class TextBlock:
     height: float
 
 
+def _preset_box(block: TextBlock | None) -> PresetBox | None:
+    """글자 사각형을 프리셋 펼치기가 쓰는 네 모서리로 바꿉니다."""
+    if block is None:
+        return None
+    return PresetBox(
+        left=block.left,
+        top=block.top,
+        right=block.left + block.width,
+        bottom=block.top + block.height,
+    )
+
+
 class SubtitleTemplate(BaseModel):
     """자막 모양 한 벌. 값은 모두 검증되며 JSON으로 저장·복원할 수 있습니다."""
 
@@ -202,6 +222,9 @@ class SubtitleTemplate(BaseModel):
     # 한 주기입니다. 화면 제목과 미리보기 시트에는 적용하지 않습니다.
     animation: Animation = "none"
     animation_ms: int | None = Field(default=None, ge=40, le=3000)
+    # 모션 프리셋 이름(pipeline.subtitle_presets). 주면 `animation`보다 먼저 씁니다.
+    # 내장 프리셋이거나 `R4_PRESETS_DIR`에 넣은 JSON 프리셋의 이름입니다.
+    preset: str = Field(default="", max_length=40, pattern=r"^$|^[a-z][a-z0-9-]{1,39}$")
     # 그라데이션 끝 색. 비우면 단색. 글자 색(속 빈 글자는 선 색)에서 이 색으로 위→아래
     # (vertical) 또는 왼쪽→오른쪽(horizontal)으로 변합니다.
     gradient_color: str = ""
@@ -363,13 +386,20 @@ class SubtitleTemplate(BaseModel):
     def _override_inner(self) -> str:
         return f"\\blur{self.glow:g}" if self.glow else ""
 
+    def motion_preset(self) -> MotionPreset | None:
+        """이 템플릿이 쓰는 모션 프리셋. 이름이 없으면 None(모르는 이름이면 ValueError)."""
+        return resolve_preset(self.preset)
+
     @property
     def animated(self) -> bool:
-        return self.animation != "none"
+        return bool(self.preset) or self.animation != "none"
 
     @property
     def moves(self) -> bool:
         """자리를 `\\move`로 정하는 움직임인지(그러면 `\\pos`를 쓰지 않습니다)."""
+        preset = self.motion_preset()
+        if preset is not None:
+            return preset.moves
         return self.animation in MOVING
 
     @property
@@ -377,8 +407,18 @@ class SubtitleTemplate(BaseModel):
         return self.animation_ms or ANIMATION_DEFAULT_MS[self.animation]
 
     @property
+    def karaoke(self) -> bool:
+        """말하는 단어를 강조하는 움직임인지. 그러면 `[[...]]` 강조 색과 겹치지 않게 뺍니다."""
+        preset = self.motion_preset()
+        if preset is not None:
+            run = preset.run_step
+            return run is not None and run.reveal == "karaoke"
+        return self.animation == "karaoke"
+
+    @property
     def animation_label(self) -> str:
-        return ANIMATION_LABELS[self.animation]
+        preset = self.motion_preset()
+        return preset.label if preset is not None else ANIMATION_LABELS[self.animation]
 
     def with_animation(self, kind: str, ms: int | None = None) -> SubtitleTemplate:
         """움직임만 바꾼 템플릿. 값은 다시 검증합니다(모르는 종류면 ValueError)."""
@@ -391,10 +431,34 @@ class SubtitleTemplate(BaseModel):
                 f"모르는 움직임입니다: {kind}. 쓸 수 있는 것: {', '.join(ANIMATION_LABELS)}"
             ) from None
 
-    def motion_tags(self, duration_ms: int | None, anchor: tuple[float, float] | None) -> str:
+    def with_preset(self, name: str) -> SubtitleTemplate:
+        """모션 프리셋만 바꾼 템플릿. 모르는 이름이면 ValueError입니다."""
+        resolve_preset(name)
+        return SubtitleTemplate.model_validate({**self.model_dump(), "preset": name})
+
+    def motion_tags(
+        self,
+        duration_ms: int | None,
+        anchor: tuple[float, float] | None,
+        block: TextBlock | None = None,
+        play_size: tuple[int, int] = (1080, 1920),
+        base_color: str | None = None,
+    ) -> str:
         """이벤트 전체(모든 층)에 붙는 움직임 명령. 시간이 없으면(정지 화면) 빈 문자열."""
         if not duration_ms or not self.animated:
             return ""
+        preset = self.motion_preset()
+        if preset is not None:
+            return preset_tags(
+                preset,
+                duration_ms=duration_ms,
+                anchor=anchor,
+                angle=self.angle,
+                glow=self.glow,
+                base_tag=self._ass_color_tag(base_color or self.base_color),
+                box=_preset_box(block),
+                play_size=play_size,
+            )
         return motion_tags(
             self.animation,
             self.motion_ms,
@@ -412,10 +476,22 @@ class SubtitleTemplate(BaseModel):
         base_color: str | None = None,
         word_times: list[tuple[int, int]] | None = None,
     ) -> str:
-        """조각별 움직임(타자기·단어별·노래방)을 본문에 넣습니다."""
-        if not duration_ms or self.animation not in PER_RUN:
+        """조각별 움직임(타자기·단어별·노래방·물결·글리치)을 본문에 넣습니다."""
+        preset = self.motion_preset()
+        if not duration_ms or (preset is None and self.animation not in PER_RUN):
             return body
         base = base_color or self.base_color
+        if preset is not None:
+            return preset_runs(
+                preset,
+                body,
+                duration_ms=duration_ms,
+                prefix=prefix,
+                hollow=self.hollow,
+                accent=self._ass_color_tag(self.accent_color or KARAOKE_ACCENT),
+                base=self._ass_color_tag(base),
+                word_times=self._decorated_word_times(word_times),
+            )
         return animate_runs(
             self.animation,
             body,
@@ -587,7 +663,11 @@ class SubtitleTemplate(BaseModel):
                 rect = (x1, 0, x2, play_height)
             strips.append((tag, rect, color))
         out = []
-        offset = motion_offset(self.animation, self.motion_ms) if self.animated else None
+        preset = self.motion_preset()
+        if preset is not None:
+            offset = preset_offset(preset)
+        else:
+            offset = motion_offset(self.animation, self.motion_ms) if self.animated else None
         for tag, (x1, y1, x2, y2), _ in strips:
             clip = f"\\clip({x1:.0f},{y1:.0f},{x2:.0f},{y2:.0f})"
             if offset:
@@ -616,10 +696,10 @@ class SubtitleTemplate(BaseModel):
         (글자가 차지하는 사각형)이 있어야 띠로 나눌 수 있고, 없으면 시작 색 단색입니다.
         `word_times`는 단어별 (시작, 끝) ms로 노래방·단어별 등장이 씁니다.
         """
-        lead = self.motion_tags(duration_ms, anchor)
-        lead = "{" + lead + "}" if lead else ""
+        lead_tags = self.motion_tags(duration_ms, anchor, block, play_size)
+        lead = "{" + lead_tags + "}" if lead_tags else ""
         # 노래방은 단어 색을 스스로 바꾸므로 `[[...]]` 강조와 겹치지 않게 뺍니다.
-        accent = self.animation != "karaoke" or not duration_ms
+        accent = not self.karaoke or not duration_ms
         blur = self._override_inner()
         layers: list[tuple[int, str, str]] = []
         layer = 0
@@ -652,7 +732,12 @@ class SubtitleTemplate(BaseModel):
                 body = self._animate(
                     front, duration_ms, blur if not self.layered else "", color, word_times
                 )
-                layers.append((layer, lead + "{" + fixed + strip + "}" + front_tags + body, ""))
+                # 색 번쩍처럼 색으로 돌아오는 동작은 띠마다 제 색으로 돌아와야 합니다.
+                strip_tags = self.motion_tags(duration_ms, anchor, block, play_size, color)
+                strip_lead = "{" + strip_tags + "}" if strip_tags else ""
+                layers.append(
+                    (layer, strip_lead + "{" + fixed + strip + "}" + front_tags + body, "")
+                )
             return layers
         front = self.body_text(text, accent=accent)
         body = self._animate(
@@ -2501,7 +2586,7 @@ def rounded_box_text(
     box_x = anchor_x + {"left": -pad, "center": 0, "right": pad}[horizontal]
     box_y = anchor_y + {"top": -pad, "middle": 0, "bottom": pad}[vertical]
     border = template.outline2 if template.border_style == "box-outline" else 0
-    motion = template.motion_tags(duration_ms, (box_x, box_y))
+    motion = template.motion_tags(duration_ms, (box_x, box_y), block)
     tags = "" if template.moves and motion else f"\\pos({box_x:.0f},{box_y:.0f})"
     tags += (
         f"\\an{int(alignment_for(vertical, horizontal))}\\p1\\shad0"

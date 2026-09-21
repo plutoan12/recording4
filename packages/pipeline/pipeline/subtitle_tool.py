@@ -52,6 +52,15 @@ from pipeline.subtitle_files import (
 )
 from pipeline.subtitle_fonts import FONT_FAMILIES
 from pipeline.subtitle_motion import ANIMATION_LABELS
+from pipeline.subtitle_presets import (
+    PACK_LABELS,
+    MotionPreset,
+    all_presets,
+    presets_by_pack,
+    register_preset,
+    resolve_preset,
+    user_presets_dir,
+)
 from pipeline.subtitle_stickers import (
     STICKER_LABELS,
     Sticker,
@@ -206,9 +215,17 @@ def _add_animation(parser: argparse.ArgumentParser) -> None:
         type=int,
         help="움직임 시간(ms, 40~3000). 등장 시간·글자당·단어당·한 주기. 비우면 종류별 기본값",
     )
+    parser.add_argument(
+        "--preset",
+        help=(
+            "모션 프리셋 이름 또는 JSON 파일. 움직임(--animation)보다 먼저 씁니다. "
+            "목록은 `presets list`."
+        ),
+    )
 
 
 def _apply_animation(template: SubtitleTemplate, args: argparse.Namespace) -> SubtitleTemplate:
+    template = _apply_preset(template, args)
     kind = getattr(args, "animation", None)
     ms = getattr(args, "animation_ms", None)
     if kind is None and ms is None:
@@ -217,6 +234,97 @@ def _apply_animation(template: SubtitleTemplate, args: argparse.Namespace) -> Su
         return template.with_animation(kind or template.animation, ms or template.animation_ms)
     except ValueError as exc:
         raise ToolError(str(exc)) from None
+
+
+def _apply_preset(template: SubtitleTemplate, args: argparse.Namespace) -> SubtitleTemplate:
+    """`--preset`(이름 또는 JSON 파일)을 템플릿에 붙입니다."""
+    given = getattr(args, "preset", None)
+    if not given:
+        return template
+    try:
+        preset = resolve_preset(given)
+        if preset is None:
+            return template
+        # JSON 파일로 준 프리셋도 이름으로 찾을 수 있게 등록한 뒤 붙입니다.
+        register_preset(preset)
+        return template.with_preset(preset.name)
+    except ValueError as exc:
+        raise ToolError(str(exc)) from None
+
+
+def cmd_presets(args: argparse.Namespace) -> int:
+    """모션 프리셋 목록·내용·JSON 내보내기·새로 만들기·검사."""
+    presets = all_presets()
+    if args.action == "list":
+        for pack, items in presets_by_pack().items():
+            print(f"[{PACK_LABELS[pack]}] {len(items)}종")
+            for preset in items:
+                print(f"  {preset.name:<20} {preset.label:<16} {preset.summary}")
+        directory = user_presets_dir()
+        print(f"\n내 프리셋 디렉터리: {directory or '(R4_PRESETS_DIR 없음)'}")
+        return EXIT_OK
+    if args.action == "check":
+        bad = _broken_presets(presets.values())
+        for name, reason in bad:
+            print(f"{name}: {reason}")
+        print(f"프리셋 {len(presets)}종 가운데 {len(bad)}종에 문제가 있습니다.")
+        return EXIT_ERROR if bad else EXIT_OK
+    if args.action == "new":
+        preset = MotionPreset(
+            name=args.name,
+            label=args.label or args.name,
+            pack="user",
+            description="직접 만든 프리셋",
+            steps=[
+                {"kind": "move", "phase": "in", "direction": "up", "amount": 80, "ms": 320},
+                {"kind": "fade", "phase": "in", "ms": 200},
+            ],
+        )
+        _write_text(args.output, preset.to_json())
+        print(f"{args.output}: 새 프리셋을 썼습니다. 값을 고쳐 --preset로 쓰세요.")
+        return EXIT_OK
+    try:
+        preset = resolve_preset(args.name)
+    except ValueError as exc:
+        raise ToolError(str(exc)) from None
+    assert preset is not None
+    if args.action == "show":
+        print(preset.to_json(), end="")
+        return EXIT_OK
+    _write_text(args.output, preset.to_json())
+    print(f"{args.output}: 프리셋 {preset.name}을 JSON으로 썼습니다. 고쳐서 --preset로 쓰세요.")
+    return EXIT_OK
+
+
+def _broken_presets(presets) -> list[tuple[str, str]]:  # noqa: ANN001
+    """실제로 명령을 만들어 보고 아무것도 나오지 않거나 오류가 나는 프리셋을 찾습니다."""
+    from pipeline.subtitle_presets import PresetBox, preset_runs, preset_tags
+
+    box = PresetBox(left=200, top=1500, right=880, bottom=1600)
+    out: list[tuple[str, str]] = []
+    for preset in presets:
+        try:
+            tags = preset_tags(
+                preset,
+                duration_ms=2000,
+                anchor=(540, 1600),
+                base_tag="\\1c&HFFFFFF&",
+                box=box,
+                play_size=(1080, 1920),
+            )
+            runs = preset_runs(
+                preset,
+                "가나 다라",
+                duration_ms=2000,
+                accent="\\1c&HFFE14D&",
+                base="\\1c&HFFFFFF&",
+            )
+        except ValueError as exc:
+            out.append((preset.name, str(exc)))
+            continue
+        if not tags and runs == "가나 다라":
+            out.append((preset.name, "명령이 만들어지지 않습니다(동작을 확인하세요)."))
+    return out
 
 
 def rules_from(args: argparse.Namespace) -> SubtitleRules:
@@ -847,9 +955,26 @@ def _chosen_templates(args: argparse.Namespace) -> list[SubtitleTemplate]:
     return [t for templates in grouped.values() for t in templates]
 
 
+def _preset_reel_templates(args: argparse.Namespace) -> list[SubtitleTemplate]:
+    """프리셋 팩을 보여 줄 때 쓰는 템플릿 목록(템플릿 하나 + 프리셋마다 한 벌)."""
+    grouped = presets_by_pack()
+    packs = list(grouped) if args.preset_pack == "all" else [args.preset_pack]
+    chosen = [preset for pack in packs for preset in grouped.get(pack, [])]
+    if not chosen:
+        raise ToolError(f"프리셋이 없습니다: {args.preset_pack}")
+    try:
+        base = resolve_template(args.templates[0] if args.templates else "default")
+        return [base.with_preset(preset.name) for preset in chosen]
+    except ValueError as exc:
+        raise ToolError(str(exc)) from None
+
+
 def cmd_reel(args: argparse.Namespace) -> int:
     fonts = fonts_dir_from(args)
-    chosen = [_apply_animation(t, args) for t in _chosen_templates(args)]
+    if getattr(args, "preset_pack", None):
+        chosen = _preset_reel_templates(args)
+    else:
+        chosen = [_apply_animation(t, args) for t in _chosen_templates(args)]
     if args.font_size is not None and not 20 <= args.font_size <= 120:
         raise ToolError("글자 크기는 20~120이어야 합니다.")
     try:
@@ -876,7 +1001,8 @@ def cmd_reel(args: argparse.Namespace) -> int:
         fonts=fonts,
         background=_background(args.background),
     )
-    print(f"{args.output}: 템플릿 {len(chosen)}종을 {seconds:g}초 영상으로 썼습니다.")
+    what = "프리셋" if getattr(args, "preset_pack", None) else "템플릿"
+    print(f"{args.output}: {what} {len(chosen)}종을 {seconds:g}초 영상으로 썼습니다.")
     return EXIT_OK
 
 
@@ -1060,10 +1186,32 @@ def build_parser() -> argparse.ArgumentParser:
     reel.add_argument("--font-size", type=int, help="글자 크기. 템플릿 값보다 우선합니다.")
     reel.add_argument("--background", default="#141414", help="배경색 #RRGGBB")
     reel.add_argument("--no-captions", action="store_true", help="화면 위 템플릿 이름을 뺍니다.")
+    reel.add_argument(
+        "--preset-pack",
+        choices=("basic", "short", "user", "all"),
+        help="템플릿 대신 모션 프리셋 팩을 차례로 보여 줍니다(--templates의 첫 템플릿에 붙임).",
+    )
     reel.add_argument("--ass", type=Path, help="영상 ASS 파일도 함께 저장")
     _add_animation(reel)
     _add_fonts_dir(reel)
     reel.set_defaults(run=cmd_reel)
+
+    presets = sub.add_parser("presets", help="모션 프리셋 목록·내용·JSON 내보내기·새로 만들기·검사")
+    preset_action = presets.add_subparsers(dest="action", required=True)
+    preset_action.add_parser("list", help="프리셋 목록(팩별)")
+    preset_action.add_parser("check", help="프리셋이 실제로 ASS 명령을 만드는지 확인")
+    show_preset = preset_action.add_parser("show", help="프리셋 내용을 JSON으로 출력")
+    show_preset.add_argument("name", help="프리셋 이름 또는 JSON 파일")
+    export_preset = preset_action.add_parser(
+        "export", help="프리셋을 JSON 파일로 저장 (고쳐서 --preset로 사용)"
+    )
+    export_preset.add_argument("name", help="프리셋 이름 또는 JSON 파일")
+    export_preset.add_argument("output", type=Path)
+    new_preset = preset_action.add_parser("new", help="새 프리셋 JSON 뼈대 만들기")
+    new_preset.add_argument("output", type=Path)
+    new_preset.add_argument("--name", required=True, help="영문 소문자·숫자·하이픈")
+    new_preset.add_argument("--label", default="", help="화면에 보이는 이름. 비우면 --name")
+    presets.set_defaults(run=cmd_presets)
     return parser
 
 

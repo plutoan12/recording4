@@ -17,6 +17,7 @@ type Template = { name: string; label: string; description: string; category: st
   animation: string; animation_ms: number | null; animation_label: string;
   gradient_color: string; gradient_direction: 'vertical' | 'horizontal' }
 type AnimationChoice = { name: string; label: string }
+type PresetChoice = { name: string; label: string; pack: string; pack_label: string; summary: string }
 type StickerKind = { kind: string; label: string; images?: string[] }
 // 워커의 pipeline.subtitle_stickers.Sticker와 같은 항목입니다. 시각은 원본 영상 기준 초입니다.
 type Sticker = { kind: string; image?: string | null; x: number; y: number; size: number; start: number; end: number | null;
@@ -126,6 +127,8 @@ export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWo
   const [templates,setTemplates] = useState<Template[]>([])
   // 빈 값이면 템플릿의 움직임을 그대로 씁니다.
   const [animation,setAnimation] = useState('')
+  const [preset,setPreset] = useState('')
+  const [presets,setPresets] = useState<PresetChoice[]>([])
   const [animations,setAnimations] = useState<AnimationChoice[]>([])
   const [stickerKinds,setStickerKinds] = useState<StickerKind[]>([])
   const [stickers,setStickers] = useState<Sticker[]>([])
@@ -160,6 +163,7 @@ export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWo
     // 내장 템플릿 목록은 서버가 정합니다. 못 받으면 기본 템플릿만 남겨 렌더는 계속할 수 있게 합니다.
     request<Template[]>('/subtitle-templates').then(setTemplates).catch(() => setTemplates([]))
     request<AnimationChoice[]>('/subtitle-animations').then(setAnimations).catch(() => setAnimations([]))
+    request<PresetChoice[]>('/subtitle-presets').then(setPresets).catch(() => setPresets([]))
     request<StickerKind[]>('/stickers').then(setStickerKinds).catch(() => setStickerKinds([]))
   }, [])
 
@@ -293,14 +297,22 @@ export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWo
           {templates.filter(t => t.category_label === group).map(t => <option key={t.name} value={t.name} title={t.description}>{t.label} ({t.name})</option>)}
         </optgroup>)}
       </select></label>
-      <label>자막 움직임<select value={animation} disabled={!burn} onChange={e=>setAnimation(e.target.value)}>
+      <label>모션 프리셋<select value={preset} disabled={!burn} onChange={e=>setPreset(e.target.value)}>
+        <option value="">쓰지 않음(템플릿 값)</option>
+        {[...new Map(presets.map(p => [p.pack, p.pack_label])).entries()].map(([pack, packLabel]) => (
+          <optgroup key={pack} label={packLabel}>
+            {presets.filter(p => p.pack === pack).map(p => <option key={p.name} value={p.name} title={p.summary}>{p.label}</option>)}
+          </optgroup>
+        ))}
+      </select></label>
+      <label>자막 움직임<select value={animation} disabled={!burn||!!preset} onChange={e=>setAnimation(e.target.value)}>
         <option value="">템플릿 기본{(() => { const chosen = templates.find(t => t.name === template); return chosen ? ` (${chosen.animation_label})` : '' })()}</option>
         {animations.map(a => <option key={a.name} value={a.name}>{a.label}</option>)}
       </select></label>
       {burn && (() => { const chosen = templates.find(t => t.name === template); return chosen ? <div className="template-chosen">
         <TemplatePreview template={chosen} animation={animation || undefined} />
-        <SubtitlePreview template={chosen.name} animation={animation || undefined} text={captions.find(c => c.text.trim())?.text.split('\n')[0]} stickers={previewStickers} />
-        <p>{chosen.description} 영상에 굽는 자막의 모양이며 SRT·VTT 파일에는 영향이 없습니다. 위 첫 줄은 CSS 근사이고, 아래 세로 화면은 워커와 같은 libass 렌더(정확 미리보기)입니다.{chosen.accent_color && ' 자막 내용에서 [[이렇게]] 감싼 부분은 강조 색으로 그려지고, 파일에는 괄호 없이 나갑니다.'}{(animation || chosen.animation !== 'none') && ' 움직임은 자막마다 시작 시각에 맞춰 붙고 화면 제목에는 붙지 않습니다.'}</p>
+        <SubtitlePreview template={chosen.name} animation={animation || undefined} preset={preset || undefined} text={captions.find(c => c.text.trim())?.text.split('\n')[0]} stickers={previewStickers} />
+        <p>{chosen.description} 영상에 굽는 자막의 모양이며 SRT·VTT 파일에는 영향이 없습니다. 위 첫 줄은 CSS 근사이고, 아래 세로 화면은 워커와 같은 libass 렌더(정확 미리보기)입니다.{chosen.accent_color && ' 자막 내용에서 [[이렇게]] 감싼 부분은 강조 색으로 그려지고, 파일에는 괄호 없이 나갑니다.'}{(animation || preset || chosen.animation !== 'none') && ' 움직임은 자막마다 시작 시각에 맞춰 붙고 화면 제목에는 붙지 않습니다.'}{preset && ' 모션 프리셋을 고르면 움직임 선택보다 먼저 쓰입니다.'}</p>
       </div> : null })()}
       {burn && templates.length > 0 && <details className="template-gallery"><summary>템플릿 전체 미리보기 ({templates.length}종)</summary>
         <div className="template-grid">{templates.map(t => <button type="button" key={t.name} className={t.name === template ? 'selected' : ''} onClick={() => setTemplate(t.name)} title={t.description}>
@@ -358,11 +370,11 @@ export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWo
           setMessage('저장된 대본의 문장 경계로 후보를 만들었습니다. AI 인기도 예측은 아닙니다.')
         })}>구간 후보 찾기</button>
         <button disabled={busy || end <= start || end-start > 180} onClick={() => void act(async () => {
-          await request('/clips', {method:'POST', body: JSON.stringify({source_asset_id:assetId, start, end, mode, focus_x:focus, title, burn_subtitles:burn, caption_language:captionLanguage, subtitle_template:template, subtitle_animation:animation || null, cues:captions, stickers})})
+          await request('/clips', {method:'POST', body: JSON.stringify({source_asset_id:assetId, start, end, mode, focus_x:focus, title, burn_subtitles:burn, caption_language:captionLanguage, subtitle_template:template, subtitle_animation:animation || null, subtitle_preset:preset || null, cues:captions, stickers})})
           setMessage('새 편집본의 렌더를 요청했습니다.'); await refresh()
         })}>숏폼 렌더</button>
       </div>
-      <button disabled={busy||end<=start||end-start>180} onClick={()=>{onWorkflow({source_asset_id:assetId,start,end,mode,focus_x:focus,title,burn_subtitles:burn,caption_language:captionLanguage,subtitle_template:template,subtitle_animation:animation||undefined,cues:captions,stickers});setMessage('아래 단계별 제작 화면에 선택 구간을 전달했습니다.')}}>선택 구간을 번역·더빙 단계로 보내기</button>
+      <button disabled={busy||end<=start||end-start>180} onClick={()=>{onWorkflow({source_asset_id:assetId,start,end,mode,focus_x:focus,title,burn_subtitles:burn,caption_language:captionLanguage,subtitle_template:template,subtitle_animation:animation||undefined,subtitle_preset:preset||undefined,cues:captions,stickers});setMessage('아래 단계별 제작 화면에 선택 구간을 전달했습니다.')}}>선택 구간을 번역·더빙 단계로 보내기</button>
       {suggestions.map((s,i) => <button key={i} onClick={() => {setStart(s.start);setEnd(s.end);setTitle(s.title)}}>{s.start.toFixed(1)}–{s.end.toFixed(1)}초 · {s.title}</button>)}
     </>}
     {message && <p role="status">{message}</p>}
