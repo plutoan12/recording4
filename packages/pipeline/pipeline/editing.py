@@ -33,6 +33,7 @@ class EditSpec(BaseModel):
     burn_subtitles: bool = True
     mosaic_faces: bool = False
     mosaic_size: int = Field(default=20, ge=4, le=100)
+    privacy_backend: Literal["deface", "openscrub", "egoblur"] = "deface"
     caption_language: str | None = Field(default=None, pattern=r"^[a-z]{2,3}$")
     font_size: int = Field(default=64, ge=20, le=120)
     cues: list[Cue] = Field(default_factory=list, max_length=3000)

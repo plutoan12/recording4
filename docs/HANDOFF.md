@@ -1474,3 +1474,12 @@ CI가 토큰 없이도 이 경로를 점검합니다(`화자 분리 토큰 오�
 ### 남은 작업
 
 - 싱크 보정 실측(`verify-align` 라벨 CI)과 자막 두 벌(구운 자막 + YouTube 트랙) 문제는 그대로입니다.
+## 2026-09-21: privacy model weights and selectable redaction path
+
+- Downloaded the MIT CenterFace model for OpenScrub and verified its pinned SHA-256 in a private evaluation directory. Deface 1.5.0 already ships a bundled CenterFace weight in the worker image.
+- Downloaded the public Apache-2.0 EgoBlur Gen1 face and license-plate archives from the Project Aria/Hugging Face release; extracted weights and kept all model files private. The archives are not committed.
+- Ran OpenScrub CenterFace face-only mosaic on its sample video: 14/14 frames, 2560×1920 at 10 fps, AAC audio retained, and a non-empty audit report. EgoBlur Gen1 face weights also loaded and produced a non-empty transformed 640×480 sample frame; a full video run was stopped after roughly two minutes of CPU-only processing and is not claimed as a throughput or temporal-quality result. These are output-integrity smoke validations, not recall scores.
+- Added `privacy_backend` to `EditSpec` and a fail-closed worker adapter. `deface` remains the default; `openscrub` and `egoblur` require explicit server paths (`R4_OPENSCRUB_BINARY`, `R4_OPENSCRUB_FACE_MODEL`, `R4_EGOBLUR_BINARY`, `R4_EGOBLUR_FACE_MODEL`). Missing models, failed commands, empty output, and timeouts fail the render.
+- Management UI can select the backend when face redaction is enabled. EgoBlur is blur rather than mosaic, and its Gen1 Aria domain does not prove quality on ordinary YouTube video.
+- Validation: Docker worker `16 passed` for privacy/editing tests. Full CI and the current branch commit still need confirmation after this change. No paid call, publication, or operational-default change.
+- Detailed provenance and limitations: [privacy model report](quality/privacy-tools-20260921/REPORT.md).

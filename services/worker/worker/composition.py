@@ -195,6 +195,6 @@ def render_final(
         rendered = temp / "final.mp4"
         if clip and clip.mosaic_faces:
             mosaiced = temp / "mosaiced.mp4"
-            _mosaic_faces(rendered, mosaiced, clip.mosaic_size)
+            _mosaic_faces(rendered, mosaiced, clip.mosaic_size, clip.privacy_backend)
             rendered = mosaiced
         shutil.copyfile(rendered, output)

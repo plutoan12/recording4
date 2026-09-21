@@ -113,6 +113,27 @@ ffsubsync는 **chardet(LGPL)** 과 **webrtcvad**를 의존성으로 끌어옵니
 
 조회한 주요 라이선스 사본은 [third_party/licenses](../third_party/licenses)에 보관합니다. 설치 패키지의 라이선스·NOTICE도 그대로 유지합니다. FFmpeg는 빌드 옵션에 따라 조건이 달라지므로 실제 배포 바이너리와 소스 제공 조건을 확인해야 합니다. Python 라이브러리의 라이선스가 모델 가중치·API 서비스 약관까지 대체하지는 않습니다.
 
+### 얼굴 비식별화 백엔드
+
+숏폼 렌더의 `EditSpec.privacy_backend`로 얼굴 비식별화 구현을 선택할 수 있습니다.
+`deface`(기본)는 모자이크, `openscrub`는 CenterFace와 모자이크, `egoblur`는
+EgoBlur Gen1과 가우시안 블러를 사용합니다. 렌더 워커는 백엔드 실행 파일과 모델
+경로를 서버 환경 변수로만 받으며, 실행 실패·빈 출력·시간 초과는 성공으로 처리하지
+않습니다. 모델 파일은 저장소에 넣지 않습니다.
+
+```bash
+R4_DEFACE_BINARY=/usr/local/bin/deface
+R4_OPENSCRUB_BINARY=/opt/openscrub/bin/openscrub
+R4_OPENSCRUB_FACE_MODEL=/srv/models/centerface.onnx
+R4_EGOBLUR_BINARY=/opt/egoblur/bin/egoblur-gen1
+R4_EGOBLUR_FACE_MODEL=/srv/models/ego_blur_face.jit
+```
+
+OpenScrub·EgoBlur를 선택했는데 실행 파일이나 가중치가 없으면 `RenderError`로
+중단합니다. 기본 운영 경로는 비교 검증이 끝날 때까지 deface로 유지합니다. EgoBlur
+가중치는 Project Aria의 Gen1 공개 모델이며 Aria Gen2/일반 영상의 품질을 자동으로
+보증하지 않으므로 실제 배포 전 별도 표본 검증이 필요합니다.
+
 ## 실제로 연결한 기능
 
 - `/clips`: 구간·화면·자막·제목을 검증하고 불변 편집본 및 렌더 요청 생성.
