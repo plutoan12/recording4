@@ -1,3 +1,12 @@
+## 2026-09-21: 키네틱 팩 34종 추가 (프리셋 127종) (Claude)
+
+- 사용자 요청: "다른 프리셋도 있으면 추가시켜줘". [PR #36](https://github.com/plutoan12/recording4/pull/36) 후속 커밋. 담당: `pipeline/subtitle_presets.py`, 테스트·문서.
+- 새 팩 `kinetic`(키네틱) 34종: 천천히 커짐·기울어짐·흐려짐(`hold`로 둔 크기·회전·번짐이 등장 뒤부터 천천히 변함), 글자·단어별 블러/확대/회전 등장, 탱탱볼·고무줄·착지·펀치·충격파·젤리, 위로 던지기·아래로 떨어짐·흐려지며·뒤집히며·눌리며 사라짐, 네온 깜빡임·시계추·똑딱·천천히 숨쉬기·좌우로 떠다님, 자막용 미세 동작(자막 팝·살짝 올라오기·강조 줌·기울여 쾅).
+- 엔진: 조각별 등장 방식에 `blur`·`scale`·`spin` 추가(기존 `type`·`pop`·`karaoke`·`glitch`와 같은 토큰 분해를 씁니다). `shake`와 `float`는 둘 다 `\frz`를 계속 써서 섞으면 덮어쓰므로 합쳐서 하나만 두도록 막았습니다.
+- 버그 수정: 동작의 `amount`가 비움과 `0`을 구분하지 못해(`amount or 기본값`) "크기를 0으로"가 기본값 40%로 바뀌었습니다. `amount`를 `float | None`로 바꿔 상하 등장·가운데 펼치기·눌리며 사라짐이 실제로 0(libass 줄 높이를 위해 1%)에서 시작합니다. 내보내는 JSON에서도 비운 값은 빠집니다.
+- 검증: 실제 렌더로 글자별 블러·단어별 확대(조각이 차례로 나타남), 고무줄(가로로 늘었다 제자리), 착지, 상하 등장(얇은 선에서 펼쳐짐), 눌리며 사라짐(픽셀 22784 → 12598), 위로 던지기(세로 중심 787 → 662 뒤 사라짐)를 프레임·픽셀로 확인했습니다. 미리보기 영상이 30fps라 사라짐 구간 프레임을 잘못 골라 처음에 "동작 없음"으로 보였던 것을 바로잡았습니다. `presets check` 127종 통과.
+- 남은 것: 탱탱볼 등장의 넘어감은 긴 자막이 화면 밖으로 나가지 않게 42%에서 26%로 줄였습니다. 글자별 회전은 libass가 줄 기준점으로 돌려 각도를 키우면 글자가 크게 흔들립니다(기본 14°).
+
 ## 2026-09-21: 모션 프리셋 93종과 프리셋 만들기 (Claude)
 
 - 사용자 요청: 인스타그램 모션 프리셋 팩(프리미어 프로용, "90도회전·꾸물꾸물자막·파도타는·글리치·블러+줌" 등) 스크린샷과 함께 "깃허브에서 이런 프리셋을 만들 수 있도록 하는 코드들 깔아줘". [PR #36](https://github.com/plutoan12/recording4/pull/36) 후속 커밋, 같은 브랜치. 담당: `pipeline/subtitle_presets.py`(신규), `pipeline/subtitle_motion.py`(`run_slots`·`state_before` 공개), `pipeline/subtitle_templates.py`, `pipeline/editing.py`, `pipeline/subtitle_tool.py`, `worker/rendering.py`·`composition.py`, `adminapi/routers/editing.py`, `apps/web`(ClipEditor.tsx, SubtitlePreview.tsx, WorkflowPanel.tsx), `.github/workflows/ci.yml`, 테스트·문서.

@@ -463,7 +463,7 @@ def test_subtitle_templates_are_listed_and_a_clip_remembers_its_template(
     presets = client.get("/subtitle-presets", headers=auth_headers).json()
     names = {p["name"] for p in presets}
     assert {"from-below", "blur-zoom", "karaoke"} <= names
-    assert {p["pack_label"] for p in presets} == {"기본 팩", "숏폼 팩"}
+    assert {p["pack_label"] for p in presets} == {"기본 팩", "숏폼 팩", "키네틱 팩"}
     assert next(p for p in presets if p["name"] == "from-below")["label"] == "아래 등장"
     with_preset = client.post(
         "/clips", headers=auth_headers, json={**data, "subtitle_preset": "blur-zoom"}

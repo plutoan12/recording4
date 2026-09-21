@@ -48,6 +48,13 @@ def test_steps_reject_combinations_that_ass_cannot_draw():
     two_runs = [{"kind": "reveal"}, {"kind": "wave", "phase": "hold"}]
     with pytest.raises(ValidationError, match="한 번만"):
         MotionPreset(name="mine", label="내 것", steps=two_runs)
+    # 흔들림과 떠다님은 둘 다 `\frz`를 계속 써서 섞으면 서로 덮어씁니다.
+    spinning = [
+        {"kind": "shake", "phase": "hold"},
+        {"kind": "float", "phase": "hold", "direction": "vertical"},
+    ]
+    with pytest.raises(ValidationError, match="합쳐서 한 번만"):
+        MotionPreset(name="mine", label="내 것", steps=spinning)
     assert MotionPreset(name="mine", label="엑스", steps=[{"kind": "fade"}]).pack == "user"
 
 
@@ -142,7 +149,8 @@ def test_every_builtin_preset_makes_something_libass_can_draw():
         assert made or runs != "가나 다라", preset.name
         assert "{" not in made and "}" not in made, preset.name
     packs = presets_by_pack()
-    assert set(packs) == {"basic", "short"}
+    assert set(packs) == {"basic", "short", "kinetic"}
+    assert len(packs["kinetic"]) == 34
     assert sum(len(items) for items in packs.values()) == len(BUILTIN_PRESETS)
 
 
@@ -234,3 +242,36 @@ def test_worker_bakes_the_preset_chosen_in_the_editor(tmp_path):
         write_subtitles(
             path, EditSpec.model_validate({**spec.model_dump(), "subtitle_preset": "nope-nope"})
         )
+
+
+def test_amount_can_be_left_out_or_set_to_zero():
+    # 비우면 종류별 기본값입니다(흔들림 3°).
+    default = MotionPreset(
+        name="shaky", label="흔들", steps=[MotionStep(kind="shake", phase="hold", ms=400)]
+    )
+    assert "\\frz3" in preset_tags(default, duration_ms=1000, anchor=(540, 1600))
+    # 0도 뜻이 있습니다. 예전에는 비움과 구분되지 않아 기본값으로 바뀌었습니다.
+    sharpen = MotionPreset(
+        name="sharpen",
+        label="또렷",
+        steps=[MotionStep(kind="blur", phase="out", amount=0, ms=200)],
+    )
+    assert "\\t(800,1000,\\blur0)" in preset_tags(sharpen, duration_ms=1000, anchor=None)
+    # 크기 0은 줄 높이가 사라지지 않게 아주 얇게 둡니다.
+    assert "\\fscy1" in tags("split-vertical")
+    # 내보낸 JSON에는 비운 값이 들어가지 않습니다.
+    assert "amount" not in json.loads(default.to_json())["steps"][0]
+
+
+def test_letters_can_appear_with_blur_zoom_or_spin():
+    for name, tag in [
+        ("letter-blur", "\\blur9"),
+        ("letter-zoom", "\\fscx55"),
+        ("letter-spin", "\\frz14"),
+    ]:
+        body = preset_runs(get_preset(name), "가나", duration_ms=1500)
+        assert body.count("{\\r") == 2 and tag in body
+        # 조각이 제 시각에 나타나고 값이 제자리로 돌아옵니다.
+        assert "\\3a&HFF&" in body and "\\t(55,56," in body
+    # 단어 단위는 단어마다 한 번입니다.
+    assert preset_runs(get_preset("word-zoom"), "가나 다라", duration_ms=1500).count("{\\r") == 2

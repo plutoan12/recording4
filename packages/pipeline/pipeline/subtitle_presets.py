@@ -93,12 +93,13 @@ Phase = Literal["in", "out", "hold"]
 Ease = Literal["linear", "in", "out", "in-out"]
 Direction = Literal["none", "up", "down", "left", "right", "both", "vertical", "horizontal"]
 Unit = Literal["char", "word"]
-Reveal = Literal["type", "pop", "karaoke", "glitch"]
-Pack = Literal["basic", "short", "user"]
+Reveal = Literal["type", "pop", "karaoke", "glitch", "blur", "scale", "spin"]
+Pack = Literal["basic", "short", "kinetic", "user"]
 
 PACK_LABELS: dict[str, str] = {
     "basic": "기본 팩",
     "short": "숏폼 팩",
+    "kinetic": "키네틱 팩",
     "user": "내 프리셋",
 }
 
@@ -126,8 +127,9 @@ class MotionStep(BaseModel):
     phase: Phase = "in"
     # 이 동작에 쓰는 시간(ms). 등장·사라짐은 길이, 계속은 한 주기입니다.
     ms: int = Field(default=320, ge=20, le=6000)
-    # 크기(%), 각도(도), 거리(px), 번짐, 잘라낼 비율 등 `kind`에 따른 양입니다.
-    amount: float = Field(default=0, ge=-4000, le=4000)
+    # 크기(%), 각도(도), 거리(px), 번짐 등 `kind`에 따른 양입니다. 비우면 종류별 기본값이고,
+    # 0도 뜻이 있습니다(크기 0 = 아무것도 없는 데서 펼쳐짐).
+    amount: float | None = Field(default=None, ge=-4000, le=4000)
     direction: Direction = "none"
     ease: Ease = "linear"
     # 제자리를 지나 살짝 넘어갔다 돌아오는 정도(%). 크기·회전에서 씁니다.
@@ -148,6 +150,10 @@ class MotionStep(BaseModel):
         if self.kind in ("move", "wipe", "float") and self.direction == "none":
             raise ValueError(f"{self.kind}에는 direction이 필요합니다.")
         return self
+
+    def size(self, default: float) -> float:
+        """이 동작이 쓸 양. 비워 두었으면 종류별 기본값입니다."""
+        return default if self.amount is None else self.amount
 
     @property
     def per_run(self) -> bool:
@@ -174,6 +180,9 @@ class MotionPreset(BaseModel):
             raise ValueError("이동(move) 동작은 프리셋 하나에 한 번만 쓸 수 있습니다.")
         if sum(1 for step in steps if step.per_run) > 1:
             raise ValueError("조각별 동작(reveal·wave)은 프리셋 하나에 한 번만 쓸 수 있습니다.")
+        # 흔들림과 떠다님은 둘 다 `\frz`(와 `\org`)를 계속 쓰므로 하나만 둡니다.
+        if sum(1 for step in steps if step.kind in ("shake", "float")) > 1:
+            raise ValueError("흔들림(shake)과 떠다님(float)은 합쳐서 한 번만 쓸 수 있습니다.")
         return steps
 
     @property
@@ -194,7 +203,7 @@ class MotionPreset(BaseModel):
         return " + ".join(f"{STEP_LABELS[s.kind]}({s.phase})" for s in self.steps)
 
     def to_json(self) -> str:
-        return json.dumps(self.model_dump(), ensure_ascii=False, indent=2) + "\n"
+        return json.dumps(self.model_dump(exclude_none=True), ensure_ascii=False, indent=2) + "\n"
 
 
 class PresetBox(BaseModel):
@@ -393,7 +402,8 @@ def preset_tags(
             else:
                 add(start, _change(start, end, _alpha_tag(255), ease))
         elif kind == "scale":
-            begin = step.amount or 40.0
+            # 0은 "아무것도 없는 데서 펼쳐짐"이지만 libass가 줄 높이를 잃지 않게 아주 얇게 둡니다.
+            begin = max(1.0, step.size(40.0)) if step.size(40.0) >= 0 else step.size(40.0)
             if step.phase == "in":
                 statics.append(_scale_tag(begin, step.direction))
                 if step.overshoot:
@@ -411,30 +421,30 @@ def preset_tags(
                 add(start, _change(start, end, _scale_tag(begin, step.direction), ease))
         elif kind == "spin":
             if step.phase == "in":
-                statics.append(f"\\frz{angle + step.amount:g}")
+                statics.append(f"\\frz{angle + step.size(0.0):g}")
                 if step.overshoot:
                     # 넘어감(%)을 도로 바꿉니다. 회전은 조금만 지나쳐도 눈에 띕니다.
                     peak = start + _i((end - start) * 0.72)
-                    past = step.overshoot * 0.15 * (-1 if step.amount >= 0 else 1)
+                    past = step.overshoot * 0.15 * (-1 if step.size(0.0) >= 0 else 1)
                     add(start, _change(start, peak, f"\\frz{angle + past:g}", ease))
                     add(peak, _change(peak, end, f"\\frz{angle:g}", "out"))
                 else:
                     add(start, _change(start, end, f"\\frz{angle:g}", ease))
             else:
-                add(start, _change(start, end, f"\\frz{angle + step.amount:g}", ease))
+                add(start, _change(start, end, f"\\frz{angle + step.size(0.0):g}", ease))
         elif kind == "flip":
             axis = "frx" if step.direction in ("up", "down", "vertical") else "fry"
             if step.phase == "in":
-                statics.append(f"\\{axis}{step.amount:g}")
+                statics.append(f"\\{axis}{step.size(0.0):g}")
                 add(start, _change(start, end, f"\\{axis}0", ease))
             else:
-                add(start, _change(start, end, f"\\{axis}{step.amount:g}", ease))
+                add(start, _change(start, end, f"\\{axis}{step.size(0.0):g}", ease))
         elif kind == "blur":
             if step.phase == "in":
-                statics.append(f"\\blur{step.amount:g}")
+                statics.append(f"\\blur{step.size(0.0):g}")
                 add(start, _change(start, end, f"\\blur{glow:g}", ease))
             else:
-                add(start, _change(start, end, f"\\blur{step.amount:g}", ease))
+                add(start, _change(start, end, f"\\blur{step.size(0.0):g}", ease))
         elif kind == "shear":
             axis = "fay" if step.direction in ("up", "down", "vertical") else "fax"
             if step.phase == "in":
@@ -450,7 +460,7 @@ def preset_tags(
             if anchor is None or move:
                 continue
             x, y = anchor
-            dx, dy = _move_offset(step.direction, step.amount or 70.0, step.phase)
+            dx, dy = _move_offset(step.direction, step.size(70.0), step.phase)
             if step.phase == "in":
                 move = f"\\move({x + dx:.0f},{y + dy:.0f},{x:.0f},{y:.0f},{start},{end})"
             else:
@@ -467,20 +477,21 @@ def preset_tags(
         elif kind in ("shake", "float"):
             half = _half_period(step, end - start)
             if step.direction in ("none",) and kind == "shake":
-                first, second = f"\\frz{angle + step.amount:g}", f"\\frz{angle - step.amount:g}"
+                swing = step.size(3.0)
+                first, second = f"\\frz{angle + swing:g}", f"\\frz{angle - swing:g}"
                 statics.append(first)
             else:
                 if anchor is None:
                     continue
                 origin, per_px = _orbit(anchor, step.direction)
                 statics.append(origin)
-                swing = per_px * (step.amount or 10.0)
+                swing = per_px * step.size(10.0)
                 first, second = f"\\frz{angle + swing:g}", f"\\frz{angle - swing:g}"
                 statics.append(first)
             add(start, _oscillate(start, end, half, second, first, ease))
         elif kind == "breathe":
             half = _half_period(step, end - start)
-            up = _scale_tag(100 + (step.amount or 6), step.direction)
+            up = _scale_tag(100 + step.size(6.0), step.direction)
             add(start, _oscillate(start, end, half, up, _scale_tag(100, step.direction), ease))
         elif kind == "glow":
             half = _half_period(step, end - start)
@@ -490,7 +501,7 @@ def preset_tags(
                     start,
                     end,
                     half,
-                    f"\\blur{glow + (step.amount or 4):g}",
+                    f"\\blur{glow + step.size(4.0):g}",
                     f"\\blur{glow:g}",
                     ease,
                 ),
@@ -508,7 +519,7 @@ def preset_offset(preset: MotionPreset) -> tuple[int, int] | None:
     for step in preset.steps:
         if step.kind != "move":
             continue
-        _, dy = _move_offset(step.direction, step.amount or 70.0, step.phase)
+        _, dy = _move_offset(step.direction, step.size(70.0), step.phase)
         if step.phase != "in":
             return None
         return _i(dy), min(step.delay + step.ms, 100000)
@@ -520,6 +531,14 @@ def preset_offset(preset: MotionPreset) -> tuple[int, int] | None:
 # 조각 하나가 만드는 `\t` 수의 한계. 글자가 많은 자막에서 파일이 커지지 않게 합니다.
 _MAX_RUN_SEGMENTS = 12
 _REVEAL_KINDS = {"type": "typewriter", "pop": "word-pop", "karaoke": "karaoke"}
+# 조각이 제 시각에 나타나면서 값 하나가 제자리로 돌아오는 등장 방식.
+_PROPERTY_REVEALS: dict[str, tuple[str, str]] = {
+    # 이름: (시작 상태, 돌아올 상태). `{}`에 `amount`가 들어갑니다.
+    "blur": ("\\blur{0:g}", "\\blur0"),
+    "scale": ("\\fscx{0:g}\\fscy{0:g}", "\\fscx100\\fscy100"),
+    "spin": ("\\frz{0:g}", "\\frz0"),
+}
+_REVEAL_DEFAULT_AMOUNT = {"blur": 9.0, "scale": 55.0, "spin": 18.0}
 
 
 def preset_runs(
@@ -540,6 +559,8 @@ def preset_runs(
     if step is None or duration_ms <= 0:
         return ass_text
     if step.kind == "reveal":
+        if step.reveal in _PROPERTY_REVEALS:
+            return _property_runs(ass_text, step, duration_ms, prefix, hollow)
         if step.reveal in _REVEAL_KINDS:
             return animate_runs(
                 _REVEAL_KINDS[step.reveal],
@@ -563,6 +584,35 @@ def _stagger(count: int, step: MotionStep, duration_ms: int) -> int:
     return max(1, min(step.stagger, int(duration_ms * 0.7 / count)))
 
 
+def _property_runs(
+    ass_text: str, step: MotionStep, duration_ms: int, prefix: str, hollow: bool
+) -> str:
+    """조각마다 제 시각에 나타나면서 번짐·크기·회전이 제자리로 돌아옵니다."""
+    items, slots = run_slots(ass_text, step.unit)
+    if not slots:
+        return ass_text
+    gap = _stagger(len(slots), step, duration_ms)
+    start_tag, end_tag = _PROPERTY_REVEALS[step.reveal]
+    amount = step.size(_REVEAL_DEFAULT_AMOUNT[step.reveal])
+    hidden = "\\3a&HFF&\\4a&HFF&" + ("" if hollow else "\\1a&HFF&")
+    shown = "\\3a&H00&\\4a&H00&" + ("" if hollow else "\\1a&H00&")
+    settle = max(40, min(step.ms, 600))
+    lead: dict[int, str] = {}
+    for order, index in enumerate(slots):
+        at = order * gap
+        lead[index] = (
+            "{"
+            + state_before(items, index, prefix)
+            + _NO_WRAP
+            + hidden
+            + start_tag.format(amount)
+            + f"\\t({at},{at + 1},{shown})"
+            + f"\\t({at},{at + settle},{end_tag})"
+            + "}"
+        )
+    return "".join(lead.get(i, "") + token for i, token in enumerate(items))
+
+
 def _glitch_runs(
     ass_text: str, step: MotionStep, duration_ms: int, prefix: str, hollow: bool
 ) -> str:
@@ -571,7 +621,7 @@ def _glitch_runs(
     if not slots:
         return ass_text
     gap = _stagger(len(slots), step, duration_ms)
-    shift = step.amount or 12.0
+    shift = step.size(12.0)
     fill = "" if hollow else "\\1a&HFF&"
     lead: dict[int, str] = {}
     for order, index in enumerate(slots):
@@ -599,7 +649,7 @@ def _wave_runs(ass_text: str, step: MotionStep, duration_ms: int, prefix: str) -
     limit = _segment_limit(step.ease, _MAX_RUN_SEGMENTS)
     if span / half > limit:
         half = -(-span // limit)
-    amount = step.amount or 14.0
+    amount = step.size(14.0)
     if step.direction in ("left", "right", "horizontal"):
         up, down = f"\\frz{amount:g}", f"\\frz{-amount:g}"
     elif step.direction == "both":
@@ -1051,6 +1101,210 @@ BUILTIN_PRESETS: list[MotionPreset] = [
         _fade(160),
         _step("move", phase="out", direction="right", amount=160, ms=320),
         _step("fade", phase="out", ms=320),
+    ),
+    # ---------------------------------------------------------------- 키네틱 팩
+    # 천천히 변하는 것, 글자·단어마다 나타나는 것, 탄성·충격, 사라짐, 미세한 반복입니다.
+    # `scale`·`spin`·`blur`·`shear`를 hold로 두면 등장이 끝난 뒤부터 천천히 그 값으로 변합니다.
+    _preset(
+        "slow-zoom-in",
+        "천천히 커짐",
+        "kinetic",
+        _fade(220),
+        _step("scale", phase="hold", amount=114),
+    ),
+    _preset(
+        "slow-zoom-out",
+        "천천히 작아짐",
+        "kinetic",
+        _fade(220),
+        _step("scale", phase="hold", amount=90),
+    ),
+    _preset(
+        "slow-tilt", "천천히 기울어짐", "kinetic", _fade(220), _step("spin", phase="hold", amount=5)
+    ),
+    _preset(
+        "slow-blur-out",
+        "천천히 흐려짐",
+        "kinetic",
+        _fade(220),
+        _step("blur", phase="hold", amount=7),
+    ),
+    _preset(
+        "slow-lean", "천천히 눕기", "kinetic", _fade(220), _step("shear", phase="hold", amount=0.16)
+    ),
+    _preset(
+        "letter-blur",
+        "글자별 블러 등장",
+        "kinetic",
+        _step("reveal", reveal="blur", stagger=55, ms=300),
+    ),
+    _preset(
+        "letter-zoom",
+        "글자별 확대 등장",
+        "kinetic",
+        _step("reveal", reveal="scale", stagger=55, ms=260),
+    ),
+    _preset(
+        "letter-spin",
+        "글자별 회전 등장",
+        "kinetic",
+        _step("reveal", reveal="spin", amount=14, stagger=55, ms=260),
+    ),
+    _preset(
+        "letter-pop",
+        "글자별 톡톡",
+        "kinetic",
+        _step("reveal", reveal="pop", unit="char", stagger=55),
+    ),
+    _preset(
+        "word-blur",
+        "단어별 블러 등장",
+        "kinetic",
+        _step("reveal", reveal="blur", unit="word", stagger=180, ms=340),
+    ),
+    _preset(
+        "word-zoom",
+        "단어별 확대 등장",
+        "kinetic",
+        _step("reveal", reveal="scale", unit="word", stagger=180, ms=300),
+    ),
+    _preset(
+        "word-spin",
+        "단어별 회전 등장",
+        "kinetic",
+        _step("reveal", reveal="spin", unit="word", amount=12, stagger=180, ms=300),
+    ),
+    _preset(
+        "elastic-in",
+        "탱탱볼 등장",
+        "kinetic",
+        _scale(26, ms=520, overshoot=26, ease="in-out"),
+        _fade(160),
+    ),
+    _preset(
+        "rubber",
+        "고무줄",
+        "kinetic",
+        _scale(132, ms=340, direction="horizontal", overshoot=8),
+        _scale(68, ms=340, direction="vertical", overshoot=8),
+    ),
+    _preset(
+        "squash-land",
+        "착지",
+        "kinetic",
+        _move("down", 120, ms=280, ease="in"),
+        _scale(72, ms=300, direction="vertical", overshoot=16),
+    ),
+    _preset("punch", "펀치", "kinetic", _scale(210, ms=120), _blur(14, ms=120), _fade(90)),
+    _preset(
+        "shockwave",
+        "충격파",
+        "kinetic",
+        _scale(64, ms=260, overshoot=34),
+        _step("glow", phase="hold", ms=520, amount=6),
+    ),
+    _preset(
+        "jelly",
+        "젤리",
+        "kinetic",
+        _scale(62, ms=440, overshoot=30, ease="in-out"),
+        _step("breathe", phase="hold", ms=700, amount=4),
+    ),
+    _preset(
+        "wobble-in", "비틀비틀 등장", "kinetic", _spin(14, ms=380, overshoot=30), _scale(70, ms=380)
+    ),
+    _preset(
+        "throw-up",
+        "위로 던지기",
+        "kinetic",
+        _fade(140),
+        _step("move", phase="out", direction="up", amount=180, ms=380, ease="in"),
+        _step("spin", phase="out", amount=45, ms=380),
+        _step("fade", phase="out", ms=380),
+    ),
+    _preset(
+        "drop-out",
+        "아래로 떨어짐",
+        "kinetic",
+        _fade(140),
+        _step("move", phase="out", direction="down", amount=190, ms=340, ease="in"),
+        _step("fade", phase="out", ms=340),
+    ),
+    _preset(
+        "blur-out",
+        "흐려지며 사라짐",
+        "kinetic",
+        _fade(140),
+        _step("blur", phase="out", amount=20, ms=420),
+        _step("fade", phase="out", ms=420),
+    ),
+    _preset(
+        "flip-out",
+        "뒤집히며 사라짐",
+        "kinetic",
+        _fade(140),
+        _step("flip", phase="out", amount=92, direction="horizontal", ms=360),
+        _step("fade", phase="out", ms=360),
+    ),
+    _preset(
+        "squeeze-out",
+        "눌리며 사라짐",
+        "kinetic",
+        _fade(140),
+        _step("scale", phase="out", amount=0, direction="vertical", ms=300),
+        _step("fade", phase="out", ms=300),
+    ),
+    _preset(
+        "neon-flicker", "네온 깜빡임", "kinetic", _step("glow", phase="hold", ms=170, amount=9)
+    ),
+    _preset(
+        "pendulum",
+        "시계추",
+        "kinetic",
+        _step("shake", phase="hold", ms=1500, amount=6, ease="in-out"),
+    ),
+    _preset("tick-tock", "똑딱", "kinetic", _step("shake", phase="hold", ms=300, amount=3)),
+    _preset(
+        "breathe-slow",
+        "천천히 숨쉬기",
+        "kinetic",
+        _step("breathe", phase="hold", ms=2400, amount=4),
+    ),
+    _preset(
+        "side-float",
+        "좌우로 떠다님",
+        "kinetic",
+        _step("float", phase="hold", ms=1800, amount=16, direction="horizontal", ease="in-out"),
+    ),
+    _preset(
+        "hover-breathe",
+        "떠다니며 숨쉬기",
+        "kinetic",
+        _step("float", phase="hold", ms=1600, amount=10, direction="vertical", ease="in-out"),
+        _step("breathe", phase="hold", ms=1600, amount=3),
+    ),
+    _preset("caption-pop", "자막 팝(작게)", "kinetic", _scale(82, ms=180, overshoot=8), _fade(120)),
+    _preset(
+        "subtitle-rise",
+        "자막 살짝 올라오기",
+        "kinetic",
+        _move("up", 26, ms=240, ease="out"),
+        _fade(180),
+    ),
+    _preset(
+        "emphasis-zoom",
+        "강조 줌",
+        "kinetic",
+        _scale(90, ms=200),
+        _step("glow", phase="hold", ms=800, amount=3),
+    ),
+    _preset(
+        "stamp-tilt",
+        "기울여 쾅",
+        "kinetic",
+        _spin(-9, ms=170, overshoot=14),
+        _scale(175, ms=170),
+        _blur(9, ms=150),
     ),
 ]
 
