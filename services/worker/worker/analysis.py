@@ -527,16 +527,19 @@ def face_track(
 
     쓸 수 있는 검출기가 없으면 빈 목록과 `"none"`입니다. 그때 리프레이밍은
     `focus_x` 고정으로 돌아갑니다(지금까지와 같은 동작입니다).
+
+    **여기서는 예외를 내지 않습니다.** 리프레이밍은 곁다리 기능이라
+    `[analysis]`를 깔지 않은 워커에서도 렌더는 끝까지 가야 합니다. 의존성이
+    없으면 고정 위치로 돌아갈 뿐입니다.
     """
-    try:
-        import cv2
-    except ImportError as exc:
-        raise MissingDependency(
-            "얼굴 검출 의존성이 없습니다. pip install '.[analysis]'를 실행하세요."
-        ) from exc
     detect, name = _open_face_detector()
     if detect is None:
         return [], name
+    try:
+        import cv2
+    except ImportError:
+        # 검출기는 있는데 프레임을 읽을 방법이 없습니다(MediaPipe만 있는 경우).
+        return [], "none"
     capture = cv2.VideoCapture(str(source))
     if not capture.isOpened():
         return [], name

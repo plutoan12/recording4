@@ -5,7 +5,8 @@
 - MediaPipe도 설치해 보고 **결함 둘을 찾았습니다.**
   1. **`mediapipe.solutions`가 1.0.1에 없습니다.** 제가 부른 API입니다. `try/except`가 조용히 삼켜서 114MB 의존성이 **한 번도 쓰이지 않았습니다.** 지금의 Tasks API(`mediapipe.tasks.python.vision.FaceDetector`)로 고쳤습니다. 모델 `.tflite`는 들어 있지 않아 따로 받아야 하므로 `scripts/fetch_face_model.py`(고정 URL·SHA-256, 230KB)를 더했고 `R4_FACE_MODEL`로 알려 줍니다. 워커 이미지에 `libegl1`·`libgles2`를 넣었습니다(없으면 공유 라이브러리를 못 엽니다).
   2. **OpenCV 대체 경로도 깨져 있었습니다.** `scenedetect`가 끌고 오는 opencv-headless 에는 haarcascade XML 이 없고, 그때 `CascadeClassifier`는 예외 없이 **빈 분류기**가 되어 얼굴을 영영 0개로 보고합니다. 이제 `cascade.empty()`를 보고 걸러 내며, 쓸 수 있는 검출기가 없으면 `face_track()`이 `"none"`을 돌려주고 리프레이밍은 `focus_x` 고정으로 돌아갑니다.
-- 검증: 새 테스트 2개(검출기 없음, 모델 파일 유무). 전체 659 passed, 6 skipped(FFmpeg가 생겨 건너뛰던 렌더 테스트가 실제로 돕니다). 실패 1건(`test_caption_track_is_uploaded_once_for_track_only_video`)은 여전히 변경 전에도 이 환경에서만 실패하며 CI에서는 통과합니다(YouTube 자막 트랙 쪽이고 이번 작업과 무관).
+- 검증: 새 테스트 3개(검출기 없음, 모델 파일 유무, opencv 없는 워커). 전체 660 passed, 6 skipped(FFmpeg가 생겨 건너뛰던 렌더 테스트가 실제로 돕니다). 실패 1건(`test_caption_track_is_uploaded_once_for_track_only_video`)은 여전히 변경 전에도 이 환경에서만 실패하며 CI에서는 통과합니다(YouTube 자막 트랙 쪽이고 이번 작업과 무관).
+- **그 고침이 CI를 깨뜨렸습니다.** `face_track()`이 `cv2`가 없으면 `MissingDependency`를 던지게 두었는데, CI의 `파이썬 검사`는 `.[dev,providers]`만 깔아서 opencv가 없습니다. "검출기가 없으면 `"none"`"이라고 적어 놓고 그 앞에서 예외를 던진 셈입니다. 이제 **검출기부터 보고**, 프레임을 읽을 `cv2`가 없으면 그대로 `([], "none")`입니다. 리프레이밍은 곁다리라 `[analysis]` 없는 워커에서도 렌더는 끝까지 가야 합니다. 이 조건을 테스트(`cv2`·`mediapipe` 임포트를 막고 확인)로 고정했습니다.
 - **남은 진짜 제약**: Google 자격증명과 LLM 키는 이 세션에 없고 있어서도 안 됩니다. 그 둘은 여전히 사람이 있는 컴퓨터에서 재야 합니다. 얼굴 검출 **정확도**도 진짜 얼굴이 있는 영상이 필요합니다(합성 화면으로는 호출이 되는지까지만 확인).
 
 ## 2026-09-21: 무음 컷이 앞뒤 침묵을 안 자르던 버그 (Claude)

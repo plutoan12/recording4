@@ -138,3 +138,27 @@ def test_the_mediapipe_model_is_only_used_when_the_file_is_there(monkeypatch, tm
     assert analysis.face_model() == present
     # 진짜 모델이 아니므로 MediaPipe 가 열지 못하고 조용히 내려갑니다.
     assert analysis._mediapipe_detector(present) is None
+
+
+def test_a_worker_without_opencv_falls_back_instead_of_failing_the_render(monkeypatch, tmp_path):
+    """`[analysis]` 없는 워커에서 리프레이밍만 못 할 뿐 렌더는 끝까지 갑니다.
+
+    리프레이밍은 곁다리입니다. 의존성이 없다고 예외를 던지면 자막·크기까지
+    같이 못 만들게 됩니다. 검출기가 없을 때와 같은 자리로 돌아갑니다.
+    """
+    import builtins
+
+    from worker import analysis
+
+    real = builtins.__import__
+
+    def blocked(name, *args, **kwargs):  # noqa: ANN001, ANN202
+        if name.split(".")[0] in {"cv2", "mediapipe"}:
+            raise ImportError(name)
+        return real(name, *args, **kwargs)
+
+    monkeypatch.delenv("R4_FACE_MODEL", raising=False)
+    monkeypatch.setattr(builtins, "__import__", blocked)
+    source = tmp_path / "a.mp4"
+    source.write_bytes(b"x")
+    assert analysis.face_track(source) == ([], "none")
