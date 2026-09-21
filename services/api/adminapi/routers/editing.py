@@ -530,7 +530,6 @@ def subtitle_presets(user: CurrentUser) -> list[dict]:
     ]
 
 
-
 def _preset_or_404(name: str) -> MotionPreset:
     if not re.fullmatch(PRESET_NAME, name):
         raise HTTPException(422, "프리셋 이름 형식이 아닙니다.")
