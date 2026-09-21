@@ -65,9 +65,6 @@ providers = [
 fonts = ["fonttools==4.65.0", "brotli==1.1.0"]
 dev = [
     "pytest==8.3.4",
-    # scripts/verify_sync_matrix.py를 tests/test_verify_sync_matrix.py가 불러옵니다.
-    # PR #33과 같은 고정 버전입니다. 없으면 CI 테스트가 4개 오류로 끝납니다.
-    "numpy==2.2.6",
     "fonttools==4.65.0",
     "brotli==1.1.0",
     "httpx==0.28.1",
