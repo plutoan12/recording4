@@ -31,6 +31,8 @@ class EditSpec(BaseModel):
     height: int = Field(default=1920, ge=320, le=3840, multiple_of=2)
     title: str = Field(default="", max_length=120)
     burn_subtitles: bool = True
+    mosaic_faces: bool = False
+    mosaic_size: int = Field(default=20, ge=4, le=100)
     caption_language: str | None = Field(default=None, pattern=r"^[a-z]{2,3}$")
     font_size: int = Field(default=64, ge=20, le=120)
     cues: list[Cue] = Field(default_factory=list, max_length=3000)

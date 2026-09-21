@@ -11,7 +11,7 @@ from types import SimpleNamespace
 
 from pipeline.editing import Cue, EditSpec
 from pipeline.subtitles import DEFAULT_RULES, SubtitleRules
-from worker.rendering import ffmpeg_binary, video_filter, write_subtitles
+from worker.rendering import _mosaic_faces, ffmpeg_binary, video_filter, write_subtitles
 
 RATE = 48000
 
@@ -192,4 +192,9 @@ def render_final(
             ],
             cwd=temp,
         )
-        shutil.copyfile(temp / "final.mp4", output)
+        rendered = temp / "final.mp4"
+        if clip and clip.mosaic_faces:
+            mosaiced = temp / "mosaiced.mp4"
+            _mosaic_faces(rendered, mosaiced, clip.mosaic_size)
+            rendered = mosaiced
+        shutil.copyfile(rendered, output)

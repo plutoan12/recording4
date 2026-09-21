@@ -17,7 +17,15 @@ def test_timeline_is_intersected_and_rebased():
 
 @pytest.mark.parametrize(
     "values",
-    [{"end": 181}, {"start": math.nan}, {"focus_x": 2}, {"start": 10, "end": 5}, {"width": 1081}],
+    [
+        {"end": 181},
+        {"start": math.nan},
+        {"focus_x": 2},
+        {"start": 10, "end": 5},
+        {"width": 1081},
+        {"mosaic_size": 3},
+        {"mosaic_size": 101},
+    ],
 )
 def test_invalid_edit_rejected(values):
     with pytest.raises(ValidationError):

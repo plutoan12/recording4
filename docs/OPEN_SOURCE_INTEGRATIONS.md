@@ -13,6 +13,7 @@
 | PySceneDetect 0.6.7.1 | 장면 경계 감지, 관리화면의 구간 선택 | [GitHub](https://github.com/Breakthrough/PySceneDetect), BSD-3-Clause |
 | pysubs2 1.8.0 | 자막 타임라인, ASS 생성, 화면 제목 스타일 | [GitHub](https://github.com/tkarabela/pysubs2), MIT |
 | charset-normalizer 3.5.1 | 들여오는 자막 파일의 인코딩 판별(CP949·EUC-KR 등) | [GitHub](https://github.com/jawah/charset_normalizer), MIT |
+| deface 1.5.0 (선택 `[privacy]`) | 워커 렌더 결과의 얼굴 자동 모자이크. 오디오 유지·타일 크기 설정 | [GitHub](https://github.com/ORB-HD/deface), MIT |
 | Google Cloud Translate 3.20.2 | 공식 번역 SDK 어댑터 | [GitHub](https://github.com/googleapis/google-cloud-python/tree/main/packages/google-cloud-translate), Apache-2.0 |
 | Google API Python Client 2.160.0 | YouTube 이어 올리기·공개 예약 어댑터 | [GitHub](https://github.com/googleapis/google-api-python-client), Apache-2.0 |
 | google-auth-oauthlib 1.2.1 | 호출자가 YouTube OAuth 인증 클라이언트를 준비할 때 사용 | [GitHub](https://github.com/googleapis/google-auth-library-python-oauthlib), Apache-2.0 |
@@ -30,6 +31,8 @@
 ffsubsync는 **chardet(LGPL)** 과 **webrtcvad**를 의존성으로 끌어옵니다. chardet은 우리 코드가 부르지 않지만 `[subtitles]`를 설치한 워커 이미지에는 들어가므로 배포물 라이선스를 따질 때 함께 봅니다. webrtcvad는 C 확장인데 PyPI에 파이썬 3.11용 휠이 없어 워커 이미지가 설치 단계에서 컴파일합니다(`infra/Dockerfile.worker`가 그 층에서만 build-essential을 넣었다 지웁니다).
 
 연결한 범위는 다음과 같습니다.
+
+- deface → `worker/rendering.py:_mosaic_faces()`. 숏폼 편집기에서 얼굴 자동 모자이크를 선택하면 먼저 자막·크롭을 렌더한 뒤 얼굴을 검출해 모자이크를 적용합니다. `R4_DEFACE_BINARY`로 실행 파일을 지정할 수 있고, 도구가 없으면 변환을 생략하지 않고 작업을 실패시킵니다. 기본값은 꺼져 있으며, 얼굴 검출 누락·오검출은 결과 승인 전에 사람이 확인해야 합니다.
 
 - stable-ts → `worker/analysis.py:align_text()`. `POST /source-assets/{id}/align`이 타이밍 없는 대본을 원본 음성에 맞춰 새 대본 버전을 만듭니다. 전사가 아니라 정렬이라 글자는 그대로 둡니다.
 - WhisperX → `worker/analysis.py:diarize()`. `POST /source-assets/{id}/diarize`가 누가 언제 말했는지 찾아 최신 대본에 화자를 붙인 새 버전을 만듭니다. 배정은 `pipeline/speakers.py:assign_speakers()`가 겹친 시간으로 정합니다. `GET /source-assets/{id}/speakers`로 화자 목록을, `PUT /jobs/{id}/voice-assignments`로 화자별 음성을 저장합니다.

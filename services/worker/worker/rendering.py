@@ -14,7 +14,14 @@ from pipeline.editing import EditSpec, clip_cues
 from pipeline.subtitle_files import plain_ass
 from pipeline.subtitles import DEFAULT_RULES, SubtitleRules, apply_rules
 
-__all__ = ["RenderError", "ffmpeg_binary", "plain_ass", "render_clip", "write_subtitles"]
+__all__ = [
+    "RenderError",
+    "deface_binary",
+    "ffmpeg_binary",
+    "plain_ass",
+    "render_clip",
+    "write_subtitles",
+]
 
 
 class RenderError(RuntimeError):
@@ -26,6 +33,34 @@ def ffmpeg_binary() -> str:
     if not binary:
         raise RenderError("FFmpeg가 없습니다. 워커 이미지를 사용하거나 FFmpeg를 설치하세요.")
     return binary
+
+
+def deface_binary() -> str:
+    """Return the optional local face-mosaic executable."""
+    binary = os.environ.get("R4_DEFACE_BINARY") or shutil.which("deface")
+    if not binary:
+        raise RenderError("얼굴 모자이크 도구가 없습니다. 워커에 deface를 설치하세요.")
+    return binary
+
+
+def _mosaic_faces(source: Path, output: Path, mosaic_size: int) -> None:
+    command = [
+        deface_binary(),
+        str(source),
+        "--replacewith",
+        "mosaic",
+        "--mosaicsize",
+        str(mosaic_size),
+        "--keep-audio",
+        "--output",
+        str(output),
+    ]
+    try:
+        completed = subprocess.run(command, capture_output=True, timeout=3600)
+    except subprocess.TimeoutExpired as exc:
+        raise RenderError("얼굴 모자이크가 1시간 제한을 넘었습니다.") from exc
+    if completed.returncode or not output.is_file():
+        raise RenderError("얼굴 모자이크 실패: 얼굴 검출 모델과 입력 영상을 확인하세요.")
 
 
 def write_subtitles(path: Path, spec: EditSpec, rules: SubtitleRules = DEFAULT_RULES) -> None:
@@ -134,4 +169,9 @@ def render_clip(
             raise RenderError(
                 "FFmpeg 합성 실패: 설치된 코덱·subtitles 필터·입력 영상을 확인하세요."
             )
-        shutil.copyfile(temp / "result.mp4", output)
+        rendered = temp / "result.mp4"
+        if spec.mosaic_faces:
+            mosaiced = temp / "mosaiced.mp4"
+            _mosaic_faces(rendered, mosaiced, spec.mosaic_size)
+            rendered = mosaiced
+        shutil.copyfile(rendered, output)

@@ -18,6 +18,8 @@ export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWo
   const [mode, setMode] = useState('pad')
   const [focus, setFocus] = useState(0.5)
   const [burn,setBurn] = useState(true)
+  const [mosaicFaces,setMosaicFaces] = useState(false)
+  const [mosaicSize,setMosaicSize] = useState(20)
   const [captionLanguage,setCaptionLanguage] = useState('ko')
   const [title, setTitle] = useState('')
   const [captions, setCaptions] = useState<Cue[]>([])
@@ -123,6 +125,8 @@ export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWo
         </select></label>
         {mode === 'crop' && <label>좌우 중심<input type="range" min="0" max="1" step="0.01" value={focus} onChange={e => setFocus(Number(e.target.value))} /></label>}
         <label>화면 제목<input maxLength={120} value={title} onChange={e => setTitle(e.target.value)} /></label>
+        <label><input type="checkbox" checked={mosaicFaces} onChange={e => setMosaicFaces(e.target.checked)} /> 얼굴 자동 모자이크</label>
+        {mosaicFaces && <label>모자이크 타일 크기<input type="number" min="4" max="100" value={mosaicSize} onChange={e => setMosaicSize(Number(e.target.value))} /></label>}
       </div>
       <p>선택 길이: {(end-start).toFixed(2)}초 · 출력: 1080 × 1920</p>
       <div className="editor-actions">
@@ -233,11 +237,11 @@ export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWo
           setMessage('저장된 대본의 문장 경계로 후보를 만들었습니다. AI 인기도 예측은 아닙니다.')
         })}>구간 후보 찾기</button>
         <button disabled={busy || end <= start || end-start > 180} onClick={() => void act(async () => {
-          await request('/clips', {method:'POST', body: JSON.stringify({source_asset_id:assetId, start, end, mode, focus_x:focus, title, burn_subtitles:burn, caption_language:captionLanguage, cues:captions})})
+          await request('/clips', {method:'POST', body: JSON.stringify({source_asset_id:assetId, start, end, mode, focus_x:focus, title, burn_subtitles:burn, mosaic_faces:mosaicFaces, mosaic_size:mosaicSize, caption_language:captionLanguage, cues:captions})})
           setMessage('새 편집본의 렌더를 요청했습니다.'); await refresh()
         })}>숏폼 렌더</button>
       </div>
-      <button disabled={busy||end<=start||end-start>180} onClick={()=>{onWorkflow({source_asset_id:assetId,start,end,mode,focus_x:focus,title,burn_subtitles:burn,caption_language:captionLanguage,cues:captions});setMessage('아래 단계별 제작 화면에 선택 구간을 전달했습니다.')}}>선택 구간을 번역·더빙 단계로 보내기</button>
+      <button disabled={busy||end<=start||end-start>180} onClick={()=>{onWorkflow({source_asset_id:assetId,start,end,mode,focus_x:focus,title,mosaic_faces:mosaicFaces,mosaic_size:mosaicSize,burn_subtitles:burn,caption_language:captionLanguage,cues:captions});setMessage('아래 단계별 제작 화면에 선택 구간을 전달했습니다.')}}>선택 구간을 번역·더빙 단계로 보내기</button>
       {suggestions.map((s,i) => <button key={i} onClick={() => {setStart(s.start);setEnd(s.end);setTitle(s.title)}}>{s.start.toFixed(1)}–{s.end.toFixed(1)}초 · {s.title}</button>)}
     </>}
     {message && <p role="status">{message}</p>}
