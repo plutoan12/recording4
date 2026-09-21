@@ -43,10 +43,16 @@ def settings(**extra):
     )
 
 
-def test_context_off_sends_each_cue_by_itself(monkeypatch):
-    """기본값입니다. 지금까지와 똑같이 한 자막씩 보냅니다."""
-    seen = translator(monkeypatch, lambda texts: [f"<{text}>" for text in texts])
+def test_both_are_on_by_default():
+    """작업을 만들 때 따로 켜지 않아도 문맥 배치와 LLM 재번역이 켜집니다."""
     options = WorkflowOptions(audio_mode="subtitles", source_language="ko")
+    assert (options.translate_context, options.translate_polish) == (True, True)
+
+
+def test_context_off_sends_each_cue_by_itself(monkeypatch):
+    """꺼 두면 지금까지와 똑같이 한 자막씩 보냅니다."""
+    seen = translator(monkeypatch, lambda texts: [f"<{text}>" for text in texts])
+    options = WorkflowOptions(audio_mode="subtitles", source_language="ko", translate_context=False)
     texts, grouped, _ = wf.run_translation(CUES, {"target": "en"}, options, settings(), None)
     assert seen == [["그래서 저는", "어제 그 자료를", "다시 만들었습니다."]]
     assert texts == ["<그래서 저는>", "<어제 그 자료를>", "<다시 만들었습니다.>"]
@@ -81,10 +87,15 @@ def test_a_translation_too_short_to_split_falls_back_to_one_call_per_cue(monkeyp
     assert grouped == []
 
 
-def test_dubbing_refuses_context_batching():
-    """더빙은 자막 조각이 곧 그 구간의 발화라 문장을 다시 나누면 어긋납니다."""
-    with pytest.raises(ValueError):
-        WorkflowOptions(audio_mode="dub", voice_id="v", translate_context=True)
+def test_dubbing_turns_context_batching_off():
+    """더빙은 자막 조각이 곧 그 구간의 발화라 문장을 다시 나누면 어긋납니다.
+
+    기본으로 켜져 있으므로 작업을 막지 않고 조용히 끕니다.
+    """
+    assert not WorkflowOptions(audio_mode="dub", voice_id="v").translate_context
+    assert not WorkflowOptions(
+        audio_mode="dub", voice_id="v", translate_context=True
+    ).translate_context
 
 
 def claude(monkeypatch, handler):
@@ -121,9 +132,9 @@ def reply(texts):
     )
 
 
-def test_polish_is_off_unless_the_job_asks_for_it(monkeypatch):
+def test_polish_is_skipped_when_the_job_turns_it_off(monkeypatch):
     monkeypatch.setattr(wf.httpx, "Client", lambda *a, **k: pytest.fail("불러서는 안 됩니다"))
-    options = WorkflowOptions(audio_mode="subtitles", source_language="ko")
+    options = WorkflowOptions(audio_mode="subtitles", source_language="ko", translate_polish=False)
     texts, notes = wf.polish(
         CUES, ["a", "b", "c"], [], {}, {"target": "en"}, options, settings(), None
     )
@@ -172,11 +183,14 @@ def test_polish_keeps_the_machine_translation_when_the_llm_fails(monkeypatch):
     assert "500" in notes["llm_translate_error"]
 
 
-def test_polish_without_a_model_name_says_so_instead_of_calling(monkeypatch):
+def test_polish_skips_quietly_when_the_server_has_no_llm(monkeypatch):
+    """기본으로 켜져 있으므로 설정이 없다고 작업을 막거나 오류를 남기지 않습니다."""
     monkeypatch.setattr(wf.httpx, "Client", lambda *a, **k: pytest.fail("불러서는 안 됩니다"))
-    options = WorkflowOptions(audio_mode="subtitles", source_language="ko", translate_polish=True)
-    _, notes = wf.polish(CUES, ["a", "b", "c"], [], {}, {"target": "en"}, options, settings(), None)
-    assert "모델 이름" in notes["llm_translate_error"]
+    options = WorkflowOptions(audio_mode="subtitles", source_language="ko")
+    texts, notes = wf.polish(
+        CUES, ["a", "b", "c"], [], {}, {"target": "en"}, options, settings(), None
+    )
+    assert (texts, notes) == (["a", "b", "c"], {})
 
 
 def test_estimate_adds_a_capped_upper_bound_for_the_llm(monkeypatch):
@@ -186,7 +200,7 @@ def test_estimate_adds_a_capped_upper_bound_for_the_llm(monkeypatch):
         "llm_translate_model": "test-model",
     }
     data = {"cues": CUES, "target": "en"}
-    plain = WorkflowOptions(audio_mode="subtitles", source_language="ko")
+    plain = WorkflowOptions(audio_mode="subtitles", source_language="ko", translate_polish=False)
     polished = WorkflowOptions(audio_mode="subtitles", source_language="ko", translate_polish=True)
     assert wf.paid_estimate("translate:0", data, plain, settings(**rates)) == Decimal("0.0005")
     # 가장 긴 자막 하나(30%의 상한) × 원문·기계 번역·문맥·출력 네 몫 + 지시문 몫.

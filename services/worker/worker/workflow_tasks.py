@@ -225,7 +225,10 @@ def polish(batch, texts, grouped, gone, data, options, settings, glossary):
     if not options.translate_polish:
         return texts, {}
     if not settings.anthropic_api_key or not settings.llm_translate_model:
-        return texts, {"llm_translate_error": "LLM 키와 모델 이름을 서버에 설정하세요."}
+        # 기본으로 켜져 있으므로 설정이 없다고 작업을 막거나 오류를 남기지
+        # 않습니다. 화면은 `/workflow/configuration`의 `llm_translate_configured`로
+        # 설정이 없다는 것을 이미 보여 줍니다.
+        return texts, {}
     sources = [cue["text"] for cue in batch]
     chosen = pick(
         review(list(zip(sources, texts, strict=True)), missing_terms=gone, grouped=grouped),

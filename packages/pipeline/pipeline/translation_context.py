@@ -53,6 +53,12 @@ MAX_CUES = 6
 MAX_CHARS = 400
 # 띄어쓰기가 없는 언어. 조각을 이을 때 공백을 넣지 않습니다.
 NO_SPACES = ("ja", "zh", "th", "lo", "my")
+# 문장 경계를 믿으려면 이만큼은 문장부호로 끝나야 합니다. 전사에 문장부호가
+# 거의 없으면 어디서 문장이 끝나는지 알 수 없고, 그때 묶으면 **서로 다른
+# 문장을 붙여** 번역하게 됩니다. 조각별 번역보다 나쁩니다. 그래서 그런
+# 대본은 묶지 않고 지금까지처럼 조각별로 번역합니다.
+# 이 값은 잰 것이 아니라 정한 것입니다.
+MIN_SENTENCE_RATE = 0.15
 
 
 def ends_sentence(text: str) -> bool:
@@ -60,11 +66,25 @@ def ends_sentence(text: str) -> bool:
     return text.rstrip().rstrip(CLOSERS).endswith(SENTENCE_END)
 
 
+def punctuated(texts: Sequence[str]) -> bool:
+    """문장 경계를 믿을 만큼 문장부호가 있는지.
+
+    전사가 문장부호를 거의 내지 않는 대본에서 묶으면 서로 다른 문장을 붙여
+    번역하게 됩니다. 그런 대본은 묶지 않습니다.
+    """
+    if not texts:
+        return False
+    return sum(map(ends_sentence, texts)) / len(texts) >= MIN_SENTENCE_RATE
+
+
 def groups(texts: Sequence[str]) -> list[list[int]]:
     """이어지는 조각을 문장 단위로 묶습니다. 값은 자리 번호입니다.
 
-    혼자 남은 조각도 크기 1인 묶음으로 나옵니다(그대로 번역됩니다).
+    혼자 남은 조각도 크기 1인 묶음으로 나옵니다(그대로 번역됩니다). 문장부호가
+    거의 없는 대본은 아예 묶지 않고 조각마다 한 묶음으로 돌려줍니다.
     """
+    if not punctuated(texts):
+        return [[index] for index in range(len(texts))]
     found: list[list[int]] = []
     current: list[int] = []
     size = 0

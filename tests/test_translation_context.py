@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from pipeline.subtitles import text_width
-from pipeline.translation_context import ends_sentence, groups, join, split_across
+from pipeline.translation_context import ends_sentence, groups, join, punctuated, split_across
 from pipeline.translation_review import Finding, pick, review, review_limit
 
 
@@ -21,8 +21,22 @@ def test_complete_sentences_are_never_merged():
 
 
 def test_a_long_run_is_cut_at_the_limit():
-    """문장부호가 아예 없어도 묶음이 무한정 커지지 않습니다."""
-    assert groups(["조각"] * 14) == [[0, 1, 2, 3, 4, 5], [6, 7, 8, 9, 10, 11], [12, 13]]
+    """문장 하나가 길어도 묶음이 무한정 커지지 않습니다."""
+    texts = ["끝."] * 6 + ["조각"] * 9
+    assert groups(texts)[6:] == [[6, 7, 8, 9, 10, 11], [12, 13, 14]]
+
+
+def test_a_transcript_without_punctuation_is_not_grouped():
+    """문장부호가 거의 없으면 어디서 문장이 끝나는지 알 수 없습니다.
+
+    그때 묶으면 **서로 다른 문장을 붙여** 번역하게 되어 조각별 번역보다
+    나쁩니다. 그래서 묶지 않고 지금까지처럼 조각마다 한 묶음으로 둡니다.
+    """
+    assert not punctuated(["조각"] * 14)
+    assert groups(["조각"] * 3) == [[0], [1], [2]]
+    # 한 장이라도 문장부호가 있으면(비율이 충분하면) 묶습니다.
+    assert punctuated(["조각", "끝."])
+    assert groups(["조각", "끝."]) == [[0, 1]]
 
 
 @pytest.mark.parametrize(

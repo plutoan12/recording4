@@ -1,3 +1,15 @@
+## 2026-09-21: 문맥 배치·LLM 재번역을 기본으로 켬 (Claude)
+
+- 사용자 요청: "네가 켜"(앞서 "작업 양식에서 켜시면 됩니다"라고 한 데 대한 답). [PR #36](https://github.com/plutoan12/recording4/pull/36) 후속 커밋. 담당: `pipeline/translation_context.py`, `pipeline/workflow.py`, `worker/workflow_tasks.py`, `apps/web/WorkflowPanel.tsx`, 테스트·문서.
+- `translate_context`·`translate_polish` 기본값을 `True`로 바꾸고 화면의 두 선택 항목도 처음부터 켜진 상태로 둡니다.
+- 켜 두어도 안전하도록 세 가지를 먼저 고쳤습니다.
+  - `punctuated()`: 자막의 **15% 미만**만 문장부호로 끝나면 묶지 않습니다. 문장 경계를 모르는 채 묶으면 서로 다른 문장을 붙여 번역하게 됩니다.
+  - 더빙은 검증 오류 대신 `translate_context`를 **끕니다**(기본값이 켜짐이므로 막으면 모든 더빙 작업이 실패합니다).
+  - LLM 키·모델이 없으면 `llm_translate_error` 없이 **조용히 건너뜁니다**. 단가만 빠진 경우는 그대로 Blocked입니다.
+- 검증: 새 테스트 4개(기본값·문장부호 없는 대본·더빙 끄기·설정 없을 때 건너뛰기), 기존 테스트 5개를 새 동작에 맞춰 고쳤습니다. 전체 `python -m pytest -q` 591 passed, 11 skipped. 실패 1건은 변경 전에도 이 환경에서만 실패합니다. ruff 0.8.4·tsc·vite build 통과.
+- 이미 만든 작업과 승인된 결과물은 바뀌지 않습니다. 작업 옵션은 작업을 만들 때 굳습니다.
+- 남은 것: 앞선 항목과 같습니다. 실제 유료 호출로 잰 수치는 여전히 없습니다.
+
 ## 2026-09-21: 문맥 배치와 어색한 자막 LLM 재번역 (Claude)
 
 - 사용자 요청: "그리고 문맥 배치해줘. 어색한 부분은 LLM 번역해주고". [PR #36](https://github.com/plutoan12/recording4/pull/36) 후속 커밋. 담당: `pipeline/translation_context.py`·`translation_review.py`(신규), `pipeline/workflow.py`, `worker/providers.py`, `worker/workflow_tasks.py`, `adminapi/config.py`·`routers/workflow.py`, `apps/web/WorkflowPanel.tsx`·`styles.css`, 테스트·문서.
