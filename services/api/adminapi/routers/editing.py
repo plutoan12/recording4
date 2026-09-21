@@ -306,7 +306,7 @@ def create_clip(payload: ClipRequest, user: CurrentUser, session: SessionDep):
         output_height=spec.height,
         screen_title=spec.title,
         publish_title=spec.title,
-        subtitle_style={"font_size": spec.font_size},
+        subtitle_style={"font_size": spec.font_size, "caption_effect": spec.caption_effect},
     )
     session.add(clip)
     session.flush()

@@ -1,0 +1,93 @@
+{
+  "version": 1,
+  "timing_source": "manual",
+  "note": "무음 디자인 시연용 수동 시각. 실제 음성 정렬 아님.",
+  "cues": [
+    {
+      "start_ms": 500,
+      "end_ms": 3500,
+      "text": "지금 말하는 단어만 강조합니다",
+      "words": [
+        {
+          "text": "지금",
+          "start_ms": 500,
+          "end_ms": 900
+        },
+        {
+          "text": "말하는",
+          "start_ms": 1000,
+          "end_ms": 1400
+        },
+        {
+          "text": "단어만",
+          "start_ms": 1500,
+          "end_ms": 1900
+        },
+        {
+          "text": "강조합니다",
+          "start_ms": 2000,
+          "end_ms": 2400
+        }
+      ]
+    },
+    {
+      "start_ms": 4000,
+      "end_ms": 7000,
+      "text": "한글과 English 2026년 함께 표시해요",
+      "words": [
+        {
+          "text": "한글과",
+          "start_ms": 4000,
+          "end_ms": 4400
+        },
+        {
+          "text": "English",
+          "start_ms": 4500,
+          "end_ms": 4900
+        },
+        {
+          "text": "2026년",
+          "start_ms": 5000,
+          "end_ms": 5400
+        },
+        {
+          "text": "함께",
+          "start_ms": 5500,
+          "end_ms": 5900
+        },
+        {
+          "text": "표시해요",
+          "start_ms": 6000,
+          "end_ms": 6400
+        }
+      ]
+    },
+    {
+      "start_ms": 7500,
+      "end_ms": 10500,
+      "text": "중요한 순간에 시선을 모으세요",
+      "words": [
+        {
+          "text": "중요한",
+          "start_ms": 7500,
+          "end_ms": 7900
+        },
+        {
+          "text": "순간에",
+          "start_ms": 8000,
+          "end_ms": 8400
+        },
+        {
+          "text": "시선을",
+          "start_ms": 8500,
+          "end_ms": 8900
+        },
+        {
+          "text": "모으세요",
+          "start_ms": 9000,
+          "end_ms": 9400
+        }
+      ]
+    }
+  ]
+}

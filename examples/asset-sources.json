@@ -1,0 +1,9 @@
+{"sources":[
+ {"repo":"TypesettingTools/arch1t3cht-Aegisub-Scripts","app":"Aegisub","download":true},
+ {"repo":"lyger/Aegisub_automation_scripts","app":"Aegisub","download":true},
+ {"repo":"Akatmks/Akatsumekusa-Aegisub-Scripts","app":"Aegisub","download":true},
+ {"repo":"lachrymaLF/Coloramen","app":"After Effects","download":true},
+ {"repo":"rendertom/PseudoEffect","app":"After Effects","download":true},
+ {"repo":"postflows/resolve-title-manager","app":"DaVinci Resolve","download":true},
+ {"repo":"nelsondooley/after-effects-presets","app":"After Effects","download":false}
+]}

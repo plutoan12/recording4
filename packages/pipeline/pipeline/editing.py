@@ -31,6 +31,9 @@ class EditSpec(BaseModel):
     height: int = Field(default=1920, ge=320, le=3840, multiple_of=2)
     title: str = Field(default="", max_length=120)
     font_size: int = Field(default=64, ge=20, le=120)
+    caption_effect: Literal["none", "clean-focus", "marker-follow", "soft-pop"] = "none"
+    caption_script: str = Field(default="", max_length=50000)
+    caption_language: str = Field(default="ko", pattern=r"^[a-z]{2,3}$")
     cues: list[Cue] = Field(default_factory=list, max_length=3000)
 
     @model_validator(mode="after")
@@ -39,6 +42,8 @@ class EditSpec(BaseModel):
             raise ValueError("숏폼 길이는 0초 초과, 180초 이하여야 합니다.")
         if self.height * 9 != self.width * 16:
             raise ValueError("출력 화면은 9:16이어야 합니다.")
+        if self.caption_effect != "none" and (self.width, self.height) != (1080, 1920):
+            raise ValueError("단어 강조 자막은 1080×1920 출력을 사용하세요.")
         return self
 
 

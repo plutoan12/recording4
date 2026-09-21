@@ -21,6 +21,9 @@ export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWo
   const [suggestions, setSuggestions] = useState<Suggestion[]>([])
   const [violations, setViolations] = useState<Violation[]>([])
   const [plainScript, setPlainScript] = useState('')
+  const [captionEffect, setCaptionEffect] = useState('none')
+  const [captionScript, setCaptionScript] = useState('')
+  const [captionLanguage, setCaptionLanguage] = useState('ko')
   const [tasks, setTasks] = useState<Task[]>([])
   const [outputUrl, setOutputUrl] = useState('')
   const [previewed, setPreviewed] = useState('')
@@ -49,6 +52,7 @@ export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWo
   }
   async function loadSource(id: string) {
     selection.current = id
+    setCaptionScript(''); setCaptionEffect('none');
     setAssetId(id); setSourceUrl(''); setSuggestions([]); setCaptions([])
     const asset = assets.find(a => a.id === id)
     setStart(0); setEnd(Math.min(30, Number(asset?.duration_seconds ?? 30)))
@@ -112,7 +116,23 @@ export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWo
         <p>자막 가독성 문제 {violations.length}건. 렌더에서 줄바꿈과 분할은 자동으로 적용되지만 아래는 사람이 고쳐야 합니다.</p>
         <ul>{violations.map((v,i) => <li key={i}>{v.index + 1}번 자막 · {v.kind} · {v.detail}</li>)}</ul>
       </div>}
-      <h3>자막 편집</h3>
+      <h3>음성에 맞춘 단어 강조</h3>
+      <label>자막 효과<select value={captionEffect} onChange={e => setCaptionEffect(e.target.value)}>
+        <option value="none">일반 자막</option><option value="clean-focus">현재 단어 색상 강조</option>
+        <option value="marker-follow">형광펜 박스</option><option value="soft-pop">작은 확대</option>
+      </select></label>
+      {captionEffect !== 'none' && <>
+        <p>선택 구간의 음성을 분석해 원본 영상 위에 단어별 자막을 합성합니다. 아래 일반 자막 대신 새로 정렬한 자막을 사용합니다.</p>
+        <label>음성 언어<select value={captionLanguage} onChange={e => setCaptionLanguage(e.target.value)}>
+          <option value="ko">한국어</option><option value="en">영어</option>
+          <option value="ja">일본어</option><option value="zh">중국어</option>
+        </select></label>
+        <label>선택 구간 대본 (선택 사항)<textarea rows={4} maxLength={50000}
+          value={captionScript} onChange={e => setCaptionScript(e.target.value)}
+          placeholder="비워 두면 자동 전사합니다. 교정한 대본이 있으면 이 구간에서 말한 내용만 넣으세요." /></label>
+        <p>모델이 계산한 시간은 완성 영상에서 확인하세요. 구간을 바꾸면 대본도 다시 확인해야 합니다.</p>
+      </>}
+      <h3>일반 자막 편집</h3>
       <p>시간은 원본 영상 기준입니다. 선택 구간 밖의 자막은 최종 영상에서 자동으로 제외됩니다.</p>
       {captions.map((cue, index) => <div className="caption-row" key={index}>
         <label>시작(초)<input type="number" min="0" step="0.01" value={cue.start} onChange={e => updateCue(index,{start:Number(e.target.value)})} /></label>
@@ -137,7 +157,7 @@ export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWo
           setMessage('저장된 대본의 문장 경계로 후보를 만들었습니다. AI 인기도 예측은 아닙니다.')
         })}>구간 후보 찾기</button>
         <button disabled={busy || end <= start || end-start > 180} onClick={() => void act(async () => {
-          await request('/clips', {method:'POST', body: JSON.stringify({source_asset_id:assetId, start, end, mode, focus_x:focus, title, cues:captions})})
+          await request('/clips', {method:'POST', body: JSON.stringify({source_asset_id:assetId, start, end, mode, focus_x:focus, title, cues:captions, caption_effect:captionEffect, caption_script:captionScript, caption_language:captionLanguage})})
           setMessage('새 편집본의 렌더를 요청했습니다.'); await refresh()
         })}>숏폼 렌더</button>
       </div>

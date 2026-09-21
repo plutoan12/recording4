@@ -121,3 +121,25 @@ def test_failed_worker_can_retry(client, auth_headers, asset, monkeypatch):
     assert "secret-token" not in str(tasks)
     retry = client.post(f"/media-tasks/{created['id']}/retry", headers=auth_headers)
     assert retry.status_code == 202 and retry.json()["state"] == "pending"
+
+
+def test_word_caption_settings_are_queued(client, auth_headers, asset, session):
+    from adminapi.models import MediaTask
+
+    data = dict(
+        source_asset_id=str(asset.id),
+        start=10,
+        end=20,
+        caption_effect="marker-follow",
+        caption_script="선택한 구간 대본",
+        caption_language="ko",
+    )
+    response = client.post("/clips", headers=auth_headers, json=data)
+    assert response.status_code == 202
+    task = session.get(MediaTask, uuid.UUID(response.json()["id"]))
+    assert task.settings["caption_effect"] == "marker-follow"
+    assert task.settings["caption_script"] == "선택한 구간 대본"
+    data["caption_effect"] = "unknown"
+    assert client.post("/clips", headers=auth_headers, json=data).status_code == 422
+    data.update(caption_effect="clean-focus", width=180, height=320)
+    assert client.post("/clips", headers=auth_headers, json=data).status_code == 422

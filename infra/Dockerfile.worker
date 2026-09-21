@@ -24,7 +24,7 @@ WORKDIR /app
 
 COPY pyproject.toml ./
 COPY packages ./packages
-RUN pip install --no-cache-dir ".[analysis,providers,imports,subtitles]"
+RUN pip install --no-cache-dir ".[analysis,providers,imports,subtitles,templates]"
 
 COPY services ./services
 

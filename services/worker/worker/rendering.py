@@ -82,7 +82,12 @@ def video_filter(spec: EditSpec) -> str:
 
 
 def render_clip(
-    source: Path, output: Path, spec: EditSpec, *, rules: SubtitleRules = DEFAULT_RULES
+    source: Path,
+    output: Path,
+    spec: EditSpec,
+    *,
+    rules: SubtitleRules = DEFAULT_RULES,
+    word_model: str = "small",
 ) -> None:
     source, output = source.resolve(), output.resolve()
     if not source.is_file() or source == output:
@@ -90,7 +95,12 @@ def render_clip(
     output.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="r4-render-") as directory:
         temp = Path(directory)
-        write_subtitles(temp / "captions.ass", spec, rules)
+        if spec.caption_effect == "none":
+            write_subtitles(temp / "captions.ass", spec, rules)
+        else:
+            from worker.word_render import write_word_captions
+
+            write_word_captions(source, temp, spec, ffmpeg_binary(), word_model)
         command = [
             ffmpeg_binary(),
             "-hide_banner",
@@ -134,3 +144,6 @@ def render_clip(
                 "FFmpeg 합성 실패: 설치된 코덱·subtitles 필터·입력 영상을 확인하세요."
             )
         shutil.copyfile(temp / "result.mp4", output)
+        if spec.caption_effect != "none":
+            shutil.copyfile(temp / "words.json", output.with_suffix(".words.json"))
+            shutil.copyfile(temp / "captions.ass", output.with_suffix(".ass"))

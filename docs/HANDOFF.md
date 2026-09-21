@@ -678,3 +678,133 @@ CI가 토큰 없이도 이 경로를 점검합니다(`화자 분리 토큰 오�
 
 - **HF 토큰**: huggingface.co 로그인 → 두 모델 페이지에서 약관 동의 → 읽기 토큰 발급 → 저장소 시크릿 `HF_TOKEN`. 계정이 필요한 일이라 대신할 수 없습니다.
 - **실제 게시**: `docs/PUBLISH_RUNBOOK.md` 순서대로. 2.5단계 점검을 먼저 돌리면 업로드 전에 대부분의 실패가 드러납니다.
+
+
+## 자막 변환기 설치 (2026-09-20)
+
+- 사용자 요청: recording4에 자막 형식 확장, 템플릿 규칙, 오류 수정/검토, Premiere·After Effects·CapCut·DaVinci 연결.
+- 로컬 기준: 8e678d5, 현재 브랜치 claude/claude-md-design-review-v8qdz4. 원격 main보다 이전인 로컬 코드에 독립 모듈로 추가. 커밋/푸시는 하지 않았음.
+- 담당: pipeline/interchange.py, tests/test_interchange.py, scripts/{install_converter,convert_subtitles}.sh, examples/{caption-template.json,converter-sample.srt}, docs/SUBTITLE_CONVERTER.md, README, .gitignore. 기존 미추적 infra/Dockerfile.dev 및 scripts/dev_check.sh 보존.
+- .venv-converter에 pysubs2 1.8.0 / pytest 8.3.4 / ruff 0.8.4 설치. 운영 Python 환경은 변경하지 않음.
+- SRT/VTT/ASS/SSA/TTML/pysubs2 JSON 입출력, 단일 언어 SMI 입력. BOM·명시적 CP949 처리, 시간 검사, 겹침/스타일 손실 보고, 기존 출력 덮어쓰기 방지.
+- SMI 파서의 글자 수 기반 종료 시간 추정을 다음 SYNC 시각으로 교체. 마지막 종료 SYNC 없으면 오류. ASS의 0초 주석은 허용.
+- 공통 JSON 템플릿으로 ASS 스타일 대체 및 AE 텍스트 레이어 JSX 생성. Premiere/CapCut/DaVinci는 SRT 교환.
+- 검증: pytest --noconftest tests/test_interchange.py 30개 통과, 대상 ruff 및 git diff --check 통과. CLI로 .runtime/editor-bundle-20260920 및 .runtime/converter-sample-20260920.ass 생성 성공.
+- 미완료: 웹/API 통합, 각 편집 앱에서 실제 가져오기/렌더 검증, MOGRT/AEP·CapCut 네이티브·DRP/Fusion 템플릿 상호 변환. 템플릿 원본과 목표 결과/앱 버전이 있어야 후속 어댑터를 검증할 수 있음.
+
+
+## 이미지 템플릿 자동 제작 시작 (2026-09-20)
+
+- 사용자 지시: 제공한 이미지로 자동 제작을 시작. template_factory.py, make_templates.sh, test_template_factory.py, TEMPLATE_FACTORY.md 추가. 설치 스크립트에 imageio-ffmpeg 0.6.0 추가.
+- 사용자 원본 5종을 .runtime/template-assets에 복사하고 해시 기록. 중복 imac24 제외. 이미지 자체는 편집하지 않음.
+- 4개 장면: imac27, imac24, message-board, retro-message. HTML, scene JSON, 상대 경로 소재를 사용하는 AE JSX, SRT 및 선택적 H.264 MP4 자동 생성.
+- 샘플 최종: .runtime/templates-v3. 모두 6.5초 1080p 30fps 무음 MP4. FFmpeg 전체 디코딩 및 프레임 육안 확인 완료.
+- 변환/템플릿 테스트 41개 통과, 대상 ruff 및 JS/JSX 구문 검사 통과. 브라우저 로컬 URL 열기는 도구 보안 정책으로 차단돼 대체 경로로 우회하지 않음.
+- 앱 내 검증, 영상 입력 슬롯 자동화, MOGRT/CapCut/Fusion 네이티브 내보내기는 남아 있음. 예약 자동화가 아닌 명령 실행형 제작 자동화. 로컬 변경이며 커밋/푸시하지 않음.
+
+
+## 미리보기 재생성 (2026-09-20)
+
+- 사용자 요청으로 .runtime/templates-fresh-01에 4종을 새로 렌더.
+- all-templates.mp4로 4종을 순서대로 연결하고 전체 디코딩 확인. templates.zip에 편집용 파일 포함.
+- 브라우저 정책 우회 없이 일반 MP4 결과물로 전달. 기존 결과와 코드는 보존.
+
+
+## 외부 자료 기반 모션 템플릿 (2026-09-20)
+
+- 사용자 요청: 외부 자료도 찾아 추가 제작. Mixkit 유형 참고, Material 모션 원칙, Aegisub ASS 문법 기반의 자체 코드로 interview/news/cinema/pop/chapter 5종 구현. 외부 템플릿 코드는 복사하지 않음.
+- Google Fonts Noto Sans KR 원본과 OFL.txt를 .runtime/external-fonts에 다운로드. 결과에도 라이선스 동봉. 시스템 전체 설치 없음.
+- motion_templates.py, make_motion_templates.sh, test_motion_templates.py, MOTION_TEMPLATES.md 추가.
+- .runtime/motion-pack-01에 MP4/ASS/SRT/출처/폰트 출력, 합본 영상과 ZIP 생성. 전체 디코딩 성공. 총 50개 테스트/대상 ruff 통과.
+- ASS 편집 가능하나 네이티브 MOGRT/CapCut/Fusion 프로젝트 아님. 각 앱 가져오기는 미검증. GitHub 커밋/푸시는 하지 않음.
+
+## 2026-09-20 개인용 외부 자료 수집기
+
+- `pipeline/asset_catalog.py`, `scripts/collect_assets.sh`, `examples/asset-sources.json`, `docs/ASSET_CATALOG.md` 추가. GitHub API의 커밋 고정 파일 목록, 라이선스 증거 보관, 해시 검증·중복 제거, 한도, 검색 HTML 구현.
+- 실제 결과 `.runtime/asset-library-01/index.html`, `.runtime/asset-library-01.zip`: 7개 저장소, 81개 발견, 77개 다운로드(스크립트 76 + AE 프리셋 1), 프리셋 4개는 라이선스 미확인으로 링크만 보관. 오류 0. 자료 파일과 라이선스 해시 및 ZIP 무결성 확인.
+- 독립 테스트 62개 통과(`--noconftest`), 새 모듈/테스트 Ruff 통과. 초기 일반 pytest는 fastapi 미설치로 공통 conftest 로드 실패하여 독립 테스트 방식 사용. 전체 서버 테스트와 브라우저 조작·앱 내 적용은 미검증.
+- 수집 파일은 실행하지 않음. 모든 외부 항목 공개 배포 검토 필요. Premiere/CapCut 네이티브 템플릿 수집 없음. 네이티브 프리셋·미리보기 확대와 개별 라이선스 검토/공개 승인 기능은 후속 작업. 원격 push/배포 안 함.
+
+## 2026-09-20 영어권 자료 추가 검색·수집
+
+- 영어 키워드로 공식 제작사·GitHub 자료 조사. `docs/ENGLISH_TEMPLATE_SOURCES.md`에 8개 소스의 활용·제한 정리, `examples/asset-sources-english.json` 추가.
+- AutoSubs, Resolve-OpenCaptions, Retro Newspaper에서 37개 추가 수집: 프리셋/컴포지션 파일 25개, 스크립트 12개. 오류 0. `.runtime/asset-library-english-01/index.html` 및 같은 이름 ZIP. 모든 자료 Git SHA·SHA-256, 라이선스 파일 SHA-256, ZIP 무결성 검증. 코드 변경 없어 기존 테스트 재실행 안 함.
+- Mixkit은 현행 약관상 자동 대량 다운로드 제한으로 수집 제외. We Design Motion 300+ Starter Kit는 이메일 구독 필요해 링크만 기록. CapCut 공식 소재와 pyCapCut은 별도 사용·호환성 제한 기록. 앱 설치/실행, 가입, 공개 재배포는 안 함.
+- 25개 프리셋 파일을 서로 다른 25개 디자인 또는 앱 검증 완료로 표기하지 않도록 주의. 다음 단계는 앱 안에서 템플릿 확인과 네이티브 변환 규칙 적용.
+
+## 2026-09-20 기존 자료로 새 템플릿 6종 제작
+
+- 사용자가 새 구매 없이 기존 자료로 계속 제작 요청. motion_templates.py에 paper/neon/quote/terminal/split/card 추가, 전체 선택 가능 스타일 11종. rise/wipe 모션 추가. 자체 레이아웃과 기존 Noto Sans KR·ASS 렌더러 사용.
+- examples/motion-series-02.srt 추가. .runtime/motion-pack-02에 6종 MP4/ASS/SRT, presets/sources/report, 폰트 라이선스, README, 45초 합본, contact-sheet.png 생성. ZIP은 .runtime/motion-pack-02.zip.
+- 관련 독립 테스트 56개 통과, 모듈 Ruff 통과. 개별 영상 6개와 합본 전체 디코딩 성공, 비교 이미지 육안 확인, ZIP 무결성 확인. 네이티브 편집 앱 가져오기 미검증.
+- 추가 결제·다운로드·예약 실행·공개 배포·원격 push 없음. 다음 제작은 사용자 대사를 같은 CLI에 넣거나 새 스타일을 추가하면 됨.
+
+## 2026-09-20 Starter Kit 사용자 제공 ZIP 가져오기
+
+- Downloads/TheStarterKit.zip 발견(1,881,735,188 bytes). .runtime/starter-kit-01/original에 폴더 구조를 보존해 1,872개 파일 압축 해제(2,039,133,323 bytes). ZIP 원본 보존.
+- 경로·심볼릭 링크·중복 경로·크기 검사 후 스트리밍 추출, ZIP CRC 및 추출 파일 전체 SHA-256 재검증. manifest.json에 원본 ZIP 해시·개별 파일 해시·출처·개인용 검토 필요 상태 기록.
+- index.html에 335개 검색 항목: Premiere MOGRT 297, AE AEP 18, LUT 20. 모든 MOGRT에 제작사 제공 PNG/MP4 미리보기 연결. 제목 관련 73개: Clean 20, Stylized 20, Lower Thirds 15, Grunge Typography 18.
+- 전체 목록 경로 존재 확인, 위 4개 제목 분류 대표 영상 디코딩 성공. 브라우저 조작과 편집기 내 적용 미검증. AtomX DMG/EXE는 보관만 했고 실행·설치하지 않음. 폰트 목록 및 Quick Guide는 원본 Documentation에 보존.
+- 외부 파일은 Git 제외 .runtime의 개인용 라이브러리로 유지. 공개 배포·변환·원격 push 없음. 후속: 실제 편집 앱에서 폰트와 연결 소재 확인 후 선택한 원본으로 새 디자인 제작.
+
+## 2026-09-20 타이포그래피 개별 추가 다운로드
+
+- 사용자 요청에 따라 Starter Kit 외부의 타이포그래피 후보 조사. Aeguys는 이름·이메일·약관 동의 폼이 필요해 제출하지 않음. Gumroad 무료 팩은 다운로드 미완료.
+- Mixkit에서 직접 고른 3개 개별 작품 Bouncing Text Title Block(748), Quick Type Title(547), Fast Bounce Title(570)을 공식 제공 링크로 다운로드. 대량 크롤링은 하지 않음.
+- .runtime/typography-downloads-01에 원본 ZIP/해제 AEP, 출처·해시 manifest.json, 개인용 목록 index.html, README 보관. ZIP 경로와 총크기 검사, CRC 무결성 검증. 네이티브 앱 적용은 미검증. 공개 재배포 대상에 포함하지 않음.
+
+## 2026-09-20 새 타이포그래피 4종 제작
+
+- typewriter/punch/cascade/stamp 추가. 기존 자체 ASS 엔진에 글자·줄별 alpha 등장, 확대·회전 모션 추가. 총 15종. 외부 AEP를 변환한 결과가 아님.
+- examples/motion-series-03.srt 및 .runtime/motion-pack-03: 4종 MP4/ASS/SRT, 폰트·라이선스, 32초 합본, 비교 이미지, README. .runtime/motion-pack-03.zip 전달.
+- 관련 독립 테스트 62개 통과, 대상 Ruff 통과. 4개 영상과 합본 전체 디코딩 성공, 대표 프레임 육안 검수, ZIP 무결성 확인. 앱 적용과 결합문자/이모지 고급 분할 미검증.
+
+## 2026-09-20 최신 자막 스타일·파일 형식 조사
+
+- docs/research/CAPTION_TRENDS_2026-09-20.md 추가. 국내외 공식 제품·규격 및 디자인 기사 조사, 핵심 출처 10개와 추가 탐색 출처 기록.
+- 확인된 기능과 유행 추정을 구분. 단어 강조, 이중 언어, 인물 뒤 타이틀, 한글 가독성 등 8개 자체 제작안과 편집기별 경로 제안.
+- 현재 생성기의 가로형 고정 및 문장 시간 기반 모션을 확인. 다음 우선순위는 세로형 좌표·단어 시각·한국어 줄바꿈. 제안 스키마/템플릿은 아직 구현 안 함.
+- 문서 작업만 수행. 테스트 재실행·다운로드·구독·예약 자동화·공개 배포 없음. 영상 표본 기반 인기 순위나 유지율 검증은 미실시.
+
+## 2026-09-20 세로형 단어 강조 구현
+
+- portrait_captions.py, make_portrait_captions.sh, portrait-words.json, tests/test_portrait_captions.py 및 PORTRAIT_CAPTIONS.md 추가. 설치 스크립트에 Pillow 11.3.0 추가.
+- 1080×1920, 단어별 시각·출처 입력, 실제 폰트 폭 기반 한국어 어절 줄바꿈, 현재 단어 색/박스/확대 3종. 기존 15종의 포인트 색만 선택적으로 재사용.
+- .runtime/portrait-pack-01에 3종 ASS/SRT/VTT/words.json/MP4/폰트 라이선스/보고서, 비교 이미지 생성. 수동 무음 시연이며 원음 자동 정렬 아님.
+- 관련 독립 테스트 73개 및 Ruff 통과. 영상 3개 전체 디코딩·비교 프레임 육안 검수. 폰트 필요한 테스트는 로컬 폰트가 없으면 skip. 전체 서버와 네이티브 앱은 미검증.
+- 다음 작업: 실제 오디오의 단어 시각 연결, 이중 언어, 플랫폼별 위치 검수. 공개 배포·원격 push·추가 구매 없음.
+
+## 2026-09-20 이중 자막·화자 이름표 추가
+
+- portrait_captions.py에 선택적 translation/speaker 검증, 폰트 폭 기반 보조 영역 배치, 안정적인 화자 색상, 원문/번역/이중 SRT·VTT 출력 추가. 기존 입력 호환 유지.
+- examples/portrait-bilingual.json 추가. .runtime/portrait-pack-02에 이중 자막/화자 이름표/결합형의 3가지 조합 영상, ASS, JSON, 자막, 폰트 라이선스, 비교 이미지와 33초 합본 생성. 별도 ZIP 제공.
+- 관련 독립 테스트 81개, Ruff 통과. 긴 번역 거부·잘못된 필드·번역 누락·화자 색 유지·파일 타이밍 검사. 영상 3개와 합본 전체 디코딩, 비교 이미지 육안 검수, ZIP 무결성 검사.
+- 자체 대본·영어 번역, 수동 무음 시연. 자동 번역/화자 인식/원음 정렬 및 실제 편집기 가져오기 미실시. 다음은 실제 음성 시각 연결과 영상 위 합성. 공개 배포·원격 push 없음.
+
+## 2026-09-20 실제 음성 자동 정렬 연결
+
+- audio_captions.py, extract_caption_words.py, make_audio_captions.sh 추가. 기존 Docker 워커 이미지/캐시의 faster-whisper(small)/stable-ts를 네트워크 없이 재사용. 운영 서비스 재시작 없음.
+- 대본 없는 자동 전사, 대본 있는 강제 정렬 두 경로. 원시 단어 시간→어절 병합→폰트 폭/휴지 기반 자막 분할→단어 강조 영상. 시각 오류는 추정으로 감추지 않고 실패. portrait_captions.build에 선택적 WAV 음성 포함 추가.
+- 한국어 사람 목소리 human0.wav 실측: .runtime/audio-caption-asr-01 (4구간18어절), .runtime/audio-caption-aligned-01 (4구간19어절). MP4 약12.7초 실제 음성 포함, 전체 디코딩·비무음 오디오·프레임 검증. 각 verification.json 기록.
+- 관련 독립 테스트 90개, 대상 Ruff 통과. 단어별 외부 정답이 없어 정렬 정확도는 미측정. 전체 서버/네이티브 편집 앱 검증 미실시. CLI 연결이며 웹 UI/API는 미연결.
+- AUDIO_CAPTIONS.md에 실행/환경/한계 작성. 모델·추가 구매·외부 업로드·원격 push 없음. 다음은 실제 사용자 음원 검수 및 원본 영상 화면 합성.
+
+## 2026-09-20 웹 설정·원본 영상 자막 합성 구현
+
+- ClipEditor.tsx에 단어 효과/선택 대본/언어 입력, EditSpec에 선택 필드, 기존 POST /clips→render 워커 연결. 기존 none 경로와 승인 흐름 유지.
+- word_render.py가 선택 구간 음성을 실제 정렬하고 영상 위 ASS 합성. 결과 MP4 및 attempt별 words.json/ASS 저장. 공급자를 pipeline.audio_provider로 옮겨 CLI와 워커가 공유. Dockerfile.worker에 templates 의존성 추가.
+- 웹 빌드, API/편집/렌더/음성 관련 46개+기존 align/diarize API 19개 테스트 통과, Ruff/diff 검사 통과. 종속 라이브러리 deprecation warning 1종.
+- 별도 recording4-caption-preview:local 이미지에서 실제 음성+테스트 영상 12.72초 1080×1920 생성. .runtime/word-overlay-check/output.mp4와 output.words.json/output.ass. 디코딩·오디오(-33.4dB)·강조 프레임 검수.
+- 현재 running stack은 /Users/an-youwon/Projects/recording4-caption-delivery의 다른 버전. 해당 checkout과 배포는 변경하지 않음. 이번 recording4 소스에 구현했으며 실제 웹 브라우저 조작/운영 UI 반영은 미완료. 다음은 운영 checkout 차이를 보존하는 통합과 API·웹·워커 동시 반영.
+
+## 2026-09-20 운영 반영 후속 완료
+
+- 사용자 요청에 따라 운영 checkout recording4-caption-delivery에 선별 통합하고 API·웹·워커·dispatcher·monitor 교체 완료.
+- 기존 자막 가져오기/싱크/화자 검수/트랙 전용 기능 보존, 새 단어 정렬 결과 SRT/VTT 내보내기까지 연결. 운영 전체 테스트491통과/2skip.
+- http://localhost:18444 실제 서비스 로그인·테스트 영상 업로드·정렬 렌더·MP4와 SRT 다운로드 성공. .runtime/live-word-caption-result.mp4 전체 디코딩/소리 검증, 서비스 healthy.
+- 상세 안내는 운영 checkout docs/WORD_CAPTIONS_RELEASE.md. 과거 ‘운영 미반영’ 기록은 이 후속 결과로 갱신됨. Git push/공개 게시 없음.
+
+## 2026-09-20 운영에서 효과 2종 추가
+
+- recording4-caption-delivery를 기준으로 underline-follow/word-focus 추가, 실제 웹에 반영. 해당 checkout의 코드가 최신 운영 구현이다.
+- 실제 서비스에서 두 효과 각각 새 정렬 렌더 작업 성공, SRT 및 소리 있는 MP4 검증. 샘플 .runtime/caption-effects-02/*-live.mp4. 관련41테스트 통과, API/worker healthy.

@@ -1,0 +1,26 @@
+# 로컬 검사용 이미지. CI의 "파이썬 검사" 잡과 같은 조건을 맞춥니다.
+#
+# 이 저장소는 Python 3.11 기준으로 의존성을 고정해 두었습니다. 더 새 파이썬에서는
+# 휠이 없어 설치 자체가 막히므로(예: psycopg-binary 3.2.3), 로컬 파이썬을 맞추는
+# 대신 이 이미지 안에서 검사를 돌립니다.
+#
+# 코드는 실행할 때 저장소를 통째로 마운트합니다. 이 이미지에는 의존성만 들어가므로
+# 코드를 고쳐도 다시 빌드할 필요가 없습니다. pyproject.toml을 고칠 때만 다시 빌드합니다.
+FROM python:3.11-slim
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
+
+# 자막 렌더 테스트가 FFmpeg와 한국어 글꼴을 씁니다. CI의 같은 단계와 맞춥니다.
+RUN apt-get update \
+    && apt-get install --no-install-recommends -y ffmpeg fonts-noto-cjk \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# 의존성 해석에 필요한 파일만 먼저 넣습니다. 나머지는 실행할 때 마운트합니다.
+COPY pyproject.toml README.md ./
+COPY packages ./packages
+RUN pip install --no-cache-dir -e ".[dev,providers]"
+
+CMD ["pytest", "-q"]

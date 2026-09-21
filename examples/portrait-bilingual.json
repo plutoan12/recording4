@@ -1,0 +1,89 @@
+{
+  "version": 1,
+  "timing_source": "manual",
+  "note": "자체 대본과 번역. 무음 시연용 수동 시각이며 실제 음성 정렬 아님.",
+  "cues": [
+    {
+      "start_ms": 500,
+      "end_ms": 3500,
+      "text": "자막도 대화처럼 자연스럽게",
+      "translation": "Let your captions flow like a conversation.",
+      "speaker": "진행자",
+      "words": [
+        {
+          "text": "자막도",
+          "start_ms": 500,
+          "end_ms": 1000
+        },
+        {
+          "text": "대화처럼",
+          "start_ms": 1100,
+          "end_ms": 1600
+        },
+        {
+          "text": "자연스럽게",
+          "start_ms": 1700,
+          "end_ms": 2200
+        }
+      ]
+    },
+    {
+      "start_ms": 4000,
+      "end_ms": 7000,
+      "text": "한국어와 영어를 함께 읽어요",
+      "translation": "Read Korean and English together.",
+      "speaker": "게스트",
+      "words": [
+        {
+          "text": "한국어와",
+          "start_ms": 4000,
+          "end_ms": 4500
+        },
+        {
+          "text": "영어를",
+          "start_ms": 4600,
+          "end_ms": 5100
+        },
+        {
+          "text": "함께",
+          "start_ms": 5200,
+          "end_ms": 5700
+        },
+        {
+          "text": "읽어요",
+          "start_ms": 5800,
+          "end_ms": 6300
+        }
+      ]
+    },
+    {
+      "start_ms": 7500,
+      "end_ms": 10500,
+      "text": "중요한 단어에 시선을 모으세요",
+      "translation": "Bring attention to the words that matter.",
+      "speaker": "진행자",
+      "words": [
+        {
+          "text": "중요한",
+          "start_ms": 7500,
+          "end_ms": 8000
+        },
+        {
+          "text": "단어에",
+          "start_ms": 8100,
+          "end_ms": 8600
+        },
+        {
+          "text": "시선을",
+          "start_ms": 8700,
+          "end_ms": 9200
+        },
+        {
+          "text": "모으세요",
+          "start_ms": 9300,
+          "end_ms": 9800
+        }
+      ]
+    }
+  ]
+}

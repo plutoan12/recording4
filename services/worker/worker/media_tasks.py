@@ -56,12 +56,21 @@ def run_media(task_id: str) -> dict:
                     output,
                     EditSpec.model_validate(spec),
                     rules=rules_from_settings(settings),
+                    word_model=settings.whisper_model,
                 )
                 with output.open("rb") as stream:
                     checksum = hashlib.file_digest(stream, "sha256").hexdigest()
                 output_key = f"renders/{task_id}/{attempt}.mp4"
                 storage.upload_file(output_key, output, "video/mp4")
                 result = {"storage_key": output_key}
+                if spec.get("caption_effect", "none") != "none":
+                    for extension, content_type in (
+                        ("words.json", "application/json"),
+                        ("ass", "text/plain"),
+                    ):
+                        key = f"renders/{task_id}/{attempt}.{extension}"
+                        storage.upload_file(key, output.with_suffix("." + extension), content_type)
+                        result[extension + "_key"] = key
             elif kind == "scenes":
                 result = {"scenes": detect_scenes(source)}
             elif kind == "diarize":
