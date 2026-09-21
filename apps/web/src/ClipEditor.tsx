@@ -128,6 +128,7 @@ export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWo
   const [denoise,setDenoise] = useState('')
   // 무음 컷에서 남길 토막. 자동으로 잰 뒤 사람이 켜고 끕니다.
   const [cuts,setCuts] = useState<{span:[number,number]; keep:boolean}[]>([])
+  const [transition,setTransition] = useState('')
   const [captionLanguage,setCaptionLanguage] = useState('ko')
   const [template,setTemplate] = useState('default')
   const [templates,setTemplates] = useState<Template[]>([])
@@ -301,6 +302,13 @@ export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWo
               onChange={e => setCuts(cuts.map((x,j) => j === i ? {...x, keep: e.target.checked} : x))} />
               {' '}{c.span[0].toFixed(2)}–{c.span[1].toFixed(2)}초 ({(c.span[1]-c.span[0]).toFixed(2)}초)</label>
           </li>)}</ul>
+          <label>이음매 전환
+            <select value={transition} onChange={e => setTransition(e.target.value)}>
+              <option value="">딱 붙이기 (전환 없음)</option>
+              {['fade','dissolve','wipeleft','wiperight','wipeup','wipedown','slideleft','slideright','smoothleft','smoothright','circleopen','circleclose'].map(k =>
+                <option key={k} value={k}>{k}</option>)}
+            </select>
+            <span className="hint">토막을 0.25초씩 겹쳐 잇습니다. 이음매 수 × 0.25초만큼 영상이 짧아지고, 토막이 짧으면 겹침도 그만큼 줄거나 생략됩니다. 무음 컷의 잦은 이음매에는 딱 붙이는 쪽이 보통 자연스럽습니다.</span></label>
           <p className="hint">끈 토막은 영상에서 빠집니다. 여기서 고치면 다시 재도 그 값이 그대로 쓰입니다.
             전부 켜면 자동으로 찾은 그대로입니다. <button type="button" onClick={() => setCuts([])}>컷 목록 비우기</button></p>
         </>}
@@ -459,11 +467,11 @@ export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWo
           setMessage('저장된 대본의 문장 경계로 후보를 만들었습니다. AI 인기도 예측은 아닙니다.')
         })}>구간 후보 찾기</button>
         <button disabled={busy || end <= start || end-start > 180} onClick={() => void act(async () => {
-          await request('/clips', {method:'POST', body: JSON.stringify({source_asset_id:assetId, start, end, mode, focus_x:focus, title, burn_subtitles:burn, caption_language:captionLanguage, subtitle_template:template, subtitle_animation:animation || null, subtitle_preset:preset || null, subtitle_pacing:pacing || null, cues:captions, stickers, silence: trimSilence ? {} : null, keep: cuts.length ? cuts.filter(c => c.keep).map(c => c.span) : null, reframe: autoFrame && mode === 'crop' ? {} : null, denoise: denoise || null})})
+          await request('/clips', {method:'POST', body: JSON.stringify({source_asset_id:assetId, start, end, mode, focus_x:focus, title, burn_subtitles:burn, caption_language:captionLanguage, subtitle_template:template, subtitle_animation:animation || null, subtitle_preset:preset || null, subtitle_pacing:pacing || null, cues:captions, stickers, silence: trimSilence ? {} : null, keep: cuts.length ? cuts.filter(c => c.keep).map(c => c.span) : null, transition: transition ? {kind: transition} : null, reframe: autoFrame && mode === 'crop' ? {} : null, denoise: denoise || null})})
           setMessage('새 편집본의 렌더를 요청했습니다.'); await refresh()
         })}>숏폼 렌더</button>
       </div>
-      <button disabled={busy||end<=start||end-start>180} onClick={()=>{onWorkflow({source_asset_id:assetId,start,end,mode,focus_x:focus,title,burn_subtitles:burn,caption_language:captionLanguage,subtitle_template:template,subtitle_animation:animation||undefined,subtitle_preset:preset||undefined,subtitle_pacing:pacing||undefined,cues:captions,stickers,silence:trimSilence?{}:undefined,keep:cuts.length?cuts.filter(c=>c.keep).map(c=>c.span):undefined,reframe:autoFrame&&mode==='crop'?{}:undefined,denoise:denoise||undefined});setMessage('아래 단계별 제작 화면에 선택 구간을 전달했습니다.')}}>선택 구간을 번역·더빙 단계로 보내기</button>
+      <button disabled={busy||end<=start||end-start>180} onClick={()=>{onWorkflow({source_asset_id:assetId,start,end,mode,focus_x:focus,title,burn_subtitles:burn,caption_language:captionLanguage,subtitle_template:template,subtitle_animation:animation||undefined,subtitle_preset:preset||undefined,subtitle_pacing:pacing||undefined,cues:captions,stickers,silence:trimSilence?{}:undefined,keep:cuts.length?cuts.filter(c=>c.keep).map(c=>c.span):undefined,transition:transition?{kind:transition}:undefined,reframe:autoFrame&&mode==='crop'?{}:undefined,denoise:denoise||undefined});setMessage('아래 단계별 제작 화면에 선택 구간을 전달했습니다.')}}>선택 구간을 번역·더빙 단계로 보내기</button>
       {suggestions.map((s,i) => <button key={i} onClick={() => {setStart(s.start);setEnd(s.end);setTitle(s.title)}}>{s.start.toFixed(1)}–{s.end.toFixed(1)}초 · {s.title}</button>)}
     </>}
     {message && <p role="status">{message}</p>}

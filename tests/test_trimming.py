@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from pipeline.editing import Cue, EditSpec, TrimSettings, Word
+from pipeline.editing import Cue, EditSpec, TransitionSettings, TrimSettings, Word
 from pipeline.subtitle_stickers import Sticker
 from pipeline.trimming import (
     keeps,
@@ -13,6 +13,7 @@ from pipeline.trimming import (
     moved_cues,
     moved_span,
     moved_words,
+    overlap_seconds,
     select_expression,
     trims,
 )
@@ -20,6 +21,8 @@ from worker.rendering import (
     RenderError,
     audio_filter_args,
     clip_keeps,
+    clip_overlap,
+    transition_graph,
     trim_filters,
     trimmed_spec,
 )
@@ -249,3 +252,58 @@ def test_api_schedules_a_silence_measuring_task(client, auth_headers, session, u
     assert task.kind == "silence"
     assert (task.settings["start"], task.settings["end"]) == (10, 40)
     assert task.settings["settings"]["min_gap"] == 1.0
+
+
+def test_a_transition_shortens_the_result_by_the_overlap():
+    kept = [(0.0, 2.0), (5.0, 7.0), (9.0, 12.0)]
+    assert kept_seconds(kept) == pytest.approx(7.0)
+    assert kept_seconds(kept, 0.3) == pytest.approx(6.4)  # 이음매 2곳 × 0.3초
+
+
+def test_times_account_for_the_overlap():
+    kept = [(0.0, 2.0), (5.0, 7.0), (9.0, 12.0)]
+    assert moved(1.0, kept, 0.3) == pytest.approx(1.0)
+    assert moved(5.5, kept, 0.3) == pytest.approx(2.2)  # 2.0 - 0.3 + 0.5
+    assert moved(10.0, kept, 0.3) == pytest.approx(4.4)  # 4.0 - 0.6 + 1.0
+    assert moved(3.0, kept, 0.3) is None
+
+
+def test_the_overlap_never_outgrows_the_shortest_segment():
+    """xfade 는 토막보다 길게 겹칠 수 없습니다. FFmpeg 가 거부합니다."""
+    kept = [(0.0, 2.0), (5.0, 5.4)]
+    assert overlap_seconds(kept, 0.25) == pytest.approx(0.2)  # 가장 짧은 토막의 절반
+    assert overlap_seconds(kept, 5.0) == pytest.approx(0.2)
+    # 너무 짧으면 전환을 포기하고 딱 붙입니다.
+    assert overlap_seconds([(0.0, 2.0), (5.0, 5.05)], 0.25) == 0.0
+    assert overlap_seconds([(0.0, 10.0)], 0.25) == 0.0
+
+
+def test_the_transition_graph_chains_each_join_with_the_right_offset():
+    graph, video, sound = transition_graph(
+        [(0.0, 2.0), (5.0, 7.0), (9.0, 12.0)], kind="wipeleft", overlap=0.3, audio=True
+    )
+    assert "[v0][v1]xfade=transition=wipeleft:duration=0.300:offset=1.700[x1]" in graph
+    # 앞 두 토막을 이으면 3.7초이므로 다음 이음매는 3.4초에서 시작합니다.
+    assert "[x1][v2]xfade=transition=wipeleft:duration=0.300:offset=3.400[x2]" in graph
+    assert "[a0][a1]acrossfade=d=0.300[y1]" in graph
+    assert (video, sound) == ("[x2]", "[y2]")
+
+
+def test_a_silent_source_gets_no_audio_graph():
+    graph, _, _ = transition_graph([(0.0, 2.0), (5.0, 7.0)], kind="fade", overlap=0.3, audio=False)
+    assert "atrim" not in graph and "acrossfade" not in graph
+
+
+def test_clip_overlap_is_zero_without_a_transition():
+    assert clip_overlap(EditSpec(start=0, end=10), [(0.0, 2.0), (5.0, 7.0)]) == 0.0
+    spec = EditSpec(start=0, end=10, transition=TransitionSettings(seconds=0.3))
+    assert clip_overlap(spec, [(0.0, 2.0), (5.0, 7.0)]) == pytest.approx(0.3)
+    # 자를 것이 없으면 이음매도 없습니다.
+    assert clip_overlap(spec, [(0.0, 10.0)]) == 0.0
+
+
+def test_the_trimmed_spec_uses_the_overlapped_length():
+    spec = EditSpec(start=10, end=20, transition=TransitionSettings(seconds=0.3))
+    moved_spec = trimmed_spec(spec, [(0.0, 2.0), (5.0, 7.0)], 0.3)
+    assert moved_spec.end == pytest.approx(3.7)
+    assert moved_spec.transition is None

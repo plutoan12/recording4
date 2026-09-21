@@ -27,6 +27,7 @@ from pipeline.trimming import (
     moved,
     moved_cues,
     moved_span,
+    overlap_seconds,
     select_expression,
     trims,
 )
@@ -34,8 +35,12 @@ from pipeline.trimming import (
 __all__ = [
     "RenderError",
     "audio_filter_args",
+    "has_audio",
+    "transition_graph",
     "clip_keeps",
+    "clip_overlap",
     "clip_path",
+    "cut_with_transitions",
     "ffmpeg_binary",
     "plain_ass",
     "render_clip",
@@ -208,6 +213,7 @@ def clip_path(
     spec: EditSpec,
     kept: Sequence[Span],
     faces: Sequence[Point] | None = None,
+    overlap: float = 0.0,
 ) -> list[Point]:
     """가로 중심이 따라갈 경로. 쓰지 않으면 빈 목록입니다.
 
@@ -223,37 +229,91 @@ def clip_path(
 
         faces = face_track(source, start=spec.start, end=spec.end)[0]
     if trims(kept):
-        shifted = [(moved(at, kept), value) for at, value in faces]
+        shifted = [(moved(at, kept, overlap), value) for at, value in faces]
         faces = [(at, value) for at, value in shifted if at is not None]
     return follow(faces, settings=settings)
 
 
-def trimmed_spec(spec: EditSpec, kept: Sequence[Span]) -> EditSpec:
+def trimmed_spec(spec: EditSpec, kept: Sequence[Span], overlap: float = 0.0) -> EditSpec:
     """자른 뒤의 시간축으로 옮긴 편집 지시.
 
     구간이 0초에서 시작하고 자막·스티커가 이미 옮겨져 있으므로, 뒤따르는
     `clip_cues`·`clip_stickers`는 그대로 지나갑니다.
     """
-    length = kept_seconds(kept)
+    length = kept_seconds(kept, overlap)
     if length < MIN_TRIMMED_SECONDS:
         raise RenderError(
             f"무음을 자르고 나면 {length:.1f}초만 남습니다. 구간을 넓히거나 컷을 약하게 하세요."
         )
     stickers = []
     for sticker in clip_stickers(getattr(spec, "stickers", None) or [], spec.start, spec.end):
-        span = moved_span(sticker.start, sticker.end, kept)
+        span = moved_span(sticker.start, sticker.end, kept, overlap)
         if span:
             stickers.append(sticker.model_copy(update={"start": span[0], "end": span[1]}))
     return spec.model_copy(
         update={
             "start": 0.0,
             "end": length,
-            "cues": moved_cues(clip_cues(spec.cues, spec.start, spec.end), kept),
+            "cues": moved_cues(clip_cues(spec.cues, spec.start, spec.end), kept, overlap),
             "stickers": stickers,
             "silence": None,
             "keep": None,
+            "transition": None,
         }
     )
+
+
+def clip_overlap(spec: EditSpec, kept: Sequence[Span]) -> float:
+    """이어 붙인 자리에서 실제로 겹칠 길이. 전환을 쓰지 않으면 0입니다."""
+    settings = getattr(spec, "transition", None)
+    return overlap_seconds(kept, settings.seconds) if settings else 0.0
+
+
+def cut_with_transitions(
+    source: Path, spec: EditSpec, kept: Sequence[Span], overlap: float, destination: Path
+) -> None:
+    """1차 통과: 자르고 전환으로 이어 임시 파일로 냅니다.
+
+    **두 번에 나눠 합니다.** 전환 그래프와 기존 체인(크기·자막·스티커)을 한
+    그래프에 욱여넣으면 꼬리표가 얽혀 고치기 어려워집니다. 다시 인코딩하는
+    만큼 화질이 조금 깎이므로 중간 파일은 `crf 18`로 넉넉히 둡니다.
+    """
+    kind = getattr(spec, "transition").kind  # noqa: B009 - 부르는 쪽이 있는지 확인했습니다.
+    audio = has_audio(source)
+    graph, video, sound = transition_graph(kept, kind=kind, overlap=overlap, audio=audio)
+    command = [
+        ffmpeg_binary(),
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-nostdin",
+        "-y",
+        "-ss",
+        str(spec.start),
+        "-i",
+        str(source),
+        "-t",
+        str(spec.end - spec.start),
+        "-filter_complex",
+        graph,
+        "-map",
+        video,
+        *(["-map", sound] if audio else []),
+        "-c:v",
+        "libx264",
+        "-preset",
+        "fast",
+        "-crf",
+        "18",
+        *(["-c:a", "aac", "-b:a", "192k"] if audio else []),
+        str(destination),
+    ]
+    try:
+        completed = subprocess.run(command, capture_output=True, timeout=3600)
+    except subprocess.TimeoutExpired as exc:
+        raise RenderError("전환 합성이 1시간 제한을 넘었습니다.") from exc
+    if completed.returncode or not destination.exists():
+        raise RenderError("FFmpeg 전환 합성 실패: 전환 종류와 토막 길이를 확인하세요.")
 
 
 def trim_filters(kept: Sequence[Span]) -> tuple[str, list[str]]:
@@ -270,6 +330,66 @@ def trim_filters(kept: Sequence[Span]) -> tuple[str, list[str]]:
         f"select='{expression}',setpts=N/FRAME_RATE/TB,",
         [f"aselect='{expression}'", "asetpts=N/SR/TB"],
     )
+
+
+def has_audio(source: Path) -> bool:
+    """소리가 들어 있는지. 없는 영상에 음성 그래프를 붙이면 FFmpeg가 멈춥니다."""
+    probe = shutil.which("ffprobe") or ffmpeg_binary().replace("ffmpeg", "ffprobe")
+    try:
+        found = subprocess.run(
+            [
+                probe,
+                "-v",
+                "error",
+                "-select_streams",
+                "a",
+                "-show_entries",
+                "stream=index",
+                "-of",
+                "csv=p=0",
+                str(source),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return bool(found.stdout.strip())
+
+
+def transition_graph(
+    kept: Sequence[Span], *, kind: str, overlap: float, audio: bool
+) -> tuple[str, str, str]:
+    """토막을 잘라 전환으로 잇는 그래프. (그래프, 영상 꼬리표, 소리 꼬리표)입니다.
+
+    `select`로 자르면 토막이 **딱 붙습니다.** 전환을 넣으려면 토막을 각각
+    따로 떠서(`trim`) 겹쳐야 하므로(`xfade`) 그래프가 달라집니다. 소리도
+    같은 길이로 겹칩니다(`acrossfade`).
+
+    `xfade`는 겹친 만큼 짧아지므로 이어 붙일 때마다 길이를 다시 셉니다.
+    """
+    parts = [
+        f"[0:v]trim=start={start:.3f}:end={end:.3f},setpts=PTS-STARTPTS[v{at}]"
+        for at, (start, end) in enumerate(kept)
+    ]
+    if audio:
+        parts += [
+            f"[0:a]atrim=start={start:.3f}:end={end:.3f},asetpts=PTS-STARTPTS[a{at}]"
+            for at, (start, end) in enumerate(kept)
+        ]
+    video, sound = "[v0]", "[a0]"
+    length = kept[0][1] - kept[0][0]
+    for at, (start, end) in enumerate(kept[1:], start=1):
+        parts.append(
+            f"{video}[v{at}]xfade=transition={kind}:duration={overlap:.3f}"
+            f":offset={length - overlap:.3f}[x{at}]"
+        )
+        if audio:
+            parts.append(f"{sound}[a{at}]acrossfade=d={overlap:.3f}[y{at}]")
+        video, sound = f"[x{at}]", f"[y{at}]"
+        length += (end - start) - overlap
+    return ";".join(parts), video, sound
 
 
 def audio_filter_args(spec: EditSpec, kept: Sequence[Span]) -> list[str]:
@@ -299,12 +419,21 @@ def render_clip(
         raise RenderError("유효한 원본과 별도 출력 경로가 필요합니다.")
     output.parent.mkdir(parents=True, exist_ok=True)
     kept = clip_keeps(source, spec, speech)
-    prefix, _ = trim_filters(kept)
+    overlap = clip_overlap(spec, kept)
     # 자른 뒤에는 시간축이 달라집니다. 자막·스티커·얼굴 경로를 먼저 옮깁니다.
-    shown = trimmed_spec(spec, kept) if trims(kept) else spec
-    path = clip_path(source, spec, kept, faces)
+    shown = trimmed_spec(spec, kept, overlap) if trims(kept) else spec
+    path = clip_path(source, spec, kept, faces, overlap)
     with tempfile.TemporaryDirectory(prefix="r4-render-") as directory:
         temp = Path(directory)
+        if overlap:
+            # 전환은 토막을 따로 떠서 겹쳐야 하므로 먼저 한 번 굽습니다.
+            media = temp / "cut.mp4"
+            cut_with_transitions(source, spec, kept, overlap, media)
+            window, prefix, cut_audio = (0.0, shown.end), "", [(0.0, shown.end)]
+        else:
+            media = source
+            window, cut_audio = (spec.start, spec.end - spec.start), kept
+            prefix, _ = trim_filters(kept)
         write_subtitles(temp / "captions.ass", shown, rules)
         try:
             filters = video_filter_args(shown, base_chain=prefix + video_filter(shown, path))
@@ -318,15 +447,15 @@ def render_clip(
             "-nostdin",
             "-y",
             "-ss",
-            str(spec.start),
+            str(window[0]),
             "-i",
-            str(source),
+            str(media),
             "-t",
-            str(spec.end - spec.start),
+            str(window[1]),
             *filters,
             "-map",
             "0:a:0?",
-            *audio_filter_args(spec, kept),
+            *audio_filter_args(spec, cut_audio),
             "-c:v",
             "libx264",
             "-preset",

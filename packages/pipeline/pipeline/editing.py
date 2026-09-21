@@ -62,6 +62,34 @@ class TrimSettings(BaseModel):
 MAX_KEEP = 200
 
 
+# xfade 전환 가운데 자막·세로 화면에서 무난한 것만 엽니다. FFmpeg에는 50여
+# 종이 있지만 화려한 것은 숏폼에서 산만합니다.
+TRANSITIONS = (
+    "fade",
+    "dissolve",
+    "wipeleft",
+    "wiperight",
+    "wipeup",
+    "wipedown",
+    "slideleft",
+    "slideright",
+    "smoothleft",
+    "smoothright",
+    "circleopen",
+    "circleclose",
+)
+
+
+class TransitionSettings(BaseModel):
+    """이어 붙인 자리에 넣을 전환. 비우면 딱 붙입니다(지금까지와 같음)."""
+
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+
+    kind: Literal[TRANSITIONS] = "fade"  # type: ignore[valid-type]
+    # 겹치는 길이. 길면 부드럽지만 그만큼 영상이 짧아지고 말이 겹칩니다.
+    seconds: float = Field(default=0.25, ge=0.05, le=2)
+
+
 class ReframeSettings(BaseModel):
     """자동 리프레이밍의 세기. 기본값은 잰 것이 아니라 정한 것입니다.
 
@@ -120,6 +148,9 @@ class EditSpec(BaseModel):
     # 있으면 `silence`보다 우선합니다. 자동으로 찾은 결과를 화면에서 손본 값이
     # 여기 들어옵니다. 사람이 고른 것을 기계가 다시 덮지 않습니다.
     keep: list[tuple[float, float]] | None = Field(default=None, max_length=MAX_KEEP)
+    # 이어 붙인 자리의 전환. 비우면 딱 붙입니다. 전환을 넣으면 토막이 서로
+    # 겹치므로 영상이 (토막 수 - 1) × seconds 만큼 짧아집니다.
+    transition: TransitionSettings | None = None
 
     @model_validator(mode="after")
     def valid_range(self):

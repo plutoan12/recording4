@@ -1,3 +1,14 @@
+## 2026-09-21: 이음매 전환 (xfade) (Claude)
+
+- 사용자가 고른 넷 중 **마지막**입니다. [PR #36](https://github.com/plutoan12/recording4/pull/36) 후속 커밋. 담당: `pipeline/editing.py`(`TransitionSettings`), `pipeline/trimming.py`(겹침 반영), `worker/rendering.py`, `apps/web`(ClipEditor.tsx, WorkflowPanel.tsx), 테스트·문서.
+- `EditSpec.transition`(기본 없음=딱 붙이기): 종류 12종 + 겹침 초. 켜면 **렌더가 두 번 돕니다** — 1차 `trim`+`xfade`(소리는 `acrossfade`)로 임시 파일, 2차에서 기존 체인을 씌웁니다. 한 그래프에 합치면 꼬리표가 얽히고 검증된 경로가 흔들립니다.
+- 시간축: 겹치면 (이음매 수 × 겹침)만큼 짧아집니다. `trimming.moved`·`kept_seconds`·`moved_cues`·`moved_span`·`clip_path`가 모두 같은 `overlap`을 씁니다.
+- 겹침은 가장 짧은 토막의 절반까지(`overlap_seconds`). 0.05초 미만이면 전환을 포기하고 딱 붙입니다(렌더가 실패하지 않게).
+- 소리 없는 원본은 `ffprobe`로 먼저 확인하고 음성 그래프를 붙이지 않습니다.
+- 검증: 새 테스트 8개(그래프의 이음매 offset 누적, 겹침 상한, 소리 없는 원본, 시간축). 전체 648 passed, 14 skipped. 실패 1건은 변경 전에도 이 환경에서만 실패합니다. ruff 0.8.4·tsc·vite build 통과.
+- **재지 못한 것**: 이 환경에 FFmpeg가 없어 실제 렌더를 못 했습니다. CI의 `test_real_render_joins_the_cuts_with_a_transition`이 12초 원본에서 세 토막을 남겨 딱 붙였을 때 6.0초, 전환 0.3초로 이었을 때 5.4초가 되는지 ffprobe로 잽니다. **CI가 빨간색이면 그 테스트를 먼저 보세요.**
+- 이로써 사용자가 고른 넷(자동 리프레이밍·잡음 제거·전환·컷 편집 화면)이 모두 끝났습니다. 남은 후보: 세로(y) 추적, 말하는 사람 고르기, DeepFilterNet, 배경음악과 sidechaincompress, librosa 비트 맞춤.
+
 ## 2026-09-21: 무음 컷 목록을 사람이 고치기 (Claude)
 
 - 사용자가 고른 넷 중 **무음 컷 편집 화면**입니다. [PR #36](https://github.com/plutoan12/recording4/pull/36) 후속 커밋. 담당: `pipeline/editing.py`(`EditSpec.keep`), `worker/media_tasks.py`·`rendering.py`, `adminapi/models.py`·`routers/editing.py`, `migrations/versions/0009_silence_media_task.py`, `apps/web`(ClipEditor.tsx, WorkflowPanel.tsx, styles.css), 테스트·문서.
