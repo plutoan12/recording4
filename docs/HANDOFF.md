@@ -1,3 +1,16 @@
+## 2026-09-21: 상호 번역·용어집·번역 기억·LLM 보정 (Claude)
+
+브랜치 `claude/claude-md-design-review-v8qdz4`, PR #17 위. 담당: `packages/pipeline/pipeline/{languages,glossary,batching,translation_jobs}.py`, `services/worker/worker/{providers,workflow_tasks}.py`, `services/api/adminapi/{config,models}.py`, `routers/{jobs,workflow}.py`, `migrations/versions/0008_translation_memory.py`, `apps/web/src/WorkflowPanel.tsx`, 테스트 5개, `THIRD_PARTY_NOTICES.md`.
+
+- 경로: 영상 → STT → 기계 번역(google | deepl | huggingface) → 용어집 → (선택) Claude 문맥·말투 보정 → QA → SRT/VTT → TTS. 단계 이름(`translate:N`)·시각·더빙 경로는 그대로입니다.
+- 언어: `pipeline.languages` 한 곳. ko·en·ja·zh 상호 12방향, ko → es·id·th·pt·vi·hi. 지원하지 않는 방향은 작업 생성에서 422, 워커에서 Blocked. 화면 선택지는 `/workflow/configuration`의 목록으로 그립니다.
+- 용어집 API: `GET/PUT /workflow/glossary` (source·target에 `*` 허용, PUT은 새 버전을 덧붙임). 인명·그룹명·곡명·브랜드명은 원문 → 목표 표기(비우면 그대로). 숫자는 항상 보호합니다.
+- 비용: 기억에 있는 문장은 공급자에 안 보내고 추정에도 안 넣습니다. 묶음 안 중복도 한 번. 로컬 모델은 추정 None(예산 예약 없음).
+- 설정: `R4_TRANSLATION_PROVIDER`, `R4_DEEPL_API_KEY`, `R4_HUGGINGFACE_TRANSLATION_MODEL`, `R4_TRANSLATION_REFINE_ENABLED`, `R4_TRANSLATION_REFINE_MODEL`, `R4_REFINE_USD_PER_1K_CHARS`, `R4_TRANSLATE_SCENE_GAP_SECONDS`, `R4_TRANSLATE_MIN/MAX_BATCH_LINES`, `R4_TRANSLATE_CONTEXT_LINES`.
+- 검증: pytest 523 통과 / 8 skip, ruff, tsc·vite build, alembic upgrade→downgrade→upgrade(머리 하나 `0008_translation_memory`).
+- 실제 호출 없음: DeepL·NLLB·Claude 보정은 전부 대역으로만 확인했습니다. 번역 품질 수치는 그대로 없습니다. `scripts/verify_translate.py`는 Google만 부릅니다.
+- 남은 것: DeepL th·vi·hi 지원 실제 확인, NLLB 모델 실측(속도·품질), 보정 전후 chrF 비교, 화자별 말투(캐릭터 메모리)는 안 넣음, 자막 규칙(`LANGUAGE_RULES`)은 ko·en만 실측이라 나머지 언어는 ko 기본값을 씁니다.
+
 ## 2026-09-19: 브라우저 확인·다국어 싱크 실패 조건 추가 (Codex)
 
 - PR #27 후속. 문체 안내/자막 번호/원문 불변을 Chrome 실제 화면에서 확인했습니다. 격리된 테스트 작업이며 영상 재생은 범위 밖입니다.

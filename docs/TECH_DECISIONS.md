@@ -1,5 +1,19 @@
 # 기술 선택과 결정 기록
 
+## 2026-09-21: 번역 경로를 STT → 기계 번역 → 용어집 → LLM 보정 → QA → SRT → TTS로
+
+| 구분 | 내용 |
+|---|---|
+| 채택 | 언어 목록·번역 방향은 `pipeline.languages` 한 곳. 핵심 ko·en·ja·zh 상호 12방향, ko → es·id·th·pt·vi·hi. 판정은 (source, target) 쌍이라 `EXTRA_SOURCES`에 언어를 더하면 그 언어의 방향이 열립니다. API·워커·화면이 전부 이 모듈을 봅니다. |
+| 채택 | 기계 번역 공급자를 설정으로 고릅니다(`R4_TRANSLATION_PROVIDER`: google · deepl · huggingface). Google 경로는 그대로이고 DeepL은 HTTP 직접 호출, Hugging Face는 로컬 NLLB-200(유료 예약 없음). |
+| 채택 | 용어집은 기존 `glossaries` 표. 기계 번역에는 용어·숫자를 자리표시자로 가려 보내고 되돌립니다(`pipeline.glossary`). LLM 보정에는 이 묶음에 나오는 용어만 규칙으로 줍니다. 새 버전을 올리면 번역 기억이 무효화됩니다. |
+| 채택 | 번역 기억(`translation_memory`). 키는 출발·목표·{공급자, 모델, 용어집 버전, 보정 모델·프롬프트 버전}. 묶음 안 중복도 한 번만 보내고, 비용 추정은 기억에 없는 글자만 셉니다. 초안과 보정본을 따로 기억해 보정이 실패해도 기계 번역을 다시 사지 않습니다. |
+| 채택 | 묶음은 장면 경계로 나눕니다(LLM-Subtrans SubtitleBatcher 이식, MIT). 30초 침묵에서 끊고, 100줄(DeepL 50줄)을 넘으면 가장 긴 틈에서 가릅니다. 단계 `translate:N`은 그대로라 실패한 묶음만 다시 돕니다. |
+| 채택 | Claude 문맥·말투 보정은 선택(`R4_TRANSLATION_REFINE_ENABLED`, 단가 필수). 앞뒤 문맥 3줄과 초안을 함께 보내고 번호로 답받습니다. 줄 수가 틀리면 한 번 더 묻고 그래도 틀리면 실패입니다. |
+| 채택 | QA는 읽기 전용. 용어집 위반과 숫자 누락을 `translation_qa`로 남기고 화면에 보여 줍니다. 자동으로 고치지 않습니다. |
+| 미확인 | 실제 DeepL·NLLB·Claude 보정 호출은 하지 않았습니다(지시: 유료 호출 금지). DeepL의 th·vi·hi 지원 여부, NLLB 품질·속도, 보정이 CER/chrF를 얼마나 바꾸는지는 잰 값이 없습니다. |
+| 참고 | 코드 출처와 라이선스는 THIRD_PARTY_NOTICES.md. llm-subs(GPL)는 구조만 따랐습니다. |
+
 ## 2026-09-19: 구운 자막과 YouTube 트랙을 상호 배타적으로 제공
 
 두 자막이 겹치는 문제를 막기 위해 렌더 설정에 `burn_subtitles`를 저장합니다. 기존 결과물과 기본값은 true입니다. false인 새 결과물만 트랙을 올리며, 트랙 실패는 예약을 중단합니다. 대사 자막만 제외하고 제목은 유지합니다. [실제 검증과 한계](CAPTION_DELIVERY.md)를 함께 기록합니다.

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 from functools import lru_cache
+from typing import Literal
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -76,6 +77,22 @@ class Settings(BaseSettings):
     tts_voice_version: str | None = None
     sync_api_key: str | None = None
     translate_usd_per_1k_chars: Decimal | None = None
+    # 번역 경로: STT → 기계 번역(google | deepl | huggingface) → 용어집 → (선택) Claude
+    # 문맥·말투 보정 → QA → SRT/VTT → TTS. 언어 목록은 pipeline.languages 한 곳입니다.
+    # huggingface는 로컬 NLLB 모델이라 유료 예약 없이 돌지만 느리고 출발 언어가 필요합니다.
+    translation_provider: Literal["google", "deepl", "huggingface"] = "google"
+    deepl_api_key: str | None = None
+    huggingface_translation_model: str = "facebook/nllb-200-distilled-600M"
+    # 기계 번역 초안을 Claude가 앞뒤 문맥과 용어집을 보고 고칩니다. 단가가 비어 있으면
+    # 돌지 않습니다. 실제 청구는 토큰 단위인데 글자 수로 잡으므로 넉넉한 상한을 적습니다.
+    translation_refine_enabled: bool = False
+    translation_refine_model: str = "claude-sonnet-5"
+    refine_usd_per_1k_chars: Decimal | None = None
+    # 묶음 나누기(LLM-Subtrans 기본값). 앞뒤 문맥 줄 수는 llm-subs 기본값(3)입니다.
+    translate_scene_gap_seconds: float = Field(default=30.0, gt=0)
+    translate_min_batch_lines: int = Field(default=1, ge=1)
+    translate_max_batch_lines: int = Field(default=100, ge=1, le=100)
+    translate_context_lines: int = Field(default=3, ge=0, le=20)
     tts_usd_per_1k_chars: Decimal | None = None
     lipsync_usd_per_second: Decimal | None = None
     # 하이라이트 추천(Claude). 실제 청구는 토큰 단위인데 여기는 글자 수로

@@ -19,6 +19,7 @@ from adminapi.models import (
     Artifact,
     Budget,
     BudgetReservation,
+    Glossary,
     Job,
     Publication,
     StageRun,
@@ -26,6 +27,7 @@ from adminapi.models import (
 )
 from adminapi.outbox import enqueue
 from adminapi.services.budget import held_total, release, settle
+from pipeline.languages import LANGUAGES, catalogue
 from pipeline.states import JobState, PublicationState, StageRunState, assert_transition
 from pipeline.style_review import style_warnings
 from pipeline.subtitle_files import MEDIA_TYPES, SubtitleFormat
@@ -47,12 +49,25 @@ def ensure_idle(job):
         raise HTTPException(409, "단계가 실행 중입니다. 완료 후 다시 시도하세요.")
 
 
+def translation_ready(s) -> bool:
+    """설정한 공급자로 번역이 돌 수 있는지. 로컬 모델은 키가 필요 없습니다."""
+    if s.translation_provider == "google":
+        return bool(s.google_cloud_project and s.translate_usd_per_1k_chars)
+    if s.translation_provider == "deepl":
+        return bool(s.deepl_api_key and s.translate_usd_per_1k_chars)
+    return s.translation_provider == "huggingface"
+
+
 @router.get("/workflow/configuration")
 def configuration(user: CurrentUser):
     s = get_settings()
     return {
         "paid_enabled": s.paid_processing_enabled,
-        "translation_configured": bool(s.google_cloud_project and s.translate_usd_per_1k_chars),
+        "translation_provider": s.translation_provider,
+        "translation_configured": translation_ready(s),
+        "translation_refine_enabled": bool(
+            s.translation_refine_enabled and s.refine_usd_per_1k_chars
+        ),
         "speech_configured": bool(s.elevenlabs_api_key and s.tts_usd_per_1k_chars),
         "lipsync_configured": bool(s.sync_api_key and s.lipsync_usd_per_second),
         "youtube_configured": bool(
@@ -60,7 +75,75 @@ def configuration(user: CurrentUser):
         ),
         "youtube_channel_id": s.youtube_channel_id,
         "youtube_captions_enabled": s.youtube_captions_enabled,
+        # 언어와 번역 방향은 pipeline.languages 한 곳에서 옵니다. 화면은 이것만 봅니다.
+        **catalogue(),
     }
+
+
+LANGUAGE_OR_ANY = r"^(\*|[a-z]{2,3})$"
+
+
+class GlossaryRequest(BaseModel):
+    source_language: str = Field(pattern=LANGUAGE_OR_ANY)
+    target_language: str = Field(pattern=LANGUAGE_OR_ANY)
+    # 원문 → 목표 표기. 비어 있으면 원문 그대로 지킵니다(인명·그룹명·곡명·브랜드명).
+    entries: dict[str, str | None] = Field(max_length=5000)
+
+    @model_validator(mode="after")
+    def known_languages(self):
+        for code in (self.source_language, self.target_language):
+            if code != "*" and code not in LANGUAGES:
+                raise ValueError(f"지원하지 않는 언어입니다: {code}")
+        if any(not term.strip() or len(term) > 200 for term in self.entries):
+            raise ValueError("용어는 비어 있지 않고 200자 이하여야 합니다.")
+        return self
+
+
+def latest_glossary(session, source, target):
+    return session.scalar(
+        select(Glossary)
+        .where(
+            Glossary.scope == "project",
+            Glossary.source_language == source,
+            Glossary.target_language == target,
+        )
+        .order_by(Glossary.version.desc())
+    )
+
+
+def glossary_response(row, source, target):
+    return {
+        "source_language": source,
+        "target_language": target,
+        "version": row.version if row else 0,
+        "entries": row.entries if row else {},
+    }
+
+
+@router.get("/workflow/glossary")
+def get_glossary(
+    user: CurrentUser,
+    session: SessionDep,
+    source: str = Query(default="*", pattern=LANGUAGE_OR_ANY),
+    target: str = Query(default="*", pattern=LANGUAGE_OR_ANY),
+):
+    return glossary_response(latest_glossary(session, source, target), source, target)
+
+
+@router.put("/workflow/glossary")
+def put_glossary(payload: GlossaryRequest, user: CurrentUser, session: SessionDep):
+    """새 버전을 덧붙입니다. 옛 버전으로 만든 번역 기억은 그대로 두고 다시 쓰지 않습니다."""
+    previous = latest_glossary(session, payload.source_language, payload.target_language)
+    row = Glossary(
+        scope="project",
+        source_language=payload.source_language,
+        target_language=payload.target_language,
+        version=(previous.version + 1) if previous else 1,
+        entries=payload.entries,
+    )
+    session.add(row)
+    session.commit()
+    return glossary_response(row, payload.source_language, payload.target_language)
 
 
 @router.get("/jobs/{job_id}/workflow")
@@ -87,6 +170,8 @@ def detail(job_id: uuid.UUID, user: CurrentUser, session: SessionDep):
         "approval_id": str(approval.id) if approval else None,
         "cues": job.workflow_data.get("cues", []),
         "translated": job.workflow_data.get("translated", []),
+        # 번역 QA(용어집 위반·숫자 누락). 읽기 전용이고 자동으로 고치지 않습니다.
+        "translation_qa": job.workflow_data.get("translation_qa", []),
         "style_warnings": style_warnings(
             rendered_cues(job.workflow_data),
             rendered_language(

@@ -47,6 +47,9 @@ subtitles = [
     "speechbrain==1.1.1",
     "ffsubsync==0.4.27",
 ]
+# 로컬 번역 모델(NLLB-200, R4_TRANSLATION_PROVIDER=huggingface). torch는 subtitles 묶음이
+# 이미 끌어옵니다. 시험은 대역으로 돌므로 없어도 됩니다. 실제 모델로 잰 값은 아직 없습니다.
+translation = ["transformers==5.17.0", "sentencepiece==0.2.1"]
 providers = [
     "google-cloud-translate==3.20.2",
     "google-api-python-client==2.160.0",

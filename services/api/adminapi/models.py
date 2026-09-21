@@ -206,6 +206,32 @@ class TranslatedSegment(Base, TimestampMixin):
     voice_key: Mapped[str | None] = mapped_column(String(128), default=None)
 
 
+class TranslationMemory(Base, TimestampMixin):
+    """같은 문장을 같은 방향으로 두 번 번역하지 않기 위한 기억.
+
+    키는 (출발, 목표, 원문·용어집 버전·공급자의 해시)입니다. 용어집이 바뀌면
+    버전이 바뀌어 새 항목이 됩니다. 사람이 고친 번역은 여기에 넣지 않습니다.
+    그것은 그 작업의 입력이지 공급자가 낸 답이 아니기 때문입니다.
+    """
+
+    __tablename__ = "translation_memory"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=new_id)
+    source_language: Mapped[str] = mapped_column(String(16))
+    target_language: Mapped[str] = mapped_column(String(16))
+    text_hash: Mapped[str] = mapped_column(String(64))
+    source_text: Mapped[str] = mapped_column(Text)
+    translated_text: Mapped[str] = mapped_column(Text)
+    provider: Mapped[str] = mapped_column(String(64))
+    glossary_version: Mapped[str | None] = mapped_column(String(255), default=None)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "source_language", "target_language", "text_hash", name="uq_translation_memory"
+        ),
+    )
+
+
 class Glossary(Base, TimestampMixin):
     """용어집. 번역 단계의 입력이며 버전이 입력 해시에 들어갑니다."""
 

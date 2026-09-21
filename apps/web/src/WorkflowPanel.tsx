@@ -6,12 +6,13 @@ export type WorkflowDraft = {source_asset_id:string; start:number; end:number; m
   title:string; burn_subtitles?:boolean; caption_language?:string; cues:{start:number;end:number;text:string}[]}
 type Cue = {start:number;end:number;text:string}
 type Detail = {id:string;state:string;stage:string|null;reason:string|null;artifact_id:string|null;approval_id:string|null;
-  options:Record<string,unknown>;cues:Cue[];translated:Cue[];
+  options:Record<string,unknown>;cues:Cue[];translated:Cue[];translation_qa?:{index:number;issues:string[]}[];
   style_warnings?:{kind:string;message:string;registers:{label:string;cue_numbers:number[]}[]}[];
   stages:{id:string;name:string;state:string;attempt:number;uncertain:boolean;estimated_cost:string|null}[]}
 type Publication = {id:string;state:string;title:string;video_id:string|null;publish_at:string;error:string|null}
-type Configuration = {paid_enabled:boolean;translation_configured:boolean;speech_configured:boolean;
-  lipsync_configured:boolean;youtube_configured:boolean;youtube_channel_id:string|null}
+type Configuration = {paid_enabled:boolean;translation_provider:string;translation_configured:boolean;translation_refine_enabled:boolean;speech_configured:boolean;
+  lipsync_configured:boolean;youtube_configured:boolean;youtube_channel_id:string|null;
+  languages:{code:string;label:string;tier:number}[];sources:string[];directions:[string,string][]}
 
 export function WorkflowPanel({assets,jobs,draft,onCreated}:{assets:SourceAsset[];jobs:Job[];draft:WorkflowDraft|null;onCreated:()=>Promise<void>}) {
   const [asset,setAsset]=useState('')
@@ -34,6 +35,12 @@ export function WorkflowPanel({assets,jobs,draft,onCreated}:{assets:SourceAsset[
   const [busy,setBusy]=useState(false)
   const [useClip,setUseClip]=useState(false)
   useEffect(()=>{if(draft){setAsset(draft.source_asset_id);setBurn(draft.burn_subtitles??true);setSourceLanguage(draft.caption_language??'ko');setUseClip(true)}},[draft])
+  // 언어 목록과 방향은 서버 설정(pipeline.languages)에서만 옵니다. 여기에 언어를 적지 않습니다.
+  const languages = config?.languages ?? []
+  const label = (code:string)=>languages.find(l=>l.code===code)?.label ?? code
+  const sourceOptions = languages.filter(l=>(config?.sources??[]).includes(l.code))
+  const targetOptions = languages.filter(l=>l.code!==sourceLanguage && (config?.directions??[]).some(([s,t])=>t===l.code && (!sourceLanguage || s===sourceLanguage)))
+  useEffect(()=>{if(targetOptions.length && !targetOptions.some(l=>l.code===target)) setTarget(targetOptions[0].code)},[targetOptions,target])
   const refresh = useCallback(async ()=>{
     try {
       const [c,p,d] = await Promise.all([
@@ -61,13 +68,13 @@ export function WorkflowPanel({assets,jobs,draft,onCreated}:{assets:SourceAsset[
   return <section className="clip-editor">
     <h2>단계별 영상 제작·게시</h2>
     <p>음성 인식·대본 확인 → 자막 번역 → 선택적 더빙 → 최종 검수 → 승인 후 예약</p>
-    {config && <p>유료 처리 {config.paid_enabled?'켜짐':'꺼짐'} · 번역 {config.translation_configured?'준비됨':'설정 필요'} · 더빙 {config.speech_configured?'준비됨':'설정 필요'} · YouTube {config.youtube_configured?'준비됨':'설정 필요'}</p>}
+    {config && <p>유료 처리 {config.paid_enabled?'켜짐':'꺼짐'} · 번역({config.translation_provider}{config.translation_refine_enabled?'+보정':''}) {config.translation_configured?'준비됨':'설정 필요'} · 더빙 {config.speech_configured?'준비됨':'설정 필요'} · YouTube {config.youtube_configured?'준비됨':'설정 필요'}</p>}
     <form onSubmit={create} className="editor-fields">
       <label>원본<select value={asset} onChange={e=>{setAsset(e.target.value);setUseClip(false)}} required><option value="">선택</option>{assets.filter(a=>a.upload_state==='verified').map(a=><option key={a.id} value={a.id}>{a.original_filename}</option>)}</select></label>
       <label>제작 방식<select value={audio} onChange={e=>setAudio(e.target.value)}><option value="original">원어 유지·자막 합성</option><option value="subtitles">자막만 번역 · 원음 유지</option><option value="dub">번역·더빙</option></select></label>
       <label>자막 표시<select value={burn?'burn':'track'} onChange={e=>setBurn(e.target.value==='burn')}><option value="burn">영상에 굽기 · 트랙 업로드 안 함</option><option value="track">YouTube 트랙만 · 영상에 굽지 않음</option></select></label>
-      <label>원본 언어<select value={sourceLanguage} onChange={e=>setSourceLanguage(e.target.value)} required={!burn&&audio==='original'}><option value="">자동 감지</option>{[['ko','한국어'],['en','영어'],['ja','일본어'],['zh','중국어']].map(([code,label])=><option key={code} value={code}>{label}</option>)}</select></label>
-      {audio!=='original' && <label>자막 번역 언어<select value={target} onChange={e=>setTarget(e.target.value)} required>{[['ko','한국어'],['en','영어'],['ja','일본어'],['zh','중국어']].map(([code,label])=><option key={code} value={code}>{label}</option>)}</select></label>}
+      <label>원본 언어<select value={sourceLanguage} onChange={e=>setSourceLanguage(e.target.value)} required={!burn&&audio==='original'}><option value="">자동 감지</option>{sourceOptions.map(l=><option key={l.code} value={l.code}>{l.label}</option>)}</select></label>
+      {audio!=='original' && <label>자막 번역 언어<select value={target} onChange={e=>setTarget(e.target.value)} required>{targetOptions.map(l=><option key={l.code} value={l.code}>{l.label}{l.tier>1?' (한국어에서만)':''}</option>)}</select></label>}
       {audio==='subtitles' && <p>원래 음성과 자막 시간을 유지합니다. 번역 결과는 검수 후 수정하거나 SRT·VTT로 내려받을 수 있습니다.</p>}
       {audio!=='original' && <label>작업 예산 상한 (USD)<input type="number" min="0" max="1" step="0.0001" value={budget} onChange={e=>setBudget(e.target.value)} required /></label>}
       {audio==='dub' && <><label>더빙 음성 ID<input value={voice} onChange={e=>setVoice(e.target.value)} required /></label>
@@ -80,7 +87,7 @@ export function WorkflowPanel({assets,jobs,draft,onCreated}:{assets:SourceAsset[
       <label>월 상한 (USD)<input type="number" min="0.0001" step="0.0001" value={monthly} onChange={e=>setMonthly(e.target.value)} /></label>
       <button disabled={busy||!monthly} onClick={()=>void act(async()=>{await request('/workflow/monthly-budget',{method:'PUT',body:JSON.stringify({limit_usd:monthly})});setMessage('이번 달 공통 예산을 저장했습니다.')})}>월 예산 저장</button>
     </details>
-    <label>진행 작업<select value={selected} onChange={e=>choose(e.target.value)}><option value="">선택</option>{jobs.map(j=><option key={j.id} value={j.id}>{j.target_language} · {j.state} · {j.id.slice(0,8)}</option>)}</select></label>
+    <label>진행 작업<select value={selected} onChange={e=>choose(e.target.value)}><option value="">선택</option>{jobs.map(j=><option key={j.id} value={j.id}>{label(j.target_language)} · {j.state} · {j.id.slice(0,8)}</option>)}</select></label>
     {detail && <>
       <p>{detail.state} · {detail.stage} {detail.reason}</p>
       <ol>{detail.stages.map(s=><li key={s.id}>{s.name} · {s.state} · 시도 {s.attempt}{s.estimated_cost&&` · 비용 상한 $${s.estimated_cost}`}
@@ -104,6 +111,10 @@ export function WorkflowPanel({assets,jobs,draft,onCreated}:{assets:SourceAsset[
         <strong>문체 혼용 확인 · 원문 말투 유지</strong>
         <p>문장은 자동으로 고치지 않습니다. 원문과 비교해 의도된 차이인지 확인해 주세요.</p>
         {detail.style_warnings?.map(w=><div key={w.kind}><p>{w.message}</p><ul>{w.registers.map(r=><li key={r.label}>{r.label}: 자막 {r.cue_numbers.join(', ')}번</li>)}</ul></div>)}
+      </aside>}
+      {(detail.translation_qa?.length??0)>0 && <aside role="note" aria-label="번역 검수 안내">
+        <strong>번역 QA · 자동으로 고치지 않습니다</strong>
+        <ul>{detail.translation_qa?.map(q=><li key={q.index}>자막 {q.index+1}번: {q.issues.join(' / ')}</li>)}</ul>
       </aside>}
       {detail.translated.length>0 && <details><summary>번역 검수·새 버전 만들기</summary>
         <button onClick={()=>setTranslated(detail.translated)}>번역 불러오기</button>

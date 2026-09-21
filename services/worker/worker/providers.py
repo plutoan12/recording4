@@ -65,6 +65,200 @@ class GoogleTranslator:
         ]
 
 
+class DeepLTranslator:
+    """DeepL API v2. Google과 같은 모양(texts → texts)이라 번역 단계가 골라 씁니다.
+
+    공식 SDK 대신 HTTP를 직접 부릅니다. 의존성을 하나 덜고, 시험이 `client`에
+    대역을 넣기 쉽습니다. 무료 키는 api-free.deepl.com, 유료 키는 api.deepl.com입니다.
+    """
+
+    def __init__(self, api_key: str, *, client: httpx.Client, allow_paid: bool = False):
+        self.api_key, self.client, self.allow_paid = api_key, client, allow_paid
+        host = "api-free.deepl.com" if api_key.endswith(":fx") else "api.deepl.com"
+        self.url = f"https://{host}/v2/translate"
+
+    def translate(self, texts: list[str], target: str, source: str | None = None) -> list[str]:
+        from pipeline.languages import DEEPL_SOURCES, DEEPL_TARGETS, provider_code
+
+        require_paid(self.allow_paid)
+        if not texts or len(texts) > 50 or sum(map(len, texts)) > 25000:
+            raise ValueError("DeepL 배치는 1~50문장, 25,000자 이하여야 합니다.")
+        body = {
+            "text": texts,
+            "target_lang": provider_code(DEEPL_TARGETS, target, "DeepL"),
+            # 자막 한 줄이 한 문장이 아닐 수 있습니다. 줄을 문장으로 다시 자르지 않게 합니다.
+            "split_sentences": "0",
+            "preserve_formatting": True,
+        }
+        if source:
+            body["source_lang"] = provider_code(DEEPL_SOURCES, source, "DeepL")
+        response = self.client.post(
+            self.url,
+            headers={"Authorization": f"DeepL-Auth-Key {self.api_key}"},
+            json=body,
+            timeout=60,
+        )
+        if response.status_code != 200:
+            raise ProviderError(f"DeepL 번역 실패: HTTP {response.status_code}")
+        output = [item["text"] for item in response.json().get("translations", [])]
+        if len(output) != len(texts):
+            raise ProviderError("DeepL 응답 수가 입력과 다릅니다.")
+        return [
+            video_terms(original, translated, source, target)
+            for original, translated in zip(texts, output, strict=True)
+        ]
+
+
+class HuggingFaceTranslator:
+    """로컬 번역 모델(NLLB-200). 유료 호출이 아니라 예산 예약 없이 돕니다.
+
+    `pipeline`에 transformers 파이프라인(또는 대역)을 넣습니다. 비어 있으면 모델을
+    내려받아 만듭니다(첫 실행에 수 GB, CPU에서 느립니다). 출발 언어를 모르면
+    쓸 수 없습니다. NLLB는 출발 언어 코드를 요구합니다.
+    """
+
+    DEFAULT_MODEL = "facebook/nllb-200-distilled-600M"
+
+    def __init__(self, model: str = DEFAULT_MODEL, *, pipeline=None, device: str = "cpu"):
+        self.model, self.pipeline, self.device = model, pipeline, device
+
+    def translate(self, texts: list[str], target: str, source: str | None = None) -> list[str]:
+        from pipeline.languages import NLLB_CODES, provider_code
+
+        if not texts:
+            raise ValueError("번역할 문장이 없습니다.")
+        if not source:
+            raise ValueError("로컬 번역 모델은 출발 언어를 알아야 합니다. 원본 언어를 지정하세요.")
+        src = provider_code(NLLB_CODES, source, "NLLB")
+        tgt = provider_code(NLLB_CODES, target, "NLLB")
+        if self.pipeline is None:
+            from transformers import pipeline as make_pipeline
+
+            self.pipeline = make_pipeline("translation", model=self.model, device=self.device)
+        rows = self.pipeline(texts, src_lang=src, tgt_lang=tgt, max_length=512)
+        output = [row["translation_text"] for row in rows]
+        if len(output) != len(texts):
+            raise ProviderError("로컬 번역 모델 응답 수가 입력과 다릅니다.")
+        return output
+
+
+# 문맥·말투 보정과 직접 번역에 쓰는 모델. 줄 수가 많고 답이 짧아 빠른 모델을 씁니다.
+TRANSLATE_MODEL = "claude-sonnet-5"
+TRANSLATE_MAX_TOKENS = 16000
+# 프롬프트가 바뀌면 이 값을 올립니다. 번역 기억의 키에 들어가 옛 답을 다시 쓰지 않게 합니다.
+TRANSLATE_PROMPT_VERSION = "1"
+
+TRANSLATE_SCHEMA = {
+    "type": "json_schema",
+    "schema": {
+        "type": "object",
+        "properties": {
+            "lines": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "id": {"type": "integer", "description": "입력 줄 번호(#n)"},
+                        "text": {"type": "string", "description": "그 줄의 번역"},
+                    },
+                    "required": ["id", "text"],
+                    "additionalProperties": False,
+                },
+            }
+        },
+        "required": ["lines"],
+        "additionalProperties": False,
+    },
+}
+
+# 규칙 문구는 LLM-Subtrans(instructions.txt, MIT)와 srt-ai의 1:1 규칙을 참고했습니다.
+TRANSLATE_SYSTEM = """You translate subtitle lines for short-form video.
+
+You receive numbered lines (#n<tab>text) to translate, optionally with [CONTEXT] lines
+before and after them. Read the context to understand the conversation, but translate
+ONLY the numbered lines.
+
+CRITICAL RULES:
+1. Output EXACTLY one translation per numbered line, with the same id. Never merge or
+   split lines; when one sentence spans several lines, translate each fragment under its own id.
+2. Keep the meaning, register and tone of the source. Do not add or drop information.
+3. Follow the glossary rules exactly. Keep names and numbers as they are.
+4. Subtitles are read quickly: prefer short, natural phrasing in the target language.
+5. Do not ask questions or add commentary."""
+
+REFINE_SYSTEM = """You polish machine-translated subtitle lines for short-form video.
+
+You receive numbered lines: the source text and a draft translation (#n<tab>source<tab>draft),
+with [CONTEXT] lines before and after. Fix what the draft got wrong: mistranslations, wrong
+register or tone for the speaker, awkward phrasing, terminology that ignores the glossary.
+Keep drafts that are already fine — do not rewrite for style alone.
+
+CRITICAL RULES:
+1. Output EXACTLY one line per id. Never merge or split lines.
+2. Keep names and numbers exactly as in the source. Follow the glossary rules exactly.
+3. Keep it short: subtitles are read quickly.
+4. Do not ask questions or add commentary."""
+
+RETRY_INSTRUCTIONS = (
+    "The previous answer was rejected: {reason}. Answer again with exactly one line per id, "
+    "ids {ids}, and nothing else."
+)
+
+
+class ClaudeTranslator:
+    """Claude로 묶음을 번역하거나(모드 translate) 기계 번역 초안을 보정합니다(모드 refine).
+
+    입력은 `pipeline.translation_jobs.TranslationJob`입니다. 답은 번호 → 번역문이고,
+    번호가 빠지거나 남으면 한 번 더 묻습니다(LLM-Subtrans의 retry_instructions).
+    그래도 틀리면 ProviderError입니다. 절반씩 나눠 다시 묻는 것은 하지 않습니다.
+    한 묶음이 실패하면 그 묶음만 단계 재실행으로 다시 갑니다.
+    """
+
+    def __init__(self, *, client=None, allow_paid: bool = False, model: str = TRANSLATE_MODEL):
+        self.client, self.allow_paid, self.model = client, allow_paid, model
+
+    def translate(self, job, *, drafts: list[str] | None = None) -> list[str]:
+        require_paid(self.allow_paid)
+        if not job.translate:
+            raise ValueError("번역할 줄이 없습니다.")
+        if self.client is None:
+            import anthropic
+
+            self.client = anthropic.Anthropic()
+        system = REFINE_SYSTEM if drafts is not None else TRANSLATE_SYSTEM
+        content = job.prompt(drafts=drafts)
+        rejected = None
+        for _attempt in range(2):
+            if rejected:
+                content = RETRY_INSTRUCTIONS.format(reason=rejected, ids=job.ids) + "\n\n" + content
+            response = self.client.messages.create(
+                model=self.model,
+                max_tokens=TRANSLATE_MAX_TOKENS,
+                system=system,
+                output_config={"format": TRANSLATE_SCHEMA},
+                messages=[{"role": "user", "content": content}],
+            )
+            stop = getattr(response, "stop_reason", None)
+            if stop == "refusal":
+                raise ProviderError("모델이 답을 거절했습니다.")
+            if stop == "max_tokens":
+                raise ProviderError("답이 잘렸습니다. 묶음을 줄이세요.")
+            text = next((b.text for b in response.content if b.type == "text"), "")
+            try:
+                rows = json.loads(text)["lines"]
+                answer = {int(row["id"]): str(row["text"]) for row in rows}
+            except (ValueError, KeyError, TypeError) as exc:
+                rejected = f"unreadable answer ({exc})"
+                continue
+            missing = [i for i in job.ids if i not in answer or not answer[i].strip()]
+            extra = [i for i in answer if i not in job.ids]
+            if missing or extra:
+                rejected = f"missing ids {missing}, unexpected ids {extra}"
+                continue
+            return [answer[i] for i in job.ids]
+        raise ProviderError(f"번역 답이 두 번 모두 맞지 않았습니다: {rejected}")
+
+
 class ElevenLabsSpeech:
     def __init__(self, api_key: str, *, client: httpx.Client, allow_paid: bool = False):
         self.api_key, self.client, self.allow_paid = api_key, client, allow_paid
