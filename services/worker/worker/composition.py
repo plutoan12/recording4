@@ -54,7 +54,7 @@ def mix_speech(paths: list[Path], cues: list[Cue], duration: float, output: Path
             start = round(cue.start * RATE)
             bound = round((cues[i + 1].start if i + 1 < len(cues) else duration) * RATE)
             if start < position or bound <= start:
-                raise TimingError(f"{i+1}번 대사의 구간이 겹칩니다. 대본을 수정하세요.")
+                raise TimingError(f"{i + 1}번 대사의 구간이 겹칩니다. 대본을 수정하세요.")
             wav = Path(directory) / f"{i}.wav"
             ffmpeg(["-i", str(path), "-ar", str(RATE), "-ac", "1", "-c:a", "pcm_s16le", str(wav)])
             with wave.open(str(wav), "rb") as speech:
@@ -62,7 +62,7 @@ def mix_speech(paths: list[Path], cues: list[Cue], duration: float, output: Path
             ratio = count / (bound - start)
             if ratio > 1.15:
                 raise TimingError(
-                    f"{i+1}번 더빙이 구간보다 깁니다. 번역을 줄여 새 버전을 만드세요."
+                    f"{i + 1}번 더빙이 구간보다 깁니다. 번역을 줄여 새 버전을 만드세요."
                 )
             if ratio > 1:
                 adjusted = Path(directory) / f"{i}-fit.wav"
@@ -86,7 +86,7 @@ def mix_speech(paths: list[Path], cues: list[Cue], duration: float, output: Path
             with wave.open(str(wav), "rb") as speech:
                 count = speech.getnframes()
                 if count > bound - start + round(0.02 * RATE):
-                    raise TimingError(f"{i+1}번 음성이 다음 구간을 침범합니다.")
+                    raise TimingError(f"{i + 1}번 음성이 다음 구간을 침범합니다.")
                 # atempo rounding at a boundary can leave <=20ms of trailing samples.
                 count = min(count, bound - start)
                 out.writeframes(speech.readframes(count))

@@ -130,4 +130,3 @@ def redact_faces(
         _egoblur(source, output, mosaic_size)
     else:  # defensive guard for callers that bypass Pydantic validation
         raise PrivacyError(f"지원하지 않는 프라이버시 백엔드입니다: {backend}")
-
