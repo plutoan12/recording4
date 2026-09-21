@@ -37,11 +37,12 @@ from adminapi.storage import get_storage
 from pipeline.batching import batch_starts
 from pipeline.budget import BudgetShortfall
 from pipeline.editing import Cue, clip_cues
-from pipeline.glossary import apply_terms, missing_numbers, protect, restore, violations
+from pipeline.glossary import apply_terms, protect, restore
 from pipeline.hashing import StageInputs
 from pipeline.languages import is_supported
 from pipeline.states import JobState, StageRunState
 from pipeline.translation_jobs import build_job
+from pipeline.translation_qa import grouped, review
 from pipeline.workflow import WorkflowOptions, rendered_cues, rendered_language
 from worker.analysis import transcribe
 from worker.celery_app import celery_app
@@ -436,25 +437,19 @@ def terms_for(entries):
     return {term: (target or term) for term, target in entries.items()}
 
 
-def translation_qa(session, source, target, cues, translated):
-    """번역 뒤 검사. 자동으로 고치지 않고 검수 화면에 보여 줄 문제만 모읍니다.
-
-    용어집 위반(원문에 용어가 있는데 목표 표기가 없음)과 사라진 숫자를 봅니다.
-    자막 규칙(줄 수·읽기 속도)은 렌더와 내보내기가 이미 봅니다.
-    """
+def translation_qa(session, settings, source, target, cues, translated):
+    """번역 뒤 검사(pipeline.translation_qa). 자동으로 고치지 않고 검수 화면에 보여 줄 문제만."""
     entries, _ = glossary_for(session, source, target)
-    issues = []
-    for index, (cue, text) in enumerate(zip(cues, translated, strict=True)):
-        found = []
-        wrong = violations(cue["text"], text, entries)
-        if wrong:
-            found.append("용어집: " + ", ".join(f"{k}→{v}" for k, v in wrong.items()))
-        numbers = missing_numbers(cue["text"], text)
-        if numbers:
-            found.append("숫자 누락: " + ", ".join(numbers))
-        if found:
-            issues.append({"index": index, "issues": found})
-    return issues
+    issues = review(
+        [c["text"] for c in cues],
+        translated,
+        source=source,
+        target=target,
+        entries=entries,
+        timings=[(float(c["start"]), float(c["end"])) for c in cues],
+        rules=rules_from_settings(settings, target),
+    )
+    return grouped(issues)
 
 
 def hold_budgets(session, job, stage, estimate):
@@ -565,6 +560,7 @@ def execute_step(name, options, data, asset, directory, stage_id, remote_id, sav
             with get_session_factory()() as session:
                 result["translation_qa"] = translation_qa(
                     session,
+                    settings,
                     options.source_language,
                     data["target"],
                     data["cues"][: len(translated)],

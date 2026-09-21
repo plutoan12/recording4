@@ -10,7 +10,7 @@
 | 채택 | 번역 기억(`translation_memory`). 키는 출발·목표·{공급자, 모델, 용어집 버전, 보정 모델·프롬프트 버전}. 묶음 안 중복도 한 번만 보내고, 비용 추정은 기억에 없는 글자만 셉니다. 초안과 보정본을 따로 기억해 보정이 실패해도 기계 번역을 다시 사지 않습니다. |
 | 채택 | 묶음은 장면 경계로 나눕니다(LLM-Subtrans SubtitleBatcher 이식, MIT). 30초 침묵에서 끊고, 100줄(DeepL 50줄)을 넘으면 가장 긴 틈에서 가릅니다. 단계 `translate:N`은 그대로라 실패한 묶음만 다시 돕니다. |
 | 채택 | Claude 문맥·말투 보정은 선택(`R4_TRANSLATION_REFINE_ENABLED`, 단가 필수). 앞뒤 문맥 3줄과 초안을 함께 보내고 번호로 답받습니다. 줄 수가 틀리면 한 번 더 묻고 그래도 틀리면 실패입니다. |
-| 채택 | QA는 읽기 전용. 용어집 위반과 숫자 누락을 `translation_qa`로 남기고 화면에 보여 줍니다. 자동으로 고치지 않습니다. |
+| 채택 | QA는 읽기 전용(`pipeline.translation_qa`). 용어집 위반·숫자 누락·미번역·빈 줄·출발 언어 글자 잔류·목표 언어 자막 규칙(lines/cps, 시간은 원문 것)을 `translation_qa`로 남기고 화면에 보여 줍니다. 자동으로 고치지 않습니다. 같은 조각으로 `scripts/translate_pipeline.py`가 파일 하나를 끝까지 돌립니다. |
 | 미확인 | 실제 DeepL·NLLB·Claude 보정 호출은 하지 않았습니다(지시: 유료 호출 금지). DeepL의 th·vi·hi 지원 여부, NLLB 품질·속도, 보정이 CER/chrF를 얼마나 바꾸는지는 잰 값이 없습니다. |
 | 참고 | 코드 출처와 라이선스는 THIRD_PARTY_NOTICES.md. llm-subs(GPL)는 구조만 따랐습니다. |
 

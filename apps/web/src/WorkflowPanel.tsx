@@ -34,6 +34,17 @@ export function WorkflowPanel({assets,jobs,draft,onCreated}:{assets:SourceAsset[
   const [message,setMessage]=useState('')
   const [busy,setBusy]=useState(false)
   const [useClip,setUseClip]=useState(false)
+  // 용어집 편집. 한 줄에 '원문<TAB>목표 표기'. 목표가 비면 원문 그대로 지킵니다(인명·그룹명·곡명·브랜드명).
+  const [glossarySource,setGlossarySource]=useState('*')
+  const [glossaryTarget,setGlossaryTarget]=useState('*')
+  const [glossaryText,setGlossaryText]=useState('')
+  const [glossaryVersion,setGlossaryVersion]=useState<number|null>(null)
+  type GlossaryRow = {source_language:string;target_language:string;version:number;entries:Record<string,string|null>}
+  const parseGlossary=(text:string)=>Object.fromEntries(text.split(/\r?\n/).map(l=>l.split('\t')).map(([a,b])=>[(a??'').trim(),(b??'').trim()||null] as const).filter(([a])=>a))
+  const loadGlossary=()=>act(async()=>{const row=await request<GlossaryRow>(`/workflow/glossary?source=${glossarySource}&target=${glossaryTarget}`)
+    setGlossaryVersion(row.version);setGlossaryText(Object.entries(row.entries).map(([k,v])=>v?`${k}\t${v}`:k).join('\n'))})
+  const saveGlossary=()=>act(async()=>{const row=await request<GlossaryRow>('/workflow/glossary',{method:'PUT',body:JSON.stringify({source_language:glossarySource,target_language:glossaryTarget,entries:parseGlossary(glossaryText)})})
+    setGlossaryVersion(row.version);setMessage(`용어집 ${row.source_language}→${row.target_language} 버전 ${row.version}을 저장했습니다. 이 방향의 번역 기억은 새로 만들어집니다.`)})
   useEffect(()=>{if(draft){setAsset(draft.source_asset_id);setBurn(draft.burn_subtitles??true);setSourceLanguage(draft.caption_language??'ko');setUseClip(true)}},[draft])
   // 언어 목록과 방향은 서버 설정(pipeline.languages)에서만 옵니다. 여기에 언어를 적지 않습니다.
   const languages = config?.languages ?? []
@@ -83,6 +94,14 @@ export function WorkflowPanel({assets,jobs,draft,onCreated}:{assets:SourceAsset[
       {draft&&draft.source_asset_id===asset && <label><input type="checkbox" checked={useClip} onChange={e=>setUseClip(e.target.checked)} /> 편집기에서 고른 {draft.start}~{draft.end}초를 숏폼으로 제작</label>}
       <button disabled={busy} type="submit">단계별 제작 시작</button>
     </form>
+    <details><summary>용어집 (인명·그룹명·곡명·브랜드명 보호)</summary>
+      <p>한 줄에 <code>원문&lt;탭&gt;목표 표기</code>. 목표 표기를 비우면 원문을 그대로 지킵니다. 숫자는 항상 보호합니다. <code>*</code>는 모든 언어에 적용됩니다.</p>
+      <label>출발<select value={glossarySource} onChange={e=>setGlossarySource(e.target.value)}><option value="*">모든 언어</option>{languages.map(l=><option key={l.code} value={l.code}>{l.label}</option>)}</select></label>
+      <label>목표<select value={glossaryTarget} onChange={e=>setGlossaryTarget(e.target.value)}><option value="*">모든 언어</option>{languages.map(l=><option key={l.code} value={l.code}>{l.label}</option>)}</select></label>
+      <button disabled={busy} onClick={()=>void loadGlossary()}>불러오기{glossaryVersion!==null&&` (버전 ${glossaryVersion})`}</button>
+      <textarea value={glossaryText} onChange={e=>setGlossaryText(e.target.value)} rows={6} placeholder={'방탄소년단\tBTS\n아이유'} />
+      <button disabled={busy||!glossaryText.trim()} onClick={()=>void saveGlossary()}>새 버전으로 저장</button>
+    </details>
     <details><summary>이번 달 유료 처리 예산</summary><p>작업별 예산과 공통 월 예산을 함께 확인합니다. 사용한 금액과 아직 결과를 확인하지 못한 요청의 예약 금액도 포함합니다.</p>
       <label>월 상한 (USD)<input type="number" min="0.0001" step="0.0001" value={monthly} onChange={e=>setMonthly(e.target.value)} /></label>
       <button disabled={busy||!monthly} onClick={()=>void act(async()=>{await request('/workflow/monthly-budget',{method:'PUT',body:JSON.stringify({limit_usd:monthly})});setMessage('이번 달 공통 예산을 저장했습니다.')})}>월 예산 저장</button>

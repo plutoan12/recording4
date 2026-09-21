@@ -9,7 +9,8 @@
 - 설정: `R4_TRANSLATION_PROVIDER`, `R4_DEEPL_API_KEY`, `R4_HUGGINGFACE_TRANSLATION_MODEL`, `R4_TRANSLATION_REFINE_ENABLED`, `R4_TRANSLATION_REFINE_MODEL`, `R4_REFINE_USD_PER_1K_CHARS`, `R4_TRANSLATE_SCENE_GAP_SECONDS`, `R4_TRANSLATE_MIN/MAX_BATCH_LINES`, `R4_TRANSLATE_CONTEXT_LINES`.
 - 검증: pytest 523 통과 / 8 skip, ruff, tsc·vite build, alembic upgrade→downgrade→upgrade(머리 하나 `0008_translation_memory`).
 - 실제 호출 없음: DeepL·NLLB·Claude 보정은 전부 대역으로만 확인했습니다. 번역 품질 수치는 그대로 없습니다. `scripts/verify_translate.py`는 Google만 부릅니다.
-- 남은 것: DeepL th·vi·hi 지원 실제 확인, NLLB 모델 실측(속도·품질), 보정 전후 chrF 비교, 화자별 말투(캐릭터 메모리)는 안 넣음, 자막 규칙(`LANGUAGE_RULES`)은 ko·en만 실측이라 나머지 언어는 ko 기본값을 씁니다.
+- 두 번째 커밋: QA를 `pipeline.translation_qa`로 옮기고 항목을 늘렸습니다(용어집·숫자·미번역·빈 줄·출발 언어 글자 잔류·목표 언어 자막 규칙 lines/cps, 시간은 원문 것). `scripts/translate_pipeline.py`가 자막 파일 하나로 묶음 → 용어집 → 공급자 → (보정) → QA → SRT/VTT를 돌립니다(identity 공급자는 무료, CI가 두 번 돌려 기억 적중까지 확인). 관리화면에 용어집 편집(불러오기·새 버전 저장)을 넣었습니다. 표본 `docs/samples/ko.srt`, `docs/samples/glossary-kpop.json`.
+- 남은 것: DeepL th·vi·hi 지원 실제 확인, NLLB 모델 실측(속도·품질), 보정 전후 chrF 비교, 화자별 말투(캐릭터 메모리)는 안 넣음, 자막 규칙(`LANGUAGE_RULES`)은 ko·en만 실측이라 나머지 언어는 ko 기본값을 씁니다(QA의 lines/cps도 그 값으로 봅니다).
 
 ## 2026-09-19: 브라우저 확인·다국어 싱크 실패 조건 추가 (Codex)
 

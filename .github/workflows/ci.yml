@@ -71,6 +71,18 @@ jobs:
       - name: 번역 자막 규칙 확인 (무료)
         run: python3 scripts/verify_translate.py --pairs docs/samples/ko-en.json
 
+      # 번역 경로 전체(묶음 → 용어집 보호·복원 → QA → SRT)가 도는지. identity 공급자라
+      # 번역기는 부르지 않습니다. 한 번 더 돌려 기억(캐시)에서 전부 나오는지도 봅니다.
+      - name: 번역 경로 확인 (무료, identity)
+        run: |
+          set -eo pipefail
+          python3 scripts/translate_pipeline.py --input docs/samples/ko.srt --source ko --target en \
+            --glossary docs/samples/glossary-kpop.json --cache "$RUNNER_TEMP/tm.json" \
+            --output "$RUNNER_TEMP/ko-en.srt" | tee "$RUNNER_TEMP/tp1.log"
+          python3 scripts/translate_pipeline.py --input docs/samples/ko.srt --source ko --target en \
+            --glossary docs/samples/glossary-kpop.json --cache "$RUNNER_TEMP/tm.json" | tee "$RUNNER_TEMP/tp2.log"
+          grep -q "공급자에 보낸 문장 0개, 기억에서 4개" "$RUNNER_TEMP/tp2.log"
+
   web:
     name: 관리화면 검사
     runs-on: ubuntu-latest
