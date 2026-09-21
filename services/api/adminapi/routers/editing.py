@@ -28,6 +28,7 @@ from adminapi.models import (
 from adminapi.outbox import enqueue
 from adminapi.storage import ObjectStorage, get_storage
 from adminapi.subtitle_rules import subtitle_rules
+from pipeline.cuts import DEFAULT_MARGIN, DEFAULT_MIN_CLIP, DEFAULT_MIN_CUT
 from pipeline.editing import Cue, EditSpec, suggest_clips
 from pipeline.states import JobState
 from pipeline.subtitle_files import (
@@ -215,7 +216,8 @@ def import_subtitles(
 
 
 class AnalysisRequest(BaseModel):
-    kind: Literal["transcribe", "scenes"]
+    # faces는 세로로 자를 때 어디를 남길지 제안만 합니다. 적용하지 않습니다.
+    kind: Literal["transcribe", "scenes", "faces"]
     language: str | None = Field(default=None, pattern=r"^[a-z]{2,3}$")
 
 
@@ -367,12 +369,47 @@ def subtitle_check(asset_id: uuid.UUID, user: CurrentUser, session: SessionDep):
 
 @router.get("/source-assets/{asset_id}/suggestions")
 def suggestions(asset_id: uuid.UUID, user: CurrentUser, session: SessionDep):
+    """공짜 규칙 추천. 문장 경계로 자를 뿐 무엇이 재미있는지는 모릅니다.
+
+    LLM에게 물어보는 쪽은 유료라 큐를 거칩니다(`POST .../highlights`).
+    """
     asset = asset_for_edit(session, asset_id)
     cues = [
         Cue(start=float(s.start_seconds), end=float(s.end_seconds), text=s.text)
         for s in transcript(session, asset_id)
     ]
     return suggest_clips(cues, duration=float(asset.duration_seconds))
+
+
+@router.post("/source-assets/{asset_id}/highlights", status_code=202)
+def highlights(asset_id: uuid.UUID, user: CurrentUser, session: SessionDep):
+    """LLM에게 숏폼 후보 구간을 물어봅니다. **제안이고, 유료입니다.**
+
+    여기서는 부르지 않습니다. 유료 호출은 예산을 잡은 뒤 워커가 합니다. 결과는
+    이 작업의 `result`에 들어옵니다. 자를지는 사람이 정합니다.
+    """
+    asset_for_edit(session, asset_id)
+    if not transcript(session, asset_id):
+        raise HTTPException(409, "대본이 없습니다. 먼저 전사하거나 대본을 올리세요.")
+    existing = session.scalar(
+        select(MediaTask).where(
+            MediaTask.source_asset_id == asset_id,
+            MediaTask.kind == "highlights",
+            MediaTask.state.in_(["pending", "running"]),
+        )
+    )
+    if existing:
+        return task_response(existing)
+    task = MediaTask(source_asset_id=asset_id, kind="highlights", settings={})
+    session.add(task)
+    session.flush()
+    enqueue(
+        session,
+        topic="media.highlights",
+        payload={"task_id": str(task.id)},
+        dedupe_key=f"media.highlights:{task.id}:{task.attempt}",
+    )
+    return task_response(task)
 
 
 class ClipRequest(EditSpec):
@@ -483,6 +520,74 @@ def retry_task(task_id: uuid.UUID, user: CurrentUser, session: SessionDep):
     task.state, task.error, task.started_at = "pending", None, None
     task.attempt += 1
     return schedule(session, task)
+
+
+class SilenceRequest(BaseModel):
+    """무음 제거 제안 설정. 전부 초 단위입니다."""
+
+    start: float | None = Field(default=None, ge=0)
+    end: float | None = Field(default=None, gt=0)
+    margin: float = Field(default=DEFAULT_MARGIN, ge=0, le=2)
+    min_cut: float = Field(default=DEFAULT_MIN_CUT, ge=0.05, le=10)
+    min_clip: float = Field(default=DEFAULT_MIN_CLIP, ge=0.05, le=10)
+
+
+@router.post("/source-assets/{asset_id}/silence", status_code=202)
+def silence(asset_id: uuid.UUID, payload: SilenceRequest, user: CurrentUser, session: SessionDep):
+    """말이 없는 구간을 빼고 남길 구간을 **제안**합니다. 적용은 사람이 누릅니다."""
+    asset_for_edit(session, asset_id)
+    existing = session.scalar(
+        select(MediaTask).where(
+            MediaTask.source_asset_id == asset_id,
+            MediaTask.kind == "silence",
+            MediaTask.state.in_(["pending", "running"]),
+        )
+    )
+    if existing:
+        return task_response(existing)
+    return schedule(
+        session,
+        MediaTask(source_asset_id=asset_id, kind="silence", settings=payload.model_dump()),
+    )
+
+
+class PreviewFrameRequest(BaseModel):
+    at: float = Field(ge=0)
+    spec: EditSpec
+
+
+@router.post("/source-assets/{asset_id}/preview-frame", status_code=202)
+def preview_frame(
+    asset_id: uuid.UUID, payload: PreviewFrameRequest, user: CurrentUser, session: SessionDep
+):
+    """편집 설정 그대로 한 장만 뽑습니다. 전체를 합성하지 않습니다."""
+    asset_for_edit(session, asset_id)
+    if payload.at >= payload.spec.output_seconds:
+        raise HTTPException(422, "미리볼 시각이 결과 길이 밖입니다.")
+    return schedule(
+        session,
+        MediaTask(
+            source_asset_id=asset_id,
+            kind="preview",
+            settings={"at": payload.at, "spec": payload.spec.model_dump(mode="json")},
+        ),
+    )
+
+
+@router.get("/media-tasks/{task_id}/preview-url")
+def preview_frame_url(
+    task_id: uuid.UUID,
+    user: CurrentUser,
+    session: SessionDep,
+    storage: ObjectStorage = Depends(get_storage),
+):
+    task = session.get(MediaTask, task_id)
+    if task is None or task.kind != "preview":
+        raise HTTPException(404, "미리보기 요청을 찾을 수 없습니다.")
+    key = (task.result or {}).get("storage_key")
+    if not key:
+        raise HTTPException(409, "아직 미리보기가 만들어지지 않았습니다.")
+    return {"url": storage.presigned_get_url(key, 300)}
 
 
 @router.get("/artifacts/{artifact_id}/preview")

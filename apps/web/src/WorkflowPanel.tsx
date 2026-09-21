@@ -6,12 +6,17 @@ export type WorkflowDraft = {source_asset_id:string; start:number; end:number; m
   title:string; burn_subtitles?:boolean; caption_language?:string; cues:{start:number;end:number;text:string}[]}
 type Cue = {start:number;end:number;text:string}
 type Detail = {id:string;state:string;stage:string|null;reason:string|null;artifact_id:string|null;approval_id:string|null;
-  options:Record<string,unknown>;cues:Cue[];translated:Cue[];
+  options:Record<string,unknown>;cues:Cue[];translated:Cue[];translation_qa?:{index:number;issues:string[]}[];
   style_warnings?:{kind:string;message:string;registers:{label:string;cue_numbers:number[]}[]}[];
   stages:{id:string;name:string;state:string;attempt:number;uncertain:boolean;estimated_cost:string|null}[]}
 type Publication = {id:string;state:string;title:string;video_id:string|null;publish_at:string;error:string|null}
-type Configuration = {paid_enabled:boolean;translation_configured:boolean;speech_configured:boolean;
-  lipsync_configured:boolean;youtube_configured:boolean;youtube_channel_id:string|null}
+type Review = {id:string;kind:string;state:string;language:string;branch:string;path:string;pull_number:number|null;
+  pull_url:string|null;error:string|null;problems:string[];notes:string[];applicable:boolean;glossary_changed:boolean;cue_count:number}
+type ReviewDetail = Review & {cues:Cue[];glossary:Record<string,string|null>|null;glossary_source:string}
+type Configuration = {paid_enabled:boolean;translation_provider:string;translation_configured:boolean;translation_refine_enabled:boolean;speech_configured:boolean;
+  lipsync_configured:boolean;youtube_configured:boolean;youtube_channel_id:string|null;
+  github_review_configured:boolean;github_repository:string|null;
+  languages:{code:string;label:string;tier:number}[];sources:string[];directions:[string,string][]}
 
 export function WorkflowPanel({assets,jobs,draft,onCreated}:{assets:SourceAsset[];jobs:Job[];draft:WorkflowDraft|null;onCreated:()=>Promise<void>}) {
   const [asset,setAsset]=useState('')
@@ -27,20 +32,39 @@ export function WorkflowPanel({assets,jobs,draft,onCreated}:{assets:SourceAsset[
   const [detail,setDetail]=useState<Detail|null>(null)
   const [translated,setTranslated]=useState<Cue[]>([])
   const [publications,setPublications]=useState<Publication[]>([])
+  const [reviews,setReviews]=useState<Review[]>([])
   const [config,setConfig]=useState<Configuration|null>(null)
   const [url,setUrl]=useState('')
   const [played,setPlayed]=useState(false)
   const [message,setMessage]=useState('')
   const [busy,setBusy]=useState(false)
   const [useClip,setUseClip]=useState(false)
+  // 용어집 편집. 한 줄에 '원문<TAB>목표 표기'. 목표가 비면 원문 그대로 지킵니다(인명·그룹명·곡명·브랜드명).
+  const [glossarySource,setGlossarySource]=useState('*')
+  const [glossaryTarget,setGlossaryTarget]=useState('*')
+  const [glossaryText,setGlossaryText]=useState('')
+  const [glossaryVersion,setGlossaryVersion]=useState<number|null>(null)
+  type GlossaryRow = {source_language:string;target_language:string;version:number;entries:Record<string,string|null>}
+  const parseGlossary=(text:string)=>Object.fromEntries(text.split(/\r?\n/).map(l=>l.split('\t')).map(([a,b])=>[(a??'').trim(),(b??'').trim()||null] as const).filter(([a])=>a))
+  const loadGlossary=()=>act(async()=>{const row=await request<GlossaryRow>(`/workflow/glossary?source=${glossarySource}&target=${glossaryTarget}`)
+    setGlossaryVersion(row.version);setGlossaryText(Object.entries(row.entries).map(([k,v])=>v?`${k}\t${v}`:k).join('\n'))})
+  const saveGlossary=()=>act(async()=>{const row=await request<GlossaryRow>('/workflow/glossary',{method:'PUT',body:JSON.stringify({source_language:glossarySource,target_language:glossaryTarget,entries:parseGlossary(glossaryText)})})
+    setGlossaryVersion(row.version);setMessage(`용어집 ${row.source_language}→${row.target_language} 버전 ${row.version}을 저장했습니다. 이 방향의 번역 기억은 새로 만들어집니다.`)})
   useEffect(()=>{if(draft){setAsset(draft.source_asset_id);setBurn(draft.burn_subtitles??true);setSourceLanguage(draft.caption_language??'ko');setUseClip(true)}},[draft])
+  // 언어 목록과 방향은 서버 설정(pipeline.languages)에서만 옵니다. 여기에 언어를 적지 않습니다.
+  const languages = config?.languages ?? []
+  const label = (code:string)=>languages.find(l=>l.code===code)?.label ?? code
+  const sourceOptions = languages.filter(l=>(config?.sources??[]).includes(l.code))
+  const targetOptions = languages.filter(l=>l.code!==sourceLanguage && (config?.directions??[]).some(([s,t])=>t===l.code && (!sourceLanguage || s===sourceLanguage)))
+  useEffect(()=>{if(targetOptions.length && !targetOptions.some(l=>l.code===target)) setTarget(targetOptions[0].code)},[targetOptions,target])
   const refresh = useCallback(async ()=>{
     try {
-      const [c,p,d] = await Promise.all([
+      const [c,p,d,r] = await Promise.all([
         request<Configuration>('/workflow/configuration'), request<Publication[]>('/publications'),
         selected ? request<Detail>(`/jobs/${selected}/workflow`) : Promise.resolve(null),
+        selected ? request<Review[]>(`/jobs/${selected}/reviews`) : Promise.resolve([] as Review[]),
       ])
-      setConfig(c);setPublications(p);setDetail(d)
+      setConfig(c);setPublications(p);setDetail(d);setReviews(r)
     } catch(e){setMessage(e instanceof Error?e.message:'상태 조회 실패')}
   },[selected])
   useEffect(()=>{void refresh();const timer=setInterval(()=>void refresh(),5000);return()=>clearInterval(timer)},[refresh])
@@ -57,17 +81,19 @@ export function WorkflowPanel({assets,jobs,draft,onCreated}:{assets:SourceAsset[
         ...(useClip&&draft ? {clip:{start:draft.start,end:draft.end,mode:draft.mode,focus_x:draft.focus_x,title:draft.title},transcript:draft.cues} : {})}})})
     setSelected(job.id);setUrl('');setPlayed(false);setMessage('작업을 시작했습니다. 단계별 결과가 아래에 표시됩니다.')
   })}
-  function choose(id:string){setSelected(id);setDetail(null);setTranslated([]);setUrl('');setPlayed(false)}
+  function choose(id:string){setSelected(id);setDetail(null);setTranslated([]);setReviews([]);setUrl('');setPlayed(false)}
+  const startReview=(id:string,kind:'export'|'import',done:string)=>act(async()=>{
+    await request(`/jobs/${id}/review`,{method:'POST',body:JSON.stringify({kind})});setMessage(done)})
   return <section className="clip-editor">
     <h2>단계별 영상 제작·게시</h2>
     <p>음성 인식·대본 확인 → 자막 번역 → 선택적 더빙 → 최종 검수 → 승인 후 예약</p>
-    {config && <p>유료 처리 {config.paid_enabled?'켜짐':'꺼짐'} · 번역 {config.translation_configured?'준비됨':'설정 필요'} · 더빙 {config.speech_configured?'준비됨':'설정 필요'} · YouTube {config.youtube_configured?'준비됨':'설정 필요'}</p>}
+    {config && <p>유료 처리 {config.paid_enabled?'켜짐':'꺼짐'} · 번역({config.translation_provider}{config.translation_refine_enabled?'+보정':''}) {config.translation_configured?'준비됨':'설정 필요'} · 더빙 {config.speech_configured?'준비됨':'설정 필요'} · YouTube {config.youtube_configured?'준비됨':'설정 필요'}</p>}
     <form onSubmit={create} className="editor-fields">
       <label>원본<select value={asset} onChange={e=>{setAsset(e.target.value);setUseClip(false)}} required><option value="">선택</option>{assets.filter(a=>a.upload_state==='verified').map(a=><option key={a.id} value={a.id}>{a.original_filename}</option>)}</select></label>
       <label>제작 방식<select value={audio} onChange={e=>setAudio(e.target.value)}><option value="original">원어 유지·자막 합성</option><option value="subtitles">자막만 번역 · 원음 유지</option><option value="dub">번역·더빙</option></select></label>
       <label>자막 표시<select value={burn?'burn':'track'} onChange={e=>setBurn(e.target.value==='burn')}><option value="burn">영상에 굽기 · 트랙 업로드 안 함</option><option value="track">YouTube 트랙만 · 영상에 굽지 않음</option></select></label>
-      <label>원본 언어<select value={sourceLanguage} onChange={e=>setSourceLanguage(e.target.value)} required={!burn&&audio==='original'}><option value="">자동 감지</option>{[['ko','한국어'],['en','영어'],['ja','일본어'],['zh','중국어']].map(([code,label])=><option key={code} value={code}>{label}</option>)}</select></label>
-      {audio!=='original' && <label>자막 번역 언어<select value={target} onChange={e=>setTarget(e.target.value)} required>{[['ko','한국어'],['en','영어'],['ja','일본어'],['zh','중국어']].map(([code,label])=><option key={code} value={code}>{label}</option>)}</select></label>}
+      <label>원본 언어<select value={sourceLanguage} onChange={e=>setSourceLanguage(e.target.value)} required={!burn&&audio==='original'}><option value="">자동 감지</option>{sourceOptions.map(l=><option key={l.code} value={l.code}>{l.label}</option>)}</select></label>
+      {audio!=='original' && <label>자막 번역 언어<select value={target} onChange={e=>setTarget(e.target.value)} required>{targetOptions.map(l=><option key={l.code} value={l.code}>{l.label}{l.tier>1?' (한국어에서만)':''}</option>)}</select></label>}
       {audio==='subtitles' && <p>원래 음성과 자막 시간을 유지합니다. 번역 결과는 검수 후 수정하거나 SRT·VTT로 내려받을 수 있습니다.</p>}
       {audio!=='original' && <label>작업 예산 상한 (USD)<input type="number" min="0" max="1" step="0.0001" value={budget} onChange={e=>setBudget(e.target.value)} required /></label>}
       {audio==='dub' && <><label>더빙 음성 ID<input value={voice} onChange={e=>setVoice(e.target.value)} required /></label>
@@ -76,11 +102,19 @@ export function WorkflowPanel({assets,jobs,draft,onCreated}:{assets:SourceAsset[
       {draft&&draft.source_asset_id===asset && <label><input type="checkbox" checked={useClip} onChange={e=>setUseClip(e.target.checked)} /> 편집기에서 고른 {draft.start}~{draft.end}초를 숏폼으로 제작</label>}
       <button disabled={busy} type="submit">단계별 제작 시작</button>
     </form>
+    <details><summary>용어집 (인명·그룹명·곡명·브랜드명 보호)</summary>
+      <p>한 줄에 <code>원문&lt;탭&gt;목표 표기</code>. 목표 표기를 비우면 원문을 그대로 지킵니다. 숫자는 항상 보호합니다. <code>*</code>는 모든 언어에 적용됩니다.</p>
+      <label>출발<select value={glossarySource} onChange={e=>setGlossarySource(e.target.value)}><option value="*">모든 언어</option>{languages.map(l=><option key={l.code} value={l.code}>{l.label}</option>)}</select></label>
+      <label>목표<select value={glossaryTarget} onChange={e=>setGlossaryTarget(e.target.value)}><option value="*">모든 언어</option>{languages.map(l=><option key={l.code} value={l.code}>{l.label}</option>)}</select></label>
+      <button disabled={busy} onClick={()=>void loadGlossary()}>불러오기{glossaryVersion!==null&&` (버전 ${glossaryVersion})`}</button>
+      <textarea value={glossaryText} onChange={e=>setGlossaryText(e.target.value)} rows={6} placeholder={'방탄소년단\tBTS\n아이유'} />
+      <button disabled={busy||!glossaryText.trim()} onClick={()=>void saveGlossary()}>새 버전으로 저장</button>
+    </details>
     <details><summary>이번 달 유료 처리 예산</summary><p>작업별 예산과 공통 월 예산을 함께 확인합니다. 사용한 금액과 아직 결과를 확인하지 못한 요청의 예약 금액도 포함합니다.</p>
       <label>월 상한 (USD)<input type="number" min="0.0001" step="0.0001" value={monthly} onChange={e=>setMonthly(e.target.value)} /></label>
       <button disabled={busy||!monthly} onClick={()=>void act(async()=>{await request('/workflow/monthly-budget',{method:'PUT',body:JSON.stringify({limit_usd:monthly})});setMessage('이번 달 공통 예산을 저장했습니다.')})}>월 예산 저장</button>
     </details>
-    <label>진행 작업<select value={selected} onChange={e=>choose(e.target.value)}><option value="">선택</option>{jobs.map(j=><option key={j.id} value={j.id}>{j.target_language} · {j.state} · {j.id.slice(0,8)}</option>)}</select></label>
+    <label>진행 작업<select value={selected} onChange={e=>choose(e.target.value)}><option value="">선택</option>{jobs.map(j=><option key={j.id} value={j.id}>{label(j.target_language)} · {j.state} · {j.id.slice(0,8)}</option>)}</select></label>
     {detail && <>
       <p>{detail.state} · {detail.stage} {detail.reason}</p>
       <ol>{detail.stages.map(s=><li key={s.id}>{s.name} · {s.state} · 시도 {s.attempt}{s.estimated_cost&&` · 비용 상한 $${s.estimated_cost}`}
@@ -105,6 +139,33 @@ export function WorkflowPanel({assets,jobs,draft,onCreated}:{assets:SourceAsset[
         <p>문장은 자동으로 고치지 않습니다. 원문과 비교해 의도된 차이인지 확인해 주세요.</p>
         {detail.style_warnings?.map(w=><div key={w.kind}><p>{w.message}</p><ul>{w.registers.map(r=><li key={r.label}>{r.label}: 자막 {r.cue_numbers.join(', ')}번</li>)}</ul></div>)}
       </aside>}
+      {(detail.translation_qa?.length??0)>0 && <aside role="note" aria-label="번역 검수 안내">
+        <strong>번역 QA · 자동으로 고치지 않습니다</strong>
+        <ul>{detail.translation_qa?.map(q=><li key={q.index}>자막 {q.index+1}번: {q.issues.join(' / ')}</li>)}</ul>
+      </aside>}
+      {config?.github_review_configured && <details><summary>GitHub에서 검수{config.github_repository&&` (${config.github_repository})`}</summary>
+        <p>자막(SRT)과 용어집을 검수 브랜치에 올리고 PR을 엽니다. 번역가는 GitHub에서 <strong>글자만</strong> 고칩니다. 시각이나 자막 개수를 바꾸면 가져올 때 걸립니다. 병합은 사람이 합니다.</p>
+        <button disabled={busy||detail.cues.length===0} onClick={()=>void startReview(detail.id,'export','검수 브랜치로 내보내는 중입니다. 잠시 뒤 PR 주소가 보입니다.')}>GitHub로 내보내기</button>
+        <button disabled={busy||!reviews.some(r=>r.kind==='export'&&r.state==='succeeded')} onClick={()=>void startReview(detail.id,'import','검수 브랜치에서 가져오는 중입니다.')}>GitHub에서 가져오기</button>
+        <ul>{reviews.map(r=><li key={r.id}>{r.kind==='export'?'내보내기':'가져오기'} · {r.state}{r.cue_count>0&&` · 자막 ${r.cue_count}개`}
+          {r.pull_url&&<> · <a href={r.pull_url} target="_blank" rel="noreferrer">PR #{r.pull_number}</a></>}
+          {r.error&&<p role="alert">{r.error}</p>}
+          {r.problems.length>0&&<><p><strong>가져온 자막에 문제가 있습니다. 고치기 전에는 넣을 수 없습니다.</strong></p><ul>{r.problems.map((t,i)=><li key={i}>{t}</li>)}</ul></>}
+          {r.notes.length>0&&<p>{r.notes.join(' / ')}</p>}
+          {r.kind==='import'&&r.state==='succeeded'&&<>
+            <button disabled={busy||!r.applicable} onClick={()=>void act(async()=>{
+              const full=await request<ReviewDetail>(`/reviews/${r.id}`)
+              setTranslated(full.cues);setMessage('가져온 번역을 아래 검수칸에 넣었습니다. 확인한 뒤 새 버전을 만드세요.')
+            })}>{r.applicable?'검수칸에 불러오기':'문제가 있어 불러올 수 없습니다'}</button>
+            {r.glossary_changed&&<button disabled={busy} onClick={()=>void act(async()=>{
+              const full=await request<ReviewDetail>(`/reviews/${r.id}`)
+              if(!full.glossary)throw new Error('가져온 용어집이 비어 있습니다.')
+              await request('/workflow/glossary',{method:'PUT',body:JSON.stringify({source_language:full.glossary_source,target_language:r.language,entries:full.glossary})})
+              setMessage('GitHub에서 고친 용어집을 새 버전으로 저장했습니다. 이 방향의 번역 기억은 새로 만들어집니다.')
+            })}>고친 용어집 저장</button>}
+          </>}
+        </li>)}</ul>
+      </details>}
       {detail.translated.length>0 && <details><summary>번역 검수·새 버전 만들기</summary>
         <button onClick={()=>setTranslated(detail.translated)}>번역 불러오기</button>
         {translated.map((c,i)=><label key={i}>자막 {i+1} · {c.start.toFixed(1)}~{c.end.toFixed(1)}초<textarea value={c.text} onChange={e=>setTranslated(rows=>rows.map((r,j)=>j===i?{...r,text:e.target.value}:r))} /></label>)}

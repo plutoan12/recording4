@@ -19,6 +19,7 @@ from pipeline.alignment import (
     supported_options,
 )
 from pipeline.editing import Cue
+from pipeline.overlap import SpokenCue, flag_overlaps, inside, overlap_regions, speaker_spans
 from pipeline.speakers import SpeakerTurn, cluster, turns_from_labels, windows
 from pipeline.subtitle_files import dump_subtitles, parse_subtitles
 from worker.rendering import ffmpeg_binary
@@ -32,8 +33,20 @@ class MissingDependency(RuntimeError):
 
 
 def transcribe(
-    source: Path, *, model: str = "small", language: str | None = None, device: str = "cpu"
+    source: Path,
+    *,
+    model: str = "small",
+    language: str | None = None,
+    device: str = "cpu",
+    tuning: dict | None = None,
 ) -> list[Cue]:
+    """오디오를 받아씁니다.
+
+    `tuning`은 디코딩 손잡이를 그대로 넘기는 자리입니다. 비워 두면 **지금까지와
+    똑같이** 돕니다. 소음·겹말에서 무엇이 나아지는지 재기 전에는 기본값을 바꾸지
+    않습니다(`scripts/verify_robust.py`). 재 보지 않은 손잡이를 운영 기본값으로
+    올리면 좋아졌는지 나빠졌는지 알 수 없습니다.
+    """
     try:
         from faster_whisper import WhisperModel
     except ImportError as exc:
@@ -44,13 +57,83 @@ def transcribe(
         model, device=device, compute_type="int8" if device == "cpu" else "float16"
     )
     segments, _ = engine.transcribe(
-        str(source), language=language, vad_filter=True, word_timestamps=True
+        str(source),
+        language=language,
+        vad_filter=True,
+        word_timestamps=True,
+        **(tuning or {}),
     )
     return [
         Cue(start=s.start, end=s.end, text=s.text.strip())
         for s in segments
         if s.text.strip() and s.end > s.start
     ]
+
+
+def mask_outside(audio, spans: list[tuple[float, float]], rate: int = 16000):  # noqa: ANN001, ANN201
+    """`spans` 밖을 무음으로 지운 복사본. numpy 배열을 받아 numpy 배열을 줍니다.
+
+    화자별로 받아쓸 때 씁니다. 그 화자의 구간만 남기면 다른 화자의 말은
+    전사기에 들어가지 않습니다. 겹친 시간은 어쩔 수 없이 둘 다 들어가는데, 그
+    자막에는 겹침 표시가 붙습니다.
+    """
+    import numpy as np
+
+    kept = np.zeros_like(audio)
+    for begin, finish in spans:
+        lo, hi = max(0, int(begin * rate)), min(len(audio), int(finish * rate))
+        if hi > lo:
+            kept[lo:hi] = audio[lo:hi]
+    return kept
+
+
+def transcribe_by_speaker(
+    source: Path,
+    turns: list[SpeakerTurn],
+    *,
+    model: str = "small",
+    language: str | None = None,
+    device: str = "cpu",
+    tuning: dict | None = None,
+) -> list[SpokenCue]:
+    """화자마다 따로 받아씁니다. 겹말 구간의 자막에는 겹침 표시를 붙입니다.
+
+    섞인 소리를 한 번에 받아쓰면 겹말에서 남의 말이 통째로 섞여 나옵니다(실측:
+    끼어든 목소리가 5dB만 작아도 CER 92%). 화자 구간 밖을 무음으로 지우면
+    겹치지 않은 시간에는 그럴 길이 없습니다. 겹친 시간은 여전히 못 믿는데,
+    **못 믿는다고 표시**됩니다.
+
+    무음에 지어낸 자막(그 화자가 말하지 않은 시각)은 버립니다. 화자 수만큼
+    전사를 돌리므로 그만큼 느립니다.
+    """
+    import tempfile
+    import wave
+
+    import numpy as np
+    from faster_whisper.audio import decode_audio
+
+    if not turns:
+        raise ValueError("화자 구간이 없습니다. 먼저 화자를 나누세요.")
+    audio = decode_audio(str(source), sampling_rate=16000)
+    regions = overlap_regions(turns)
+    spoken: list[SpokenCue] = []
+    with tempfile.TemporaryDirectory(prefix="r4-speaker-") as temp:
+        for speaker in sorted({t.speaker for t in turns}):
+            spans = speaker_spans(turns, speaker)
+            only = Path(temp) / f"{speaker}.wav"
+            with wave.open(str(only), "wb") as out:
+                out.setnchannels(1)
+                out.setsampwidth(2)
+                out.setframerate(16000)
+                samples = np.clip(mask_outside(audio, spans), -0.999, 0.999)
+                out.writeframes((samples * 32767).astype("<i2").tobytes())
+            cues = transcribe(only, model=model, language=language, device=device, tuning=tuning)
+            flags = flag_overlaps(cues, regions)
+            for cue, flagged in zip(cues, flags, strict=True):
+                if not inside(cue, spans):
+                    continue
+                spoken.append(SpokenCue(cue=cue, speaker=speaker, overlap=flagged))
+    return sorted(spoken, key=lambda item: (item.cue.start, item.speaker))
 
 
 def align_text(

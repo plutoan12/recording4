@@ -114,3 +114,15 @@ GOOGLE_APPLICATION_CREDENTIALS=~/.runtime/google-adc.json \
   돌려 실제 정렬 시각으로 재야 확실합니다.
 - 영어 외 목표 언어. `LANGUAGE_RULES`에 한국어와 영어만 있습니다. 모르는
   언어는 설정값을 그대로 씁니다(추측해서 바꾸지 않습니다).
+
+## 파일 하나로 번역 경로 돌리기 (2026-09-21)
+
+`scripts/translate_pipeline.py`는 워커의 `translate:N` 단계와 같은 조각으로 자막 파일 하나를
+묶음 → 용어집 보호 → 기계 번역 → (Claude 보정) → QA → SRT/VTT까지 돌립니다.
+
+    python3 scripts/translate_pipeline.py --input docs/samples/ko.srt --source ko --target en \
+        --glossary docs/samples/glossary-kpop.json --provider identity --output /tmp/ko-en.srt
+
+`--provider identity`는 번역기를 부르지 않습니다(CI가 이렇게 돕니다). google · deepl ·
+huggingface · claude와 `--refine`은 `--allow-paid`가 있어야 부릅니다. `--cache`를 주면 같은
+문장을 다시 보내지 않습니다. QA 항목은 `pipeline.translation_qa` 문서 문자열을 보세요.

@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -105,3 +106,96 @@ def test_google_translation_applies_explicit_video_terminology():
         ["녹화 중입니다."], "zh", "ko"
     )
     assert translated == ["录像仍在继续。"]
+
+
+def test_deepl_request_contract_and_language_codes():
+    def handler(request):
+        assert request.headers["Authorization"] == "DeepL-Auth-Key k:fx"
+        assert request.url.host == "api-free.deepl.com"
+        body = json.loads(request.content)
+        assert body["target_lang"] == "ZH-HANS" and body["source_lang"] == "KO"
+        assert body["split_sentences"] == "0"
+        return httpx.Response(200, json={"translations": [{"text": "录音中"}]})
+
+    from worker.providers import DeepLTranslator
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        out = DeepLTranslator("k:fx", client=client, allow_paid=True).translate(
+            ["녹화 중입니다."], "zh", "ko"
+        )
+    assert out == ["录像中"]
+    with httpx.Client(transport=httpx.MockTransport(lambda r: pytest.fail("network"))) as client:
+        with pytest.raises(ProviderError):
+            DeepLTranslator("k", client=client).translate(["x"], "en")
+
+
+def test_huggingface_translator_needs_a_source_and_maps_codes():
+    from worker.providers import HuggingFaceTranslator
+
+    seen = {}
+
+    def fake_pipeline(texts, **kwargs):
+        seen.update(kwargs)
+        return [{"translation_text": t.upper()} for t in texts]
+
+    adapter = HuggingFaceTranslator(pipeline=fake_pipeline)
+    assert adapter.translate(["a"], "en", "ko") == ["A"]
+    assert seen["src_lang"] == "kor_Hang" and seen["tgt_lang"] == "eng_Latn"
+    with pytest.raises(ValueError):
+        adapter.translate(["a"], "en", None)
+
+
+class FakeMessages:
+    def __init__(self, answers):
+        self.answers, self.calls = list(answers), []
+
+    def create(self, **kwargs):
+        self.calls.append(kwargs)
+        answer = self.answers.pop(0)
+        return SimpleNamespace(
+            stop_reason="end_turn",
+            content=[SimpleNamespace(type="text", text=json.dumps(answer))],
+        )
+
+
+def test_claude_translator_retries_once_on_a_bad_line_count():
+    from pipeline.translation_jobs import build_job
+    from worker.providers import ClaudeTranslator
+
+    job = build_job(["하나", "둘"], source="ko", target="en", entries={})
+    messages = FakeMessages(
+        [
+            {"lines": [{"id": 0, "text": "one"}]},
+            {"lines": [{"id": 0, "text": "one"}, {"id": 1, "text": "two"}]},
+        ]
+    )
+    adapter = ClaudeTranslator(client=SimpleNamespace(messages=messages), allow_paid=True)
+    assert adapter.translate(job) == ["one", "two"]
+    assert len(messages.calls) == 2
+    assert "rejected" in messages.calls[1]["messages"][0]["content"]
+
+
+def test_claude_translator_gives_up_after_the_retry():
+    from pipeline.translation_jobs import build_job
+    from worker.providers import ClaudeTranslator
+
+    job = build_job(["하나"], source="ko", target="en", entries={})
+    messages = FakeMessages([{"lines": []}, {"lines": [{"id": 7, "text": "x"}]}])
+    with pytest.raises(ProviderError):
+        ClaudeTranslator(client=SimpleNamespace(messages=messages), allow_paid=True).translate(job)
+
+
+def test_claude_refine_sends_drafts_and_paid_gate_holds():
+    from pipeline.translation_jobs import build_job
+    from worker.providers import ClaudeTranslator
+
+    job = build_job(["안녕"], source="ko", target="en", entries={})
+    with pytest.raises(ProviderError):
+        ClaudeTranslator(client=SimpleNamespace()).translate(job, drafts=["Hi"])
+    messages = FakeMessages([{"lines": [{"id": 0, "text": "Hello"}]}])
+    out = ClaudeTranslator(client=SimpleNamespace(messages=messages), allow_paid=True).translate(
+        job, drafts=["Hi"]
+    )
+    assert out == ["Hello"]
+    assert "polish" in messages.calls[0]["system"].lower()
+    assert "#0\t안녕\tHi" in messages.calls[0]["messages"][0]["content"]

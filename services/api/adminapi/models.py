@@ -206,6 +206,32 @@ class TranslatedSegment(Base, TimestampMixin):
     voice_key: Mapped[str | None] = mapped_column(String(128), default=None)
 
 
+class TranslationMemory(Base, TimestampMixin):
+    """같은 문장을 같은 방향으로 두 번 번역하지 않기 위한 기억.
+
+    키는 (출발, 목표, 원문·용어집 버전·공급자의 해시)입니다. 용어집이 바뀌면
+    버전이 바뀌어 새 항목이 됩니다. 사람이 고친 번역은 여기에 넣지 않습니다.
+    그것은 그 작업의 입력이지 공급자가 낸 답이 아니기 때문입니다.
+    """
+
+    __tablename__ = "translation_memory"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=new_id)
+    source_language: Mapped[str] = mapped_column(String(16))
+    target_language: Mapped[str] = mapped_column(String(16))
+    text_hash: Mapped[str] = mapped_column(String(64))
+    source_text: Mapped[str] = mapped_column(Text)
+    translated_text: Mapped[str] = mapped_column(Text)
+    provider: Mapped[str] = mapped_column(String(64))
+    glossary_version: Mapped[str | None] = mapped_column(String(255), default=None)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "source_language", "target_language", "text_hash", name="uq_translation_memory"
+        ),
+    )
+
+
 class Glossary(Base, TimestampMixin):
     """용어집. 번역 단계의 입력이며 버전이 입력 해시에 들어갑니다."""
 
@@ -218,6 +244,38 @@ class Glossary(Base, TimestampMixin):
     version: Mapped[int] = mapped_column(Integer, default=1)
     entries: Mapped[dict] = mapped_column(JSON, default=dict)
     effective_from: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class SubtitleReview(Base, TimestampMixin):
+    """GitHub 저장소에서 하는 자막 검수. 작업 하나와 브랜치·PR 하나를 잇습니다.
+
+    `kind`는 내보내기(export)와 가져오기(import)입니다. 가져온 번역은 `result`에만
+    두고 작업에 자동으로 넣지 않습니다. 사람이 화면에서 확인하고 새 버전을 만듭니다.
+    """
+
+    __tablename__ = "subtitle_reviews"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=new_id)
+    job_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("jobs.id", ondelete="CASCADE"), index=True)
+    kind: Mapped[str] = mapped_column(String(16))
+    language: Mapped[str] = mapped_column(String(16))
+    branch: Mapped[str] = mapped_column(String(255))
+    path: Mapped[str] = mapped_column(String(512))
+    state: Mapped[str] = mapped_column(String(16), default="pending")
+    pull_number: Mapped[int | None] = mapped_column(Integer, default=None)
+    pull_url: Mapped[str | None] = mapped_column(String(512), default=None)
+    commit_sha: Mapped[str | None] = mapped_column(String(64), default=None)
+    result: Mapped[dict] = mapped_column(JSON, default=dict)
+    error: Mapped[str | None] = mapped_column(Text, default=None)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+
+    __table_args__ = (
+        CheckConstraint("kind in ('export','import')", name="ck_subtitle_review_kind"),
+        CheckConstraint(
+            "state in ('pending','running','succeeded','failed')", name="ck_subtitle_review_state"
+        ),
+    )
 
 
 class VoiceAssignment(Base, TimestampMixin):
@@ -462,7 +520,8 @@ class MediaTask(Base, TimestampMixin):
             "state in ('pending','running','succeeded','failed')", name="ck_media_task_state"
         ),
         CheckConstraint(
-            "kind in ('render','transcribe','scenes','align','diarize','sync')",
+            "kind in ('render','transcribe','scenes','align','diarize','sync',"
+            "'faces','highlights','silence','preview')",
             name="ck_media_task_kind",
         ),
     )

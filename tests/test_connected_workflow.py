@@ -160,7 +160,7 @@ def test_full_dub_stages_and_budget_settlement(
 
     monkeypatch.setattr(wf, "mix_speech", mix)
     monkeypatch.setattr(
-        wf, "compose_dub", lambda src, audio, out, start, duration: out.write_bytes(b"dub")
+        wf, "compose_dub", lambda src, audio, out, start, duration, **_: out.write_bytes(b"dub")
     )
     client.put("/workflow/monthly-budget", headers=auth_headers, json={"limit_usd": "10"})
     jid = create(audio_mode="dub", source_language="en", voice_id="test", budget_usd="1")

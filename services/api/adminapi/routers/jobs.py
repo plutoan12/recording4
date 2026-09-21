@@ -12,6 +12,7 @@ from adminapi.deps import CurrentUser, SessionDep
 from adminapi.models import Budget, Job, SourceAsset, VoiceAssignment, utcnow
 from adminapi.outbox import enqueue
 from adminapi.schemas import JobCreateRequest, JobResponse, JobTransitionRequest
+from pipeline.languages import is_supported
 from pipeline.states import JobState, TransitionError, assert_transition
 from pipeline.time import as_utc
 
@@ -37,6 +38,14 @@ def create_job(payload: JobCreateRequest, user: CurrentUser, session: SessionDep
         and payload.workflow.clip.end > float(asset.duration_seconds)
     ):
         raise HTTPException(422, "선택 구간이 원본 길이를 넘습니다.")
+    if payload.workflow.audio_mode != "original" and not is_supported(
+        payload.workflow.source_language, payload.target_language
+    ):
+        raise HTTPException(
+            422,
+            f"지원하지 않는 번역 방향입니다: "
+            f"{payload.workflow.source_language or '자동'} → {payload.target_language}",
+        )
     if payload.workflow.reuse_from_job_id:
         parent = session.get(Job, payload.workflow.reuse_from_job_id)
         if parent is None or parent.created_by_id != user.id or parent.source_asset_id != asset.id:

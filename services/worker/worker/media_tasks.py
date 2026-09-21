@@ -14,6 +14,7 @@ from adminapi.config import get_settings
 from adminapi.db import get_session_factory
 from adminapi.models import Artifact, MediaTask, SourceAsset, TranscriptSegment, utcnow
 from adminapi.storage import get_storage
+from pipeline.cuts import keep_spans, kept_seconds, within
 from pipeline.editing import Cue, EditSpec
 from pipeline.speakers import SpeakerTurn, assign_speakers, speaker_totals
 from worker.analysis import (
@@ -22,12 +23,39 @@ from worker.analysis import (
     align_text,
     detect_scenes,
     diarize,
+    silence_spans,
     sync_subtitles,
     transcribe,
+    vad_spans,
 )
 from worker.celery_app import celery_app
-from worker.rendering import render_clip
+from worker.faces import MissingDependency as FacesMissing
+from worker.faces import suggest as suggest_focus_point
+from worker.media import ProbeError, probe
+from worker.rendering import render_clip, render_preview
 from worker.subtitle_rules import rules_from_settings
+
+
+def source_audio(source: Path) -> bool | None:
+    """원본에 소리가 있는지. 알 수 없으면 None이고, 그때는 있다고 보고 갑니다."""
+    try:
+        return probe(str(source)).has_audio
+    except (ProbeError, OSError):
+        return None
+
+
+def background_music(edit: EditSpec, directory: Path, storage) -> Path | None:  # noqa: ANN001
+    """배경음악으로 쓸 원본을 내려받습니다. 고르지 않았으면 None입니다."""
+    if edit.music_asset_id is None:
+        return None
+    with get_session_factory()() as session:
+        asset = session.get(SourceAsset, edit.music_asset_id)
+        if asset is None or asset.upload_state != "verified":
+            raise ValueError("배경음악으로 쓸 검사 통과한 원본을 찾을 수 없습니다.")
+        key = asset.storage_key
+    path = directory / "music.media"
+    storage.download_file(key, path)
+    return path
 
 
 def latest_transcript(session, task_uuid) -> list[Cue]:  # noqa: ANN001
@@ -85,14 +113,60 @@ def run_media(task_id: str) -> dict:
                 # 영상에 구워진 자막과 달라지는데, 사람은 같은 자막이라고 믿고
                 # 올립니다. 남겨 두면 내보내기가 그때 쓴 규칙으로 만듭니다.
                 rules = rules_from_settings(settings)
-                render_clip(source, output, EditSpec.model_validate(spec), rules=rules)
+                edit = EditSpec.model_validate(spec)
+                render_clip(
+                    source,
+                    output,
+                    edit,
+                    rules=rules,
+                    music=background_music(edit, directory, storage),
+                    has_audio=source_audio(source),
+                )
                 with output.open("rb") as stream:
                     checksum = hashlib.file_digest(stream, "sha256").hexdigest()
                 output_key = f"renders/{task_id}/{attempt}.mp4"
                 storage.upload_file(output_key, output, "video/mp4")
                 result = {"storage_key": output_key, "subtitle_rules": asdict(rules)}
+            elif kind == "silence":
+                # 남길 구간을 **제안**만 합니다. 여기서 영상을 자르지 않습니다.
+                speech = vad_spans(source) or silence_spans(source)
+                seconds = float(probe(str(source)).duration_seconds)
+                kept = keep_spans(
+                    speech,
+                    seconds,
+                    margin=float(spec.get("margin", 0.2)),
+                    min_cut=float(spec.get("min_cut", 0.5)),
+                    min_clip=float(spec.get("min_clip", 0.4)),
+                )
+                if spec.get("start") is not None or spec.get("end") is not None:
+                    kept = within(
+                        kept, float(spec.get("start") or 0), float(spec.get("end") or seconds)
+                    )
+                result = {
+                    "segments": [{"start": start, "end": end} for start, end in kept],
+                    "kept_seconds": kept_seconds(kept),
+                    "source_seconds": round(seconds, 3),
+                    "removed_seconds": round(seconds - kept_seconds(kept), 3),
+                    "speech_spans": len(speech),
+                }
+            elif kind == "preview":
+                output = directory / "preview.png"
+                render_preview(
+                    source,
+                    output,
+                    EditSpec.model_validate(spec["spec"]),
+                    float(spec["at"]),
+                    rules=rules_from_settings(settings),
+                )
+                output_key = f"previews/{task_id}/{attempt}.png"
+                storage.upload_file(output_key, output, "image/png")
+                result = {"storage_key": output_key, "at": float(spec["at"])}
             elif kind == "scenes":
                 result = {"scenes": detect_scenes(source)}
+            elif kind == "faces":
+                # 제안만 만듭니다. focus_x를 여기서 바꾸지 않습니다. 검출기가
+                # 틀리면 사람이 맞춘 값을 망칩니다.
+                result = {"focus": asdict(suggest_focus_point(source))}
             elif kind == "diarize":
                 # 누가 말했는지만 찾습니다. 대본 글자는 건드리지 않습니다.
                 turns = diarize(
@@ -243,9 +317,12 @@ def run_media(task_id: str) -> dict:
                 task.state = "failed"
                 # Exceptions from SDKs can contain credentials/URLs. Expose type only.
                 # 설치 안내는 저희가 쓴 고정 문구라 그대로 보여 줍니다.
+                # 설치·설정이 빠졌다는 안내는 모듈마다 자기 예외를 씁니다.
+                # 하나만 적어 두면 나머지는 "처리 실패"로 뭉개져서 무엇을
+                # 설치해야 하는지 알 수 없습니다.
                 task.error = (
                     str(exc)
-                    if isinstance(exc, MissingDependency)
+                    if isinstance(exc, MissingDependency | FacesMissing)
                     else f"{type(exc).__name__}: 처리 실패. 워커 설정과 입력을 확인하세요."
                 )
                 task.finished_at = utcnow()

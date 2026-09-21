@@ -6,8 +6,14 @@ import type { WorkflowDraft } from './WorkflowPanel'
 type Cue = { start: number; end: number; text: string }
 type Suggestion = { start: number; end: number; title: string; reason: string }
 type Violation = { index: number; kind: string; detail: string }
+type Segment = { start: number; end: number; speed?: number }
 type Task = { id: string; source_asset_id: string; clip_edit_id: string | null; kind: string; state: string; error: string | null;
-  result: { artifact_id?: string; scenes?: {start: number; end: number}[]; sync?: {offset_seconds:number; framerate_scale:number; clamped:number} } }
+  result: { artifact_id?: string; scenes?: {start: number; end: number}[];
+    sync?: {offset_seconds:number; framerate_scale:number; clamped:number};
+    focus?: {focus_x: number; samples: number; found: number; reason: string};
+    clips?: Suggestion[]; rejected?: {first: number; last: number; why: string}[];
+    segments?: Segment[]; kept_seconds?: number; removed_seconds?: number; source_seconds?: number;
+    storage_key?: string; at?: number } }
 
 export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWorkflow: (draft:WorkflowDraft)=>void }) {
   const [assetId, setAssetId] = useState('')
@@ -25,6 +31,15 @@ export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWo
   const [plainScript, setPlainScript] = useState('')
   const [tasks, setTasks] = useState<Task[]>([])
   const [outputUrl, setOutputUrl] = useState('')
+  // 이어 붙일 구간들. 비어 있으면 지금까지처럼 시작~종료 한 구간입니다.
+  const [segments, setSegments] = useState<Segment[]>([])
+  const [fadeIn, setFadeIn] = useState(0)
+  const [fadeOut, setFadeOut] = useState(0)
+  const [musicId, setMusicId] = useState('')
+  const [musicGain, setMusicGain] = useState(-18)
+  const [musicDuck, setMusicDuck] = useState(true)
+  const [previewAt, setPreviewAt] = useState(0)
+  const [frameUrl, setFrameUrl] = useState('')
   const [previewed, setPreviewed] = useState('')
   const [previewId, setPreviewId] = useState('')
   const [approvedId,setApprovedId] = useState('')
@@ -55,6 +70,7 @@ export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWo
   async function loadSource(id: string) {
     selection.current = id
     setAssetId(id); setSourceUrl(''); setSuggestions([]); setCaptions([])
+    setSegments([]); setFrameUrl('')
     const asset = assets.find(a => a.id === id)
     setStart(0); setEnd(Math.min(30, Number(asset?.duration_seconds ?? 30)))
     if (!id) return
@@ -91,6 +107,15 @@ export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWo
   function updateCue(index: number, patch: Partial<Cue>) {
     setCaptions(current => current.map((cue, i) => i === index ? {...cue, ...patch} : cue))
   }
+  const outputSeconds = segments.length
+    ? segments.reduce((total, seg) => total + (seg.end - seg.start) / (seg.speed || 1), 0)
+    : Math.max(0, end - start)
+  // 렌더와 미리보기가 **같은 설정**을 씁니다. 갈라지면 미리본 것과 다른 결과가 나옵니다.
+  const clipSpec = () => ({
+    start, end, mode, focus_x: focus, title, burn_subtitles: burn, caption_language: captionLanguage,
+    cues: captions, segments, fade_in: fadeIn, fade_out: fadeOut,
+    music_asset_id: musicId || null, music_gain_db: musicGain, music_duck: musicDuck,
+  })
   return <section className="clip-editor">
     <h2>롱폼 → 숏폼 편집</h2>
     <p>원본 구간을 고르고 세로 화면·제목·자막을 편집하세요. 저장할 때마다 독립된 결과물을 만듭니다.</p>
@@ -111,7 +136,42 @@ export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWo
         {mode === 'crop' && <label>좌우 중심<input type="range" min="0" max="1" step="0.01" value={focus} onChange={e => setFocus(Number(e.target.value))} /></label>}
         <label>화면 제목<input maxLength={120} value={title} onChange={e => setTitle(e.target.value)} /></label>
       </div>
-      <p>선택 길이: {(end-start).toFixed(2)}초 · 출력: 1080 × 1920</p>
+      <p>선택 길이: {(end-start).toFixed(2)}초 · 결과 길이: {outputSeconds.toFixed(2)}초 · 출력: 1080 × 1920</p>
+      <details><summary>여러 구간 이어 붙이기 · 무음 빼기 · 페이드 · 배경음악</summary>
+        <p>구간을 고르지 않으면 시작~종료를 통째로 씁니다. 고르면 그것들만 순서대로 이어 붙이고, 자막 시각도 이어 붙인 시간축으로 옮깁니다.</p>
+        <div className="editor-actions">
+          <button disabled={busy||end<=start} onClick={() => setSegments(list => [...list, {start, end, speed: 1}])}>지금 구간 추가</button>
+          <button disabled={busy||segments.length===0} onClick={() => setSegments([])}>구간 모두 지우기</button>
+          <button disabled={busy} onClick={() => void act(async () => {
+            await request(`/source-assets/${assetId}/silence`, {method:'POST', body: JSON.stringify({start, end})})
+            setMessage('말이 없는 구간을 찾고 있습니다. 결과는 제안이고, 적용은 아래에서 누릅니다.'); await refresh()
+          })}>무음 빼고 남길 구간 제안</button>
+        </div>
+        <ol>{segments.map((seg, i) => <li key={i}>
+          {seg.start.toFixed(2)}~{seg.end.toFixed(2)}초 ({((seg.end-seg.start)/(seg.speed||1)).toFixed(2)}초)
+          <label>배속<input type="number" min="0.5" max="4" step="0.1" value={seg.speed ?? 1}
+            onChange={e => setSegments(list => list.map((x, j) => j===i ? {...x, speed: Number(e.target.value)} : x))} /></label>
+          <button onClick={() => setSegments(list => list.filter((_, j) => j !== i))}>삭제</button>
+        </li>)}</ol>
+        <div className="editor-fields">
+          <label>시작 페이드(초)<input type="number" min="0" max="5" step="0.1" value={fadeIn} onChange={e => setFadeIn(Number(e.target.value))} /></label>
+          <label>끝 페이드(초)<input type="number" min="0" max="5" step="0.1" value={fadeOut} onChange={e => setFadeOut(Number(e.target.value))} /></label>
+          <label>배경음악 원본<select value={musicId} onChange={e => setMusicId(e.target.value)}>
+            <option value="">없음</option>
+            {assets.filter(a => a.upload_state === 'verified' && a.id !== assetId).map(a => <option key={a.id} value={a.id}>{a.original_filename}</option>)}
+          </select></label>
+          {musicId && <>
+            <label>배경음악 음량(dB)<input type="number" min="-60" max="0" step="1" value={musicGain} onChange={e => setMusicGain(Number(e.target.value))} /></label>
+            <label><input type="checkbox" checked={musicDuck} onChange={e => setMusicDuck(e.target.checked)} /> 말할 때 음량 자동으로 낮추기</label>
+          </>}
+          <label>미리볼 시각(결과 기준, 초)<input type="number" min="0" step="0.1" value={previewAt} onChange={e => setPreviewAt(Number(e.target.value))} /></label>
+        </div>
+        <button disabled={busy||previewAt>=outputSeconds} onClick={() => void act(async () => {
+          await request(`/source-assets/${assetId}/preview-frame`, {method:'POST', body: JSON.stringify({at: previewAt, spec: clipSpec()})})
+          setMessage('미리보기 한 장을 만들고 있습니다. 아래 작업 목록에서 열 수 있습니다.'); await refresh()
+        })}>이 설정으로 한 장 미리보기</button>
+        {frameUrl && <img src={frameUrl} alt="편집 설정 미리보기" style={{maxWidth: 240}} />}
+      </details>
       <div className="editor-actions">
         <button disabled={busy} onClick={() => void act(async () => {
           await request(`/source-assets/${assetId}/analyze`, {method:'POST', body: JSON.stringify({kind:'transcribe'})})
@@ -120,6 +180,10 @@ export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWo
         <button disabled={busy} onClick={() => void act(async () => {
           await request(`/source-assets/${assetId}/analyze`, {method:'POST', body: JSON.stringify({kind:'scenes'})}); await refresh()
         })}>장면 감지</button>
+        <button disabled={busy} onClick={() => void act(async () => {
+          await request(`/source-assets/${assetId}/analyze`, {method:'POST', body: JSON.stringify({kind:'faces'})})
+          setMessage('얼굴 위치를 찾고 있습니다. 결과는 제안일 뿐이고 좌우 중심은 바뀌지 않습니다.'); await refresh()
+        })}>좌우 중심 제안</button>
         <button disabled={busy} onClick={() => void act(async () => {
           setCaptions(await request<Cue[]>(`/source-assets/${assetId}/transcript`))
         })}>대본 다시 읽기</button>
@@ -187,8 +251,20 @@ export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWo
           setSuggestions(await request<Suggestion[]>(`/source-assets/${assetId}/suggestions`))
           setMessage('저장된 대본의 문장 경계로 후보를 만들었습니다. AI 인기도 예측은 아닙니다.')
         })}>구간 후보 찾기</button>
+        <button disabled={busy} onClick={() => void act(async () => {
+          await request(`/source-assets/${assetId}/highlights`, {method:'POST'})
+          setMessage('AI에게 구간을 물어봤습니다. 유료 호출이고 결과는 아래 목록에 나옵니다. 끝나면 불러오기를 누르세요.'); await refresh()
+        })}>AI 구간 추천 요청 (유료)</button>
+        <button disabled={busy} onClick={() => void act(async () => {
+          const done = tasks.filter(t => t.source_asset_id === assetId && t.kind === 'highlights' && t.state === 'succeeded')
+          const latest = done[done.length - 1]
+          if (!latest?.result.clips) { setMessage('끝난 AI 추천이 없습니다. 먼저 요청하고 기다리세요.'); return }
+          setSuggestions(latest.result.clips)
+          const dropped = latest.result.rejected?.length ?? 0
+          setMessage(`AI 추천 ${latest.result.clips.length}건입니다. 버린 후보 ${dropped}건(대본에 없는 번호·겹침·길이). 자를지는 직접 정하세요.`)
+        })}>AI 추천 결과 불러오기</button>
         <button disabled={busy || end <= start || end-start > 180} onClick={() => void act(async () => {
-          await request('/clips', {method:'POST', body: JSON.stringify({source_asset_id:assetId, start, end, mode, focus_x:focus, title, burn_subtitles:burn, caption_language:captionLanguage, cues:captions})})
+          await request('/clips', {method:'POST', body: JSON.stringify({source_asset_id:assetId, ...clipSpec()})})
           setMessage('새 편집본의 렌더를 요청했습니다.'); await refresh()
         })}>숏폼 렌더</button>
       </div>
@@ -203,9 +279,25 @@ export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWo
         {t.result.sync.framerate_scale !== 1 && ` · 속도 ${t.result.sync.framerate_scale}배`}
         {t.result.sync.clamped > 0 && ` · 0초로 잘린 자막 ${t.result.sync.clamped}개`}</span>}
       {t.result.scenes?.map((s,i) => <button key={i} onClick={() => {setStart(s.start);setEnd(Math.min(s.end,s.start+180))}}>{s.start.toFixed(1)}–{s.end.toFixed(1)}초</button>)}
+      {t.result.focus && <> <span>{t.result.focus.reason}</span>
+        {/* 누를 때만 적용합니다. 검출기가 틀리면 맞춰 둔 값을 망칩니다. */}
+        <button disabled={busy} onClick={() => {setMode('crop');setFocus(t.result.focus!.focus_x);
+          setMessage(`좌우 중심을 ${t.result.focus!.focus_x}로 바꿨습니다. 미리보기로 확인하세요.`)}}>
+          이 제안 적용</button></>}
       {t.state === 'failed' && <button disabled={busy} onClick={() => void act(async () => {
         await request(`/media-tasks/${t.id}/retry`, {method:'POST'}); await refresh()
       })}>재시도</button>}
+      {t.kind === 'silence' && t.result.segments && <>
+        <p>남길 구간 {t.result.segments.length}개 · 남김 {t.result.kept_seconds}초 / 원본 {t.result.source_seconds}초 (뺀 시간 {t.result.removed_seconds}초)</p>
+        <button disabled={busy} onClick={() => {
+          setSegments((t.result.segments ?? []).map(seg => ({...seg, speed: 1})))
+          setMessage('제안한 구간을 편집기에 넣었습니다. 확인하고 고친 뒤 저장하세요.')
+        }}>제안 구간 적용</button>
+      </>}
+      {t.kind === 'preview' && t.result.storage_key && <button disabled={busy} onClick={() => void act(async () => {
+        const found = await request<{url:string}>(`/media-tasks/${t.id}/preview-url`)
+        setFrameUrl(found.url); setMessage('미리보기를 불러왔습니다. 위 편집 설정 칸에서 볼 수 있습니다.')
+      })}>미리보기 보기</button>}
       {t.kind === 'render' && t.clip_edit_id && (['srt','vtt'] as const).map(fmt => <button key={fmt} disabled={busy} onClick={() => void act(async () => {
         await downloadFile(`/clips/${t.clip_edit_id}/subtitles?format=${fmt}`, `clip-${t.clip_edit_id}.${fmt}`)
         setMessage(`자막 ${fmt.toUpperCase()} 파일을 내려받았습니다. 시각은 클립 시작이 0초입니다.`)
