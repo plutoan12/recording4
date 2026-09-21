@@ -113,6 +113,8 @@ def test_translate_step_hands_the_glossary_to_the_provider(
         def __init__(self, *args, **kwargs):
             seen["resource"] = kwargs.get("glossary_resource")
 
+        missing_terms: dict = {}
+
         def translate(self, texts, target, source, *, glossary=None):
             seen["glossary"] = glossary
             return ["Recording 4 was used."]

@@ -103,3 +103,7 @@ button {
 .glossary table { max-width: 720px; }
 .glossary td input { width: 100%; box-sizing: border-box; }
 .glossary button { margin: .2rem; }
+
+/* 선택 항목 아래의 설명. 무엇이 달라지는지 고를 때 보이게 둡니다. */
+.hint { display: block; font-size: .8rem; color: #555; font-weight: normal; margin-top: .2rem; }
+@media (prefers-color-scheme: dark) { .hint { color: #aaa; } }

@@ -121,7 +121,7 @@ def translate(
 
     translator = GoogleTranslator(project, allow_paid=True)
     output = translator.translate(texts, target, source, glossary=glossary)
-    return output, translator.missing_terms
+    return output, [term for terms in translator.missing_terms.values() for term in terms]
 
 
 def load_glossary(path: Path | None, source: str, target: str) -> Glossary | None:

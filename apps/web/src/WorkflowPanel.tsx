@@ -11,7 +11,7 @@ type Detail = {id:string;state:string;stage:string|null;reason:string|null;artif
   stages:{id:string;name:string;state:string;attempt:number;uncertain:boolean;estimated_cost:string|null}[]}
 type Publication = {id:string;state:string;title:string;video_id:string|null;publish_at:string;error:string|null}
 type Configuration = {paid_enabled:boolean;translation_configured:boolean;speech_configured:boolean;
-  lipsync_configured:boolean;youtube_configured:boolean;youtube_channel_id:string|null}
+  lipsync_configured:boolean;llm_translate_configured:boolean;youtube_configured:boolean;youtube_channel_id:string|null}
 
 export function WorkflowPanel({assets,jobs,draft,onCreated}:{assets:SourceAsset[];jobs:Job[];draft:WorkflowDraft|null;onCreated:()=>Promise<void>}) {
   const [asset,setAsset]=useState('')
@@ -33,6 +33,8 @@ export function WorkflowPanel({assets,jobs,draft,onCreated}:{assets:SourceAsset[
   const [message,setMessage]=useState('')
   const [busy,setBusy]=useState(false)
   const [useClip,setUseClip]=useState(false)
+  const [context,setContext]=useState(false)
+  const [polishing,setPolishing]=useState(false)
   useEffect(()=>{if(draft){setAsset(draft.source_asset_id);setBurn(draft.burn_subtitles??true);setSourceLanguage(draft.caption_language??'ko');setUseClip(true)}},[draft])
   const refresh = useCallback(async ()=>{
     try {
@@ -53,7 +55,7 @@ export function WorkflowPanel({assets,jobs,draft,onCreated}:{assets:SourceAsset[
   }
   async function create(event:React.FormEvent){event.preventDefault();await act(async()=>{
     const job = await request<Job>('/jobs',{method:'POST',body:JSON.stringify({source_asset_id:asset,target_language:target,
-      workflow:{audio_mode:audio,burn_subtitles:burn,source_language:sourceLanguage||null,voice_id:voice||null,lipsync:audio==='dub'&&lip,budget_usd:budget,
+      workflow:{audio_mode:audio,burn_subtitles:burn,source_language:sourceLanguage||null,voice_id:voice||null,lipsync:audio==='dub'&&lip,budget_usd:budget,translate_context:audio==='subtitles'&&context,translate_polish:audio!=='original'&&polishing,
         ...(useClip&&draft ? {clip:{start:draft.start,end:draft.end,mode:draft.mode,focus_x:draft.focus_x,title:draft.title,subtitle_template:draft.subtitle_template??'default',subtitle_animation:draft.subtitle_animation??null,subtitle_preset:draft.subtitle_preset??null,subtitle_pacing:draft.subtitle_pacing??null,stickers:draft.stickers??[]},transcript:draft.cues} : {})}})})
     setSelected(job.id);setUrl('');setPlayed(false);setMessage('작업을 시작했습니다. 단계별 결과가 아래에 표시됩니다.')
   })}
@@ -69,6 +71,12 @@ export function WorkflowPanel({assets,jobs,draft,onCreated}:{assets:SourceAsset[
       <label>원본 언어<select value={sourceLanguage} onChange={e=>setSourceLanguage(e.target.value)} required={!burn&&audio==='original'}><option value="">자동 감지</option>{[['ko','한국어'],['en','영어'],['ja','일본어'],['zh','중국어']].map(([code,label])=><option key={code} value={code}>{label}</option>)}</select></label>
       {audio!=='original' && <label>자막 번역 언어<select value={target} onChange={e=>setTarget(e.target.value)} required>{[['ko','한국어'],['en','영어'],['ja','일본어'],['zh','중국어']].map(([code,label])=><option key={code} value={code}>{label}</option>)}</select></label>}
       {audio==='subtitles' && <p>원래 음성과 자막 시간을 유지합니다. 번역 결과는 검수 후 수정하거나 SRT·VTT로 내려받을 수 있습니다.</p>}
+      {audio==='subtitles' && <label><input type="checkbox" checked={context} onChange={e=>setContext(e.target.checked)} /> 문맥 배치 (한 문장으로 잘린 자막을 합쳐서 번역)
+        <span className="hint">번역 요금은 그대로입니다. 합친 번역문을 각 자막이 떠 있던 시간에 맞춰 다시 나누므로 낱말이 말한 자리와 정확히 맞지는 않습니다. 더빙에는 쓰지 않습니다.</span></label>}
+      {audio!=='original' && <label><input type="checkbox" checked={polishing} onChange={e=>setPolishing(e.target.checked)} disabled={!config?.llm_translate_configured} /> 어색한 자막만 LLM으로 다시 번역
+        <span className="hint">{config?.llm_translate_configured
+          ? '원문이 그대로 남았거나 길이가 이상하거나 용어가 빠진 자막을 최대 30%까지 골라 다시 씁니다. 추가 요금이 듭니다(예산 상한에 포함됩니다).'
+          : 'LLM 키·모델 이름·단가 상한을 서버에 설정해야 켤 수 있습니다.'}</span></label>}
       {audio!=='original' && <label>작업 예산 상한 (USD)<input type="number" min="0" max="1" step="0.0001" value={budget} onChange={e=>setBudget(e.target.value)} required /></label>}
       {audio==='dub' && <><label>더빙 음성 ID<input value={voice} onChange={e=>setVoice(e.target.value)} required /></label>
         <label><input type="checkbox" checked={lip} onChange={e=>setLip(e.target.checked)} /> 립싱크 사용</label>

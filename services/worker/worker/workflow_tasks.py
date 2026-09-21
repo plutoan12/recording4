@@ -36,11 +36,19 @@ from pipeline.editing import Cue, clip_cues
 from pipeline.glossary import protect
 from pipeline.hashing import StageInputs
 from pipeline.states import JobState, StageRunState
+from pipeline.translation_context import groups, join, split_across
+from pipeline.translation_review import pick, review, review_limit
 from pipeline.workflow import WorkflowOptions, rendered_cues, rendered_language
 from worker.analysis import transcribe
 from worker.celery_app import celery_app
 from worker.composition import TimingError, compose_dub, mix_speech, render_final
-from worker.providers import ElevenLabsSpeech, GoogleTranslator, SyncLipsync
+from worker.providers import (
+    ClaudeTranslator,
+    ElevenLabsSpeech,
+    GoogleTranslator,
+    ProviderError,
+    SyncLipsync,
+)
 from worker.subtitle_rules import rules_from_settings
 
 
@@ -149,7 +157,123 @@ def translate_glossary(session, options, data, settings):
     return active_glossary(session, options.source_language, data.get("target"))
 
 
+def context_plan(batch, options):
+    """문맥 배치 묶음. 쓰지 않으면 자막마다 한 묶음입니다."""
+    if not options.translate_context or options.audio_mode == "dub":
+        return [[index] for index in range(len(batch))]
+    return groups([cue["text"] for cue in batch])
+
+
+def run_translation(batch, data, options, settings, glossary):
+    """한 묶음을 번역합니다. (번역문, 묶여서 번역된 자리, 빠진 용어) 순입니다.
+
+    문맥 배치를 켜면 한 문장으로 이어진 자막을 **합쳐서** 번역하고 번역문을
+    원래 자막 수만큼 다시 나눕니다. 나눌 수 없으면 그 묶음만 지금까지처럼
+    자막별로 다시 번역합니다.
+    """
+    target, source = data["target"], options.source_language
+    plan = context_plan(batch, options)
+    translator = GoogleTranslator(
+        settings.google_cloud_project,
+        allow_paid=True,
+        glossary_resource=settings.google_translate_glossary,
+    )
+    joined = [join([batch[index]["text"] for index in group], source) for group in plan]
+    output = translator.translate(joined, target, source, glossary=glossary)
+
+    texts = [""] * len(batch)
+    grouped, again, gone = [], [], {}
+    for position, (group, translated) in enumerate(zip(plan, output, strict=True)):
+        lost = translator.missing_terms.get(position)
+        if lost:
+            gone[group[0]] = lost
+        if len(group) == 1:
+            texts[group[0]] = translated
+            continue
+        spans = [batch[index]["end"] - batch[index]["start"] for index in group]
+        pieces = split_across(translated, spans, target)
+        if pieces is None:
+            again += group
+            continue
+        for index, piece in zip(group, pieces, strict=True):
+            texts[index] = piece
+        grouped += group
+    if again:
+        # 나누지 못한 묶음만 자막별로 다시 부릅니다. 나머지는 그대로 씁니다.
+        retry = GoogleTranslator(
+            settings.google_cloud_project,
+            allow_paid=True,
+            glossary_resource=settings.google_translate_glossary,
+        )
+        for index, translated in zip(
+            again,
+            retry.translate([batch[i]["text"] for i in again], target, source, glossary=glossary),
+            strict=True,
+        ):
+            texts[index] = translated
+        for position, lost in retry.missing_terms.items():
+            gone[again[position]] = lost
+    return texts, grouped, gone
+
+
+def polish(batch, texts, grouped, gone, data, options, settings, glossary):
+    """어색한 자막만 LLM으로 다시 번역합니다. (번역문, 기록) 순입니다.
+
+    실패해도 기계 번역을 그대로 씁니다. **다시 쓰기에 실패했다고 자막을
+    버리지 않습니다.** 무슨 일이 있었는지는 단계 결과에 남깁니다.
+    """
+    if not options.translate_polish:
+        return texts, {}
+    if not settings.anthropic_api_key or not settings.llm_translate_model:
+        return texts, {"llm_translate_error": "LLM 키와 모델 이름을 서버에 설정하세요."}
+    sources = [cue["text"] for cue in batch]
+    chosen = pick(
+        review(list(zip(sources, texts, strict=True)), missing_terms=gone, grouped=grouped),
+        len(texts),
+    )
+    if not chosen:
+        return texts, {"llm_retranslated": 0}
+    items = [
+        {
+            "source": sources[index],
+            "draft": texts[index],
+            "context": " ".join(sources[max(0, index - 1) : index + 2]),
+        }
+        for index in chosen
+    ]
+    try:
+        with httpx.Client() as client:
+            better = ClaudeTranslator(
+                settings.anthropic_api_key,
+                client=client,
+                model=settings.llm_translate_model,
+                allow_paid=True,
+            ).retranslate(items, data["target"], options.source_language, glossary=glossary)
+    except (ProviderError, httpx.HTTPError) as exc:
+        return texts, {"llm_translate_error": str(exc)}
+    for index, text in zip(chosen, better, strict=True):
+        texts[index] = text
+    return texts, {"llm_retranslated": len(chosen)}
+
+
+def llm_chars(batch, options, settings):
+    """LLM 재번역에 보낼 글자 수의 상한.
+
+    실제로 몇 개가 걸릴지는 번역해 봐야 알므로 **상한**으로 잡습니다. 가장 긴
+    자막이 상한만큼 걸린다고 보고, 자막마다 원문·기계 번역·앞뒤 문맥·출력
+    네 몫을 셉니다. 여기에 지시문 몫을 더합니다.
+    """
+    if not options.translate_polish or not settings.llm_translate_model:
+        return 0
+    count = review_limit(len(batch))
+    if not count:
+        return 0
+    longest = sorted((len(cue["text"]) for cue in batch), reverse=True)[:count]
+    return sum(longest) * 4 + 600
+
+
 def paid_estimate(name, data, options, settings, session=None):
+    llm_cost = Decimal("0")
     if name.startswith("translate:"):
         if options.translated_cues is not None or options.source_language == data.get("target"):
             return None
@@ -159,8 +283,17 @@ def paid_estimate(name, data, options, settings, session=None):
         # 용어집이 걸린 문장은 표시가 붙은 채로 나갑니다. Google은 표시 글자도
         # 세어 청구하므로 **보낼 글자 그대로** 잽니다.
         glossary = translate_glossary(session, options, data, settings) if session else None
-        count = sum(len(protect(c["text"], glossary)[0]) for c in translation_batch(data))
+        batch = translation_batch(data)
+        count = sum(len(protect(c["text"], glossary)[0]) for c in batch)
         units = Decimal(count) / 1000
+        extra = llm_chars(batch, options, settings)
+        if extra:
+            llm_rate = settings.llm_translate_usd_per_1k_chars
+            if llm_rate is None or llm_rate <= 0:
+                raise Blocked("LLM 재번역의 보수적인 단가 상한을 서버에 설정하세요.")
+            llm_cost = (Decimal(extra) / 1000 * llm_rate).quantize(
+                Decimal("0.0001"), rounding=ROUND_UP
+            )
     elif name.startswith("dub:"):
         rate = settings.tts_usd_per_1k_chars
         if not settings.elevenlabs_api_key or not options.voice_id:
@@ -180,7 +313,8 @@ def paid_estimate(name, data, options, settings, session=None):
         raise Blocked("서버의 유료 처리 설정이 꺼져 있습니다.")
     if rate is None or rate <= 0:
         raise Blocked("해당 공급자의 보수적인 단가 상한을 서버에 설정하세요.")
-    return (units * rate).quantize(Decimal("0.0001"), rounding=ROUND_UP)
+    total = (units * rate).quantize(Decimal("0.0001"), rounding=ROUND_UP)
+    return total + llm_cost
 
 
 def translation_batch(data):
@@ -286,16 +420,13 @@ def execute_step(name, options, data, asset, directory, stage_id, remote_id, sav
         else:
             with get_session_factory()() as session:
                 glossary = translate_glossary(session, options, data, settings)
-            texts = GoogleTranslator(
-                settings.google_cloud_project,
-                allow_paid=True,
-                glossary_resource=settings.google_translate_glossary,
-            ).translate(
-                [c["text"] for c in batch],
-                data["target"],
-                options.source_language,
-                glossary=glossary,
-            )
+            texts, grouped, gone = run_translation(batch, data, options, settings, glossary)
+            texts, notes = polish(batch, texts, grouped, gone, data, options, settings, glossary)
+            return {
+                "translated": data.get("translated", [])
+                + [{**cue, "text": text} for cue, text in zip(batch, texts, strict=True)],
+                **notes,
+            }
         return {
             "translated": data.get("translated", [])
             + [{**cue, "text": text} for cue, text in zip(batch, texts, strict=True)]

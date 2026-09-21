@@ -125,7 +125,7 @@ def test_without_glossary_nothing_changes():
     assert client.requests[0]["mime_type"] == "text/plain"
     assert client.requests[0]["parent"] == "projects/p/locations/global"
     assert "glossary_config" not in client.requests[0]
-    assert translator.missing_terms == []
+    assert translator.missing_terms == {}
 
 
 def test_dropped_term_is_recorded_but_translation_is_kept():
@@ -135,7 +135,7 @@ def test_dropped_term_is_recorded_but_translation_is_kept():
     assert translator.translate(
         ["녹화4로 편집했습니다."], "en", "ko", glossary=make({"녹화4": "Recording 4"})
     ) == ["편집했습니다"]
-    assert translator.missing_terms == ["Recording 4"]
+    assert translator.missing_terms == {0: ["Recording 4"]}
 
 
 def test_google_own_glossary_uses_its_region_and_glossary_translations():

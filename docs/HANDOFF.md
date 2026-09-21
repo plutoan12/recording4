@@ -1,3 +1,14 @@
+## 2026-09-21: 문맥 배치와 어색한 자막 LLM 재번역 (Claude)
+
+- 사용자 요청: "그리고 문맥 배치해줘. 어색한 부분은 LLM 번역해주고". [PR #36](https://github.com/plutoan12/recording4/pull/36) 후속 커밋. 담당: `pipeline/translation_context.py`·`translation_review.py`(신규), `pipeline/workflow.py`, `worker/providers.py`, `worker/workflow_tasks.py`, `adminapi/config.py`·`routers/workflow.py`, `apps/web/WorkflowPanel.tsx`·`styles.css`, 테스트·문서.
+- **문맥 배치**(`WorkflowOptions.translate_context`, 기본값 꺼짐): 문장부호로 끝나지 않는 자막을 이어 한 문장으로 합쳐 번역하고, 번역문을 각 자막이 떠 있던 시간에 비례해 다시 나눕니다. 글자 수가 늘지 않아 **요금은 그대로**입니다. 나눌 수 없으면 그 묶음만 자막별로 다시 번역합니다. 더빙에서는 `WorkflowOptions`가 거부합니다.
+- **LLM 재번역**(`translate_polish`, 기본값 꺼짐): 원문 그대로·비어 있음·길이 이상(묶음 중앙값의 1/2~2배 밖)·같은 말 반복·용어 누락·문장 조각을 점수로 매겨 상위 **최대 30%, 최대 20개**만 다시 씁니다. 앞뒤 자막과 용어집을 같이 넘깁니다. 실패하면 기계 번역을 그대로 두고 `llm_translate_error`를 단계 결과에 남깁니다.
+- 설정: `R4_ANTHROPIC_API_KEY`, `R4_LLM_TRANSLATE_MODEL`, `R4_LLM_TRANSLATE_USD_PER_1K_CHARS`를 모두 넣어야 켜집니다. 모델 이름에 기본값을 두지 않았습니다. `/workflow/configuration`이 `llm_translate_configured`로 알려 주고 화면의 선택 항목이 그에 따라 잠깁니다.
+- 예산: `paid_estimate`가 LLM 상한을 더합니다(가장 긴 자막 × 상한 개수 × 네 몫 + 지시문 600자). 단가를 설정하지 않고 켜면 Blocked입니다.
+- 검증: 새 테스트 33개(묶기·다시 나누기·판정·상한·워커 연결·요청 헤더와 본문·실패 시 복귀·예산). 전체 `python -m pytest -q` 589 passed, 11 skipped. 실패 1건은 변경 전에도 이 환경에서만 실패합니다. ruff 0.8.4·tsc·vite build 통과.
+- **재지 못한 것**: 실제 LLM 호출을 하지 않았습니다(키 없음). 요청·응답 모양만 대역으로 고정했습니다. 문맥 배치가 실제로 번역을 낫게 하는지도 Google 호출 없이는 수치로 말할 수 없습니다. 자격증명이 있는 곳에서 `scripts/verify_translate.py`로 재세요.
+- 남은 것: 어색함 판정은 겉모양만 봅니다(뜻이 틀렸는지는 보지 않습니다). 다시 나눈 자막은 말한 자리와 정확히 맞지 않습니다. 재번역 개수·사유를 작업 화면에 보여 주지는 않습니다(단계 결과에만 남습니다).
+
 ## 2026-09-21: 용어집을 번역에 연결 (Claude)
 
 - 사용자 요청: 번역 품질을 올리는 세 가지 안(문맥 배치·용어집·LLM 번역)의 비용을 비교한 뒤 "일단 용어집부터 연결하고". [PR #36](https://github.com/plutoan12/recording4/pull/36) 후속 커밋. 담당: `pipeline/glossary.py`(신규), `worker/providers.py`, `worker/workflow_tasks.py`, `adminapi/services/glossary.py`(신규), `adminapi/routers/glossaries.py`(신규), `adminapi/config.py`·`main.py`, `apps/web/GlossaryPanel.tsx`(신규)·`App.tsx`·`styles.css`, `scripts/verify_translate.py`, 테스트·문서.

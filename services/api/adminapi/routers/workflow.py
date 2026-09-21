@@ -53,6 +53,9 @@ def configuration(user: CurrentUser):
     return {
         "paid_enabled": s.paid_processing_enabled,
         "translation_configured": bool(s.google_cloud_project and s.translate_usd_per_1k_chars),
+        "llm_translate_configured": bool(
+            s.anthropic_api_key and s.llm_translate_model and s.llm_translate_usd_per_1k_chars
+        ),
         "speech_configured": bool(s.elevenlabs_api_key and s.tts_usd_per_1k_chars),
         "lipsync_configured": bool(s.sync_api_key and s.lipsync_usd_per_second),
         "youtube_configured": bool(

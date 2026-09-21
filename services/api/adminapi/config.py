@@ -68,12 +68,17 @@ class Settings(BaseSettings):
     # Storage에 두어야 하고 `global` 위치는 지원되지 않습니다. 비워 두면
     # glossaries 테이블의 용어집을 번역 전에 원문에 박아 넣습니다.
     google_translate_glossary: str | None = None
+    # 어색한 자막만 다시 번역하는 LLM. 키와 모델 이름을 모두 넣어야 켜집니다.
+    # 모델 이름은 바뀌므로 기본값을 두지 않습니다(설정한 값이 사람의 결정입니다).
+    anthropic_api_key: str | None = None
+    llm_translate_model: str | None = None
     elevenlabs_api_key: str | None = None
     tts_model: str = "eleven_multilingual_v2"
     tts_model_version: str | None = None
     tts_voice_version: str | None = None
     sync_api_key: str | None = None
     translate_usd_per_1k_chars: Decimal | None = None
+    llm_translate_usd_per_1k_chars: Decimal | None = None
     tts_usd_per_1k_chars: Decimal | None = None
     lipsync_usd_per_second: Decimal | None = None
     youtube_upload_enabled: bool = False

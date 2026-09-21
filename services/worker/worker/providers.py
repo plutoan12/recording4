@@ -6,6 +6,7 @@ for contract tests. Persist returned remote ids before polling or retry decision
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 from pathlib import Path
@@ -54,8 +55,9 @@ class GoogleTranslator:
     않은 문장은 지금까지와 똑같이 `text/plain`으로 갑니다. 방식과 한계는
     `pipeline.glossary`에 적어 두었습니다.
 
-    호출마다 `missing_terms`에 **번역문에서 사라진 용어**가 남습니다. 용어가
-    빠졌다고 번역을 버리지는 않습니다. 세어서 보여 주는 것까지가 몫입니다.
+    호출마다 `missing_terms`에 **번역문에서 사라진 용어**가 자리 번호별로
+    남습니다. 용어가 빠졌다고 번역을 버리지는 않습니다. 세어서 보여 주는
+    것까지가 몫입니다.
     """
 
     def __init__(
@@ -74,7 +76,7 @@ class GoogleTranslator:
             raise ValueError("Google 용어집은 global 위치를 지원하지 않습니다. 지역을 고르세요.")
         self.project, self.client, self.allow_paid = project, client, allow_paid
         self.glossary_resource = glossary_resource
-        self.missing_terms: list[str] = []
+        self.missing_terms: dict[int, list[str]] = {}
 
     @property
     def parent(self) -> str:
@@ -119,7 +121,7 @@ class GoogleTranslator:
             from google.cloud import translate_v3
 
             self.client = translate_v3.TranslationServiceClient()
-        self.missing_terms = []
+        self.missing_terms = {}
         if self.glossary_resource:
             glossary = None  # Google이 처리하므로 우리 표시는 넣지 않습니다.
         marked = [protect(text, glossary) for text in texts]
@@ -145,11 +147,11 @@ class GoogleTranslator:
                 strict=True,
             ):
                 output[index] = restore(translated)
-                self.missing_terms += missing(output[index], marked[index][1])
+                gone = missing(output[index], marked[index][1])
+                if gone:
+                    self.missing_terms[index] = gone
         if self.missing_terms:
-            logger.warning(
-                "번역문에서 빠진 용어 %d개: %s", len(self.missing_terms), self.missing_terms
-            )
+            logger.warning("번역문에서 빠진 용어: %s", self.missing_terms)
 
         return [
             video_terms(original, translated, source, target)
@@ -215,3 +217,130 @@ class SyncLipsync:
             raise ProviderError(f"립싱크 조회 실패: HTTP {response.status_code}")
         data = response.json()
         return {key: data.get(key) for key in ("id", "status", "outputUrl", "error")}
+
+
+class ClaudeTranslator:
+    """어색한 자막만 다시 번역합니다. 앞뒤 자막을 문맥으로 같이 넘깁니다.
+
+    전체를 LLM에 맡기지 않습니다. 기계 번역이 대부분을 처리하고, 여기서는
+    `pipeline.translation_review`가 고른 몇 개만 다시 씁니다. 고르는 수에
+    상한이 있어(기본 30%) 비용이 번역량에 비례해 뛰지 않습니다.
+
+    응답은 **입력과 같은 개수의 JSON 배열**이어야 합니다. 개수가 다르거나
+    JSON이 아니면 `ProviderError`를 냅니다. 부르는 쪽은 그때 기계 번역
+    결과를 그대로 씁니다. **다시 쓰기에 실패해도 자막은 남습니다.**
+    """
+
+    URL = "https://api.anthropic.com/v1/messages"
+    VERSION = "2023-06-01"
+    # 자막 한 줄이 길어야 수백 자입니다. 넉넉히 잡되 폭주를 막습니다.
+    MAX_TOKENS = 4096
+
+    def __init__(
+        self,
+        api_key: str,
+        *,
+        client: httpx.Client,
+        model: str,
+        allow_paid: bool = False,
+    ):
+        self.api_key, self.client, self.model = api_key, client, model
+        self.allow_paid = allow_paid
+        self.usage: dict[str, int] = {}
+
+    def prompt(
+        self,
+        items: list[dict],
+        target: str,
+        source: str | None,
+        glossary: Glossary | None,
+    ) -> str:
+        lines = [
+            "아래는 영상 자막입니다. 기계 번역이 어색하게 옮긴 자막을 다시 번역합니다.",
+            f"원문 언어: {source or '자동 감지'} / 목표 언어: {target}",
+            "",
+            "규칙:",
+            "- `다시 번역할 자막`의 각 항목을 목표 언어로 옮깁니다.",
+            "- 자막이므로 **짧고 말하듯이** 씁니다. 설명을 덧붙이지 않습니다.",
+            "- 앞뒤 자막은 문맥으로만 쓰고 번역하지 않습니다.",
+            "- 줄바꿈을 넣지 않습니다. 한 항목은 한 줄입니다.",
+        ]
+        if glossary and glossary.entries:
+            pairs = ", ".join(f"{key} → {value}" for key, value in glossary.entries.items())
+            lines.append(f"- 다음 표기를 **그대로** 씁니다: {pairs}")
+        lines += [
+            "",
+            "출력: 설명 없이 JSON 배열 하나만. 항목 수는 입력과 같아야 합니다.",
+            "",
+            "앞뒤 문맥:",
+            json.dumps(
+                [{"원문": item["context"]} for item in items], ensure_ascii=False, indent=None
+            ),
+            "",
+            "다시 번역할 자막:",
+            json.dumps(
+                [{"원문": item["source"], "기계 번역": item["draft"]} for item in items],
+                ensure_ascii=False,
+            ),
+        ]
+        return "\n".join(lines)
+
+    def retranslate(
+        self,
+        items: list[dict],
+        target: str,
+        source: str | None = None,
+        *,
+        glossary: Glossary | None = None,
+    ) -> list[str]:
+        """`items`는 `{"source", "draft", "context"}` 목록입니다."""
+        require_paid(self.allow_paid)
+        if not items:
+            raise ValueError("다시 번역할 자막이 없습니다.")
+        response = self.client.post(
+            self.URL,
+            headers={
+                "Authorization": f"Bearer {self.api_key}",
+                "anthropic-version": self.VERSION,
+                "content-type": "application/json",
+            },
+            json={
+                "model": self.model,
+                "max_tokens": self.MAX_TOKENS,
+                "messages": [
+                    {"role": "user", "content": self.prompt(items, target, source, glossary)}
+                ],
+            },
+            timeout=120,
+        )
+        if response.status_code != 200:
+            raise ProviderError(f"LLM 재번역 실패: HTTP {response.status_code}")
+        body = response.json()
+        self.usage = body.get("usage") or {}
+        if body.get("stop_reason") == "max_tokens":
+            raise ProviderError("LLM 재번역이 길이 제한에서 잘렸습니다.")
+        text = "".join(
+            block.get("text", "")
+            for block in body.get("content", [])
+            if block.get("type") == "text"
+        )
+        return self._parse(text, len(items))
+
+    @staticmethod
+    def _parse(text: str, count: int) -> list[str]:
+        start, end = text.find("["), text.rfind("]")
+        if start < 0 or end <= start:
+            raise ProviderError("LLM 재번역 응답에서 JSON 배열을 찾지 못했습니다.")
+        try:
+            parsed = json.loads(text[start : end + 1])
+        except json.JSONDecodeError:
+            raise ProviderError("LLM 재번역 응답이 JSON이 아닙니다.") from None
+        if not isinstance(parsed, list) or len(parsed) != count:
+            raise ProviderError("LLM 재번역 응답 수가 입력과 다릅니다.")
+        output = []
+        for item in parsed:
+            value = item.get("번역") if isinstance(item, dict) else item
+            if not isinstance(value, str) or not value.strip():
+                raise ProviderError("LLM 재번역 응답에 빈 항목이 있습니다.")
+            output.append(" ".join(value.split()))
+        return output
