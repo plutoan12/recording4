@@ -74,6 +74,8 @@ def independent(target="B", **changes):
         visual=dict(
             method="active_speaker_detection",
             model_revision="visual-v1",
+            score_kind="calibrated_probability",
+            calibration_revision="visual-calibration-v1",
             active_speaker_score=0.9,
         ),
     )
@@ -89,7 +91,11 @@ def proposed(targets=("B",)):
 
 
 def test_independent_voice_and_visual_evidence_only_qualifies_without_applying():
-    output = qualify_target_reviews(proposed(), [independent()])
+    output = qualify_target_reviews(
+        proposed(),
+        [independent()],
+        trusted_visual_calibrations={("visual-v1", "visual-calibration-v1")},
+    )
     word = output[0]["words"][0]
     review = word["target_asr_review"]
     assert review["independent_voice_verified"] is True
@@ -99,6 +105,8 @@ def test_independent_voice_and_visual_evidence_only_qualifies_without_applying()
     assert review["applied"] is False
     assert review["voice_provenance"]["model_revision"] == "voice-v1"
     assert review["visual_provenance"]["model_revision"] == "visual-v1"
+    assert review["visual_provenance"]["score_kind"] == "calibrated_probability"
+    assert review["visual_provenance"]["calibration_revision"] == "visual-calibration-v1"
     assert word["speaker"] == "A"
     assert word["needs_review"] is True
 
@@ -156,6 +164,8 @@ def test_ambiguous_target_text_cannot_be_qualified():
                 "visual": {
                     "method": "active_speaker_detection",
                     "model_revision": "visual-v1",
+                    "score_kind": "calibrated_probability",
+                    "calibration_revision": "visual-calibration-v1",
                     "active_speaker_score": 0.69,
                 }
             },
@@ -190,6 +200,8 @@ def test_weak_or_non_independent_support_is_rejected(changes, reason):
             "visual": {
                 "method": "active_speaker_detection",
                 "model_revision": "visual-v1",
+                "score_kind": "calibrated_probability",
+                "calibration_revision": "visual-calibration-v1",
                 "active_speaker_score": 2,
             }
         },
@@ -231,6 +243,70 @@ def test_human_evidence_requires_attribution_and_preserves_it():
     row["visual"].pop("reviewer_id")
     with pytest.raises(ValueError, match="visual provenance"):
         qualify_target_reviews(proposed(), [row])
+
+
+@pytest.mark.parametrize(
+    ("visual", "expected_score_kind"),
+    [
+        (
+            {
+                "method": "active_speaker_detection",
+                "model_revision": "visual-v1",
+                "active_speaker_score": 0.9,
+            },
+            None,
+        ),
+        (
+            {
+                "method": "active_speaker_detection",
+                "model_revision": "visual-v1",
+                "score_kind": "raw_logit",
+                "calibration_revision": "visual-calibration-v1",
+                "active_speaker_score": 4.2,
+            },
+            "raw_logit",
+        ),
+        (
+            {
+                "method": "active_speaker_detection",
+                "model_revision": "visual-v1",
+                "score_kind": "calibrated_probability",
+                "active_speaker_score": 0.9,
+            },
+            "calibrated_probability",
+        ),
+    ],
+)
+def test_machine_visual_evidence_requires_trusted_calibration_without_aborting(
+    visual, expected_score_kind
+):
+    review = qualify_target_reviews(proposed(), [independent(visual=visual)])[0]["words"][0][
+        "target_asr_review"
+    ]
+    assert review["qualified_for_reassignment"] is False
+    assert "untrusted_visual_calibration" in review["qualification_reasons"]
+    assert review["visual_provenance"].get("score_kind") == expected_score_kind
+
+
+def test_trusted_visual_calibration_uses_normalized_provenance():
+    visual = independent()["visual"]
+    visual.update(
+        model_revision=" visual-v1 ",
+        score_kind=" calibrated_probability ",
+        calibration_revision=" visual-calibration-v1 ",
+    )
+    review = qualify_target_reviews(
+        proposed(),
+        [independent(visual=visual)],
+        trusted_visual_calibrations={("visual-v1", "visual-calibration-v1")},
+    )[0]["words"][0]["target_asr_review"]
+    assert review["qualified_for_reassignment"] is True
+
+
+@pytest.mark.parametrize("trusted", [None, [["visual-v1", "visual-calibration-v1"]]])
+def test_invalid_trusted_visual_calibration_has_fixed_error(trusted):
+    with pytest.raises(ValueError, match="Invalid trusted visual calibration"):
+        qualify_target_reviews(proposed(), [independent()], trusted_visual_calibrations=trusted)
 
 
 def test_requalification_clears_stale_provenance():

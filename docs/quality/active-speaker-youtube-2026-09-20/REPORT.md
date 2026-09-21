@@ -1,0 +1,42 @@
+# 실제 영상의 활성 화자·음성 화자 불일치 검사
+
+사용자가 지정한 [32.6초 YouTube 영상](https://www.youtube.com/watch?v=6LVyV8ueYc8)을 비공개로 내려받아 영상과 음성을 서로 독립적으로 분석했다. 원본 영상·음원·얼굴 추적·원시 점수는 비공개 평가 폴더에만 두고 저장소에는 집계만 남긴다.
+
+## 고정 입력과 실행
+
+- 영상 SHA-256: `79bfecbab4548baf7c6fd18704048fa39644b32f738c248d027267e82694ca49`
+- 영상: 32.600816초, 854×398, H.264/AAC
+- 시각: MIT 라이선스 [Light-ASD](https://github.com/Junhua-Liao/Light-ASD) revision `ed38c232de5efe0261dbd68627c0ade7cdfe14eb`, CPU 실행
+- 음성: Sortformer v2.1 revision `fafaab5faa1617a0ca52d38dd3dc4bd636800d3d`, 기존 고정 체크포인트와 기본 스트리밍 설정
+- 원본 WAV에서는 모델 끝 시각 32.63초가 실제 32.60초를 넘어 엄격 파서가 거부했다. 기준을 완화하지 않고 끝에 0.04초 무음을 붙인 32.64초 별도 사본으로 결과를 만들었다. 사본 SHA-256은 `9d0bcfbd7c8ad7b34925e9f4290b99c782c51c8a4cadccd38a35020dc127bc93`이며 원본과 실행 결과는 비공개로 보존했다.
+
+Light-ASD 공식 데모는 0~1 확률이 아니라 클래스 1의 원시 로그잇을 저장하고 `0 이상`을 발화로 표시한다. 또한 10개 얼굴 추적에서 각각 마지막 1프레임의 점수가 없어 총 10개 추적 꼬리 프레임, 고유 8프레임·0.32초가 미채점이다. 원시 로그잇에 sigmoid를 적용한 값은 단조 변환일 뿐, 사람 정답으로 보정된 확률이 아니다. 아래 시각 시간은 미채점 얼굴을 활성으로 추측하지 않은 하한이다.
+
+## 모델 간 불일치
+
+| 항목 | 시간 |
+|---|---:|
+| Light-ASD가 한 명 이상 활성으로 표시 | 29.32초 이상 |
+| Light-ASD가 두 명 이상 활성으로 표시 | 10.12초 이상 |
+| Sortformer가 한 명 이상 발화로 표시 | 31.60초 |
+| Sortformer가 두 명 이상 발화로 표시 | 2.56초 |
+| 두 모델이 함께 겹말로 표시 | 2.44초 이상 |
+
+Sortformer 겹말의 **95.31%**는 Light-ASD도 겹말로 표시했다. 반대로 Light-ASD 겹말 중 Sortformer가 함께 잡은 비율은 **24.11%**다. 영상 후반의 웃음과 동시 반응에서 여러 얼굴이 동시에 활성으로 표시되지만, 화면만으로 실제 유성 발화와 웃음·입 모양을 완전히 구분할 수 없다. 따라서 차이 7.68초를 음성 모델의 확정 누락이나 정확도 증가로 세지 않고 **사람 검수 후보**로만 남긴다.
+
+음성 구간은 각 25fps 프레임의 중심 시각에서 활성인 **서로 다른 화자 ID** 수로 센다. 같은 화자의 겹친 청크를 두 화자로 세지 않고, 시작·끝을 floor/ceil로 넓혀 화자 교대 경계에 가짜 겹말을 만들지 않는다.
+
+## 코드에 반영한 방어
+
+기계 활성 화자 근거가 대상 화자 재검사 자격에 쓰이려면 `score_kind=calibrated_probability`와 보정 revision을 선언하고, 호출자가 별도로 전달한 신뢰 목록에 `(model_revision, calibration_revision)` 조합이 있어야 한다. 선언만으로는 통과하지 않는다. 현재 신뢰 목록은 비어 있어 Light-ASD 원시 로그잇이나 임의의 sigmoid 값은 `untrusted_visual_calibration`으로 남는다. 사람 정답으로 보정한 뒤 코드 검토를 거친 revision을 등록하기 전까지 이번 결과는 불일치 탐지와 검수 우선순위에만 쓴다. 음성 임베딩의 0.6/0.15 기준은 기존 계약을 유지하며, 별도의 확률 보정값은 아니라는 한계가 남는다.
+
+집계는 `scripts/compare_active_speaker_diarization.py`가 얼굴 상자·영상·대사 없는 비공개 로그잇 JSON과 Sortformer 결과를 다시 검사해 생성한다. 입력 지문은 [집계 JSON](results.json)에 기록했다. 같은 입력으로 다음처럼 실행하면 공개 파일과 바이트 단위로 일치하며, 미채점 프레임을 별도 분모로 보존한다.
+
+```bash
+python3 scripts/compare_active_speaker_diarization.py \
+  --active <비공개-sanitized-active-logits.json> \
+  --diarization <비공개-sortformer-result.json> \
+  --output docs/quality/active-speaker-youtube-2026-09-20/results.json
+```
+
+이 표본에는 완전한 사람별 발화 정답이 없으므로 활성 화자 정확도, DER 개선, 단어 화자 정답 증가는 아직 입증되지 않았다. 운영 자동 재배정과 기본 모델은 바꾸지 않는다.

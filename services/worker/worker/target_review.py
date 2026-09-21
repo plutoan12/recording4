@@ -13,6 +13,7 @@ from difflib import SequenceMatcher
 VOICE_MATCH_MINIMUM = 0.6
 VOICE_MARGIN_MINIMUM = 0.15
 VISUAL_ACTIVE_SPEAKER_MINIMUM = 0.7
+VISUAL_SCORE_KIND = "calibrated_probability"
 TIMING_TOLERANCE_SECONDS = 0.02
 VOICE_METHODS = {"speaker_embedding", "human_voice_reference"}
 VISUAL_METHODS = {"active_speaker_detection", "human_visual_review"}
@@ -105,10 +106,18 @@ def _evidence_provenance(value, name):
     revision = value.get("model_revision")
     if not isinstance(revision, str) or not revision.strip():
         raise ValueError(f"Invalid {name} provenance")
-    return dict(method=method, model_revision=revision.strip())
+    provenance = dict(method=method, model_revision=revision.strip())
+    if method == "active_speaker_detection":
+        calibration_revision = value.get("calibration_revision")
+        score_kind = value.get("score_kind")
+        if isinstance(score_kind, str) and score_kind.strip():
+            provenance["score_kind"] = score_kind.strip()
+        if isinstance(calibration_revision, str) and calibration_revision.strip():
+            provenance["calibration_revision"] = calibration_revision.strip()
+    return provenance
 
 
-def qualify_target_reviews(reviews, evidence):
+def qualify_target_reviews(reviews, evidence, *, trusted_visual_calibrations=()):
     """Attach independent voice and visual support without changing assignments.
 
     Target-ASR text is conditioned on diarization.  A singleton text candidate is
@@ -117,6 +126,18 @@ def qualify_target_reviews(reviews, evidence):
     This function records that eligibility; it never applies the candidate.
     """
     result = copy.deepcopy(reviews)
+    try:
+        trusted_visual_calibrations = list(trusted_visual_calibrations)
+    except TypeError as exc:
+        raise ValueError("Invalid trusted visual calibration") from exc
+    if any(
+        not isinstance(item, tuple)
+        or len(item) != 2
+        or not all(isinstance(value, str) and value for value in item)
+        for item in trusted_visual_calibrations
+    ):
+        raise ValueError("Invalid trusted visual calibration")
+    trusted_visual_calibrations = set(trusted_visual_calibrations)
     indexed = {}
     for row in evidence:
         if not isinstance(row, dict):
@@ -205,13 +226,37 @@ def qualify_target_reviews(reviews, evidence):
                         reasons.append("invalid_visual_provenance")
                     else:
                         review["visual_provenance"] = _evidence_provenance(visual, "visual")
-                        active = _bounded_number(
-                            visual.get("active_speaker_score"), "active speaker score", 0, 1
+                        active = _finite_number(
+                            visual.get("active_speaker_score"), "active speaker score"
                         )
-                        if active < VISUAL_ACTIVE_SPEAKER_MINIMUM:
-                            reasons.append("visual_speaker_below_threshold")
+                        if visual.get("method") == "active_speaker_detection":
+                            visual_provenance = review["visual_provenance"]
+                            score_kind = visual_provenance.get("score_kind")
+                            if score_kind == VISUAL_SCORE_KIND:
+                                active = _bounded_number(active, "active speaker score", 0, 1)
+                            calibration = (
+                                visual_provenance.get("model_revision"),
+                                visual_provenance.get("calibration_revision"),
+                            )
+                            calibration_trusted = (
+                                score_kind == VISUAL_SCORE_KIND
+                                and calibration in trusted_visual_calibrations
+                            )
+                            if not calibration_trusted:
+                                reasons.append("untrusted_visual_calibration")
+                            if (
+                                score_kind == VISUAL_SCORE_KIND
+                                and active < VISUAL_ACTIVE_SPEAKER_MINIMUM
+                            ):
+                                reasons.append("visual_speaker_below_threshold")
+                            elif calibration_trusted:
+                                review["independent_visual_verified"] = True
                         else:
-                            review["independent_visual_verified"] = True
+                            active = _bounded_number(active, "active speaker score", 0, 1)
+                            if active < VISUAL_ACTIVE_SPEAKER_MINIMUM:
+                                reasons.append("visual_speaker_below_threshold")
+                            else:
+                                review["independent_visual_verified"] = True
                     voice_provenance = review.get("voice_provenance", {})
                     visual_provenance = review.get("visual_provenance", {})
                     if (
