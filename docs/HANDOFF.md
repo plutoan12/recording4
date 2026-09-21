@@ -1,3 +1,10 @@
+## 2026-09-21 사용자 지정 영상 로컬 검수 초안
+
+- YouTube 자동 자막 트랙이 없어 패딩한 분석용 음원 사본에 캐시된 `Systran/faster-whisper-small`을 무료 CPU 실행했다. 한국어 감지 확률은 1.0, 32.64초·8개 세그먼트였다. 전사는 사람 정답이 아니므로 정확도 계산·화자 자동 수정에 사용하지 않는다.
+- 시각·음성 모델 불일치 및 미채점 15개 후보에 ASR 세그먼트, Sortformer 발화 구간, Light-ASD 활성 트랙을 시간으로 연결한 비공개 초안 `review-draft-small-ko-v2.json`을 `/Users/an-youwon/Projects/recording4-evaluation-private/active-speaker-youtube-20260920`에 저장했다. 후보 상태는 모두 `human_review_required`이며 기존 배정·운영 기본은 유지한다.
+- 최신 `d6d151e` GitHub Actions run **35608809724**는 Python·DER·UI 검사 성공(워커/스택은 조건상 생략)이다. 저장소에는 집계·절차 문서만 남기고 원시 음원·전사·토큰은 커밋하지 않았다. [상세](quality/active-speaker-youtube-2026-09-20/REPORT.md)
+- 남은 일: 후보 구간 사람 검수와 독립 화자 정답 작성, 그 뒤 같은 분모의 DER/CER·오배정/누락 비교. 사람 정답 전에는 정확도 개선이나 운영 채택을 말하지 않는다.
+
 ## 2026-09-20 사용자 지정 영상 활성 화자 진단
 
 - 지정한 32.6초 영상에서 Light-ASD 10개 얼굴 추적과 Sortformer v2.1 음성 화자를 독립 실행했다. 시각 겹말 10.12초, 음성 겹말 2.56초, 동의 2.44초다. 음성 겹말의 95.31%를 시각이 지지하지만 시각 겹말의 음성 지지는 24.11%라 차이 구간은 사람 검수 대상으로만 남긴다.
