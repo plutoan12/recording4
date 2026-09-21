@@ -1,3 +1,9 @@
+## 2026-09-21 privacy-tool 후보 3종 확보
+
+- 세 저장소를 비공개 평가 폴더에 shallow clone했다: `ORB-HD/deface` `09b670db307b970cff6fad1848cf04d5f0810ec4`(MIT, 현재 워커 기본 모자이크), `austinmabry/OpenScrub` `cbe4ad4e14b92618ad497095b75259a789703ac6`(Apache-2.0, 얼굴·사람·번호판·OCR 검수 후보), `facebookresearch/EgoBlur` `75144e14916223313beb6593b631e32ca149d840`(Apache-2.0, 얼굴·번호판 블러 후보).
+- 위치: `/Users/an-youwon/Projects/recording4-evaluation-private/privacy-tools-20260921`. 각 저장소의 원문과 모델 파일은 GitHub 저장소와 비공개 평가 폴더에만 두며 recording4 코드 저장소에는 복사하지 않는다.
+- 현재 운영 연결은 검증된 `deface==1.5.0` 모자이크뿐이다. OpenScrub은 사람 검수·OCR·전체 인물 마스킹 비교용, EgoBlur는 Aria 계열 모델과 블러 비교용으로 격리했다. 모델 다운로드와 실제 영상 처리는 별도 승인·품질 검증 뒤에 진행한다.
+
 ## 2026-09-21 얼굴 모자이크와 후보 음성 검수팩
 
 - 숏폼 `EditSpec`에 `mosaic_faces`와 `mosaic_size(4~100, 기본20)`를 추가하고 관리화면에서 선택하도록 연결했다. 워커는 자막·크롭 렌더 뒤 MIT `deface==1.5.0`을 실행해 얼굴을 자동 검출·모자이크하고 오디오를 유지한다. 도구가 없거나 실행이 실패하면 원본 얼굴이 남은 결과를 성공 처리하지 않는다. 기본값은 꺼져 있다.
