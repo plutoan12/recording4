@@ -20,7 +20,16 @@ PR #36을 밀고 있는 동안 main에 PR #17이 들어왔고, **같은 기능�
 - 얼굴 캐스케이드를 두 곳에서 따로 열던 것을 `worker.faces._cascade` 하나로 모았습니다(그쪽이 objdetect 없는 5.x 휠과 빈 분류기까지 걸러 냅니다).
 - `EditSpec`에 `segments`와 무음 컷을 함께 주지 못하게 했습니다 → 무음 컷 쪽을 아예 없애면서 이 규칙도 필요 없어졌습니다.
 
-**아직 재지 못한 것**: 합친 뒤의 전환·리프레이밍을 실제 렌더로 다시 확인해야 합니다(아래 검증 참고). 번역 쪽은 main 것을 그대로 쓰므로 main의 검증이 그대로 유효합니다.
+검증: 전체 765 passed·4 skipped·**0 failed**. 실제 렌더 8개 통과 — 전환은 3초 구간 둘을 0.3초씩 겹쳐 5.7초(딱 붙이면 6.0초), 움직이는 crop 식과 `afftdn`이 FFmpeg를 통과합니다. 번역 쪽은 main 것을 그대로 쓰므로 main의 검증이 그대로 유효합니다.
+
+**의존성을 건드렸으면 빈 venv에서 재세요.** 이 병합에서 `pyproject.toml`의 `dev` 묶음에 numpy를 `2.2.6`·`2.4.6` 둘로 남겼고, CI의 `파이썬 검사`가 설치 단계에서 `ResolutionImpossible`로 죽었습니다. 이 환경에는 numpy가 이미 깔려 있어 pip이 다시 풀 일이 없었고 테스트는 멀쩡히 통과했습니다. 앞으로는 이렇게 확인합니다:
+
+```
+python -m venv /tmp/civenv && /tmp/civenv/bin/pip install -e ".[dev,providers]"
+/tmp/civenv/bin/python -m pytest -q && /tmp/civenv/bin/ruff check . && /tmp/civenv/bin/ruff format --check .
+```
+
+**앞 기록의 정정**: 그동안 여러 항목에 "`test_caption_track_is_uploaded_once_for_track_only_video`는 이 환경에서만 실패하고 CI에서는 통과한다"고 적었습니다. 위 깨끗한 venv에서는 **통과합니다.** 기준 커밋에서도 실패한 것은 맞지만 원인은 코드나 기준 커밋이 아니라 **이 컨테이너 주 환경에 딸려 들어온 무언가**였습니다. 앞으로 "이 환경에서만"이라고 적기 전에 깨끗한 venv에서 한 번 더 봅니다.
 
 ## 2026-09-21: 환경을 핑계로 미룬 검증을 직접 하고, 얼굴 검출 결함 둘을 고침 (Claude)
 
