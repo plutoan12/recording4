@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Literal
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -38,28 +39,6 @@ class Cue(BaseModel):
         if self.end <= self.start:
             raise ValueError("자막 종료는 시작보다 뒤여야 합니다.")
         return self
-
-
-class TrimSettings(BaseModel):
-    """무음 자동 컷의 세기. 기본값은 잰 것이 아니라 정한 것입니다.
-
-    자르는 계산은 `pipeline.trimming`에 있습니다. 여기에는 값만 둡니다
-    (그쪽이 이 파일을 읽으므로 반대로 읽으면 순환 참조가 됩니다).
-    """
-
-    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
-
-    # 말 앞뒤로 남길 여유. 딱 붙여 자르면 첫 소리가 잘립니다.
-    pad: float = Field(default=0.12, ge=0, le=2)
-    # 이보다 짧은 침묵은 자르지 않습니다. 숨 쉬는 자리까지 없애면 듣기 나쁩니다.
-    min_gap: float = Field(default=0.6, ge=0.05, le=10)
-    # 이보다 짧은 토막은 버립니다. 한 프레임짜리 조각이 남지 않게.
-    min_keep: float = Field(default=0.4, ge=0.05, le=10)
-
-
-# 사람이 정할 수 있는 토막 수의 상한. 자동 탐지 쪽 상한(`trimming.MAX_SEGMENTS`)과
-# 같은 이유입니다. FFmpeg 필터 문자열이 끝없이 길어지지 않게 합니다.
-MAX_KEEP = 200
 
 
 # xfade 전환 가운데 자막·세로 화면에서 무난한 것만 엽니다. FFmpeg에는 50여
@@ -106,6 +85,26 @@ class ReframeSettings(BaseModel):
     max_speed: float = Field(default=0.25, ge=0.01, le=2)
 
 
+class TimeSpan(BaseModel):
+    """이어 붙일 구간 하나. `speed`는 재생 속도입니다(2.0이면 두 배 빠르게)."""
+
+    model_config = ConfigDict(allow_inf_nan=False, extra="forbid")
+    start: float = Field(ge=0)
+    end: float = Field(gt=0)
+    speed: float = Field(default=1.0, ge=0.5, le=4.0)
+
+    @model_validator(mode="after")
+    def ordered(self):
+        if self.end <= self.start:
+            raise ValueError("구간 끝은 시작보다 뒤여야 합니다.")
+        return self
+
+    @property
+    def output_seconds(self) -> float:
+        """이 구간이 결과에서 차지하는 시간."""
+        return (self.end - self.start) / self.speed
+
+
 class EditSpec(BaseModel):
     model_config = ConfigDict(allow_inf_nan=False, extra="forbid")
     start: float = Field(ge=0)
@@ -135,47 +134,53 @@ class EditSpec(BaseModel):
     cues: list[Cue] = Field(default_factory=list, max_length=3000)
     # 스티커(화살표·반짝이·말풍선·PNG). 시각은 자막과 같은 원본 시간축이며 구간에 맞춰 옮깁니다.
     stickers: list[Sticker] = Field(default_factory=list, max_length=20)
-    # 말이 없는 구간을 잘라내고 남은 토막을 이어 붙입니다. 비우면 자르지 않습니다.
-    # 자른 뒤에는 시간축이 달라지므로 자막·단어 시각·스티커를 함께 옮깁니다.
-    silence: TrimSettings | None = None
     # 세로로 자를 때 얼굴을 따라 중심을 움직입니다. 비우면 `focus_x` 고정입니다.
     # `mode="crop"`에서만 씁니다(`pad`는 화면 전체를 남기므로 자를 것이 없습니다).
     reframe: ReframeSettings | None = None
     # 음성 잡음 제거. FFmpeg 내장 필터라 새 의존성이 없습니다. 비우면 건드리지
     # 않습니다. `strong`은 잡음을 더 깎지만 목소리도 같이 깎일 수 있습니다.
     denoise: Literal["soft", "strong"] | None = None
-    # 남길 토막을 **사람이 직접 정한 것**. 구간 시작을 0으로 센 (시작, 끝)입니다.
-    # 있으면 `silence`보다 우선합니다. 자동으로 찾은 결과를 화면에서 손본 값이
-    # 여기 들어옵니다. 사람이 고른 것을 기계가 다시 덮지 않습니다.
-    keep: list[tuple[float, float]] | None = Field(default=None, max_length=MAX_KEEP)
     # 이어 붙인 자리의 전환. 비우면 딱 붙입니다. 전환을 넣으면 토막이 서로
     # 겹치므로 영상이 (토막 수 - 1) × seconds 만큼 짧아집니다.
     transition: TransitionSettings | None = None
+    # 이어 붙일 구간들. 비어 있으면 지금까지처럼 start~end 한 구간입니다.
+    segments: list[TimeSpan] = Field(default_factory=list, max_length=50)
+    fade_in: float = Field(default=0.0, ge=0, le=5)
+    fade_out: float = Field(default=0.0, ge=0, le=5)
+    # 배경음악으로 쓸 원본. 그 원본의 소리만 가져다 깝니다.
+    music_asset_id: UUID | None = None
+    music_gain_db: float = Field(default=-18.0, ge=-60, le=0)
+    # 말할 때 배경음악 음량을 자동으로 낮춥니다.
+    music_duck: bool = True
+
+    @property
+    def output_seconds(self) -> float:
+        """결과 영상의 길이. 구간을 골랐으면 그것들을 이어 붙인 길이입니다."""
+        if self.segments:
+            return sum(span.output_seconds for span in self.segments)
+        return self.end - self.start
+
+    @property
+    def spans(self) -> list[TimeSpan]:
+        """실제로 쓸 구간. 고르지 않았으면 start~end 하나입니다."""
+        return self.segments or [TimeSpan(start=self.start, end=self.end)]
 
     @model_validator(mode="after")
     def valid_range(self):
-        if not 0 < self.end - self.start <= 180:
-            raise ValueError("숏폼 길이는 0초 초과, 180초 이하여야 합니다.")
         if self.height * 9 != self.width * 16:
             raise ValueError("출력 화면은 9:16이어야 합니다.")
-        if self.keep is not None:
-            self._valid_keep()
+        previous: float | None = None
+        for span in self.segments:
+            if span.start < self.start or span.end > self.end:
+                raise ValueError("이어 붙일 구간은 시작~끝 안에 있어야 합니다.")
+            if previous is not None and span.start < previous:
+                raise ValueError("이어 붙일 구간은 시간 순서대로, 겹치지 않게 주세요.")
+            previous = span.end
+        if not 0 < self.output_seconds <= 180:
+            raise ValueError("숏폼 길이는 0초 초과, 180초 이하여야 합니다.")
+        if self.fade_in + self.fade_out > self.output_seconds:
+            raise ValueError("페이드 길이가 결과 길이를 넘습니다.")
         return self
-
-    def _valid_keep(self) -> None:
-        """남길 토막은 차례대로, 겹치지 않고, 구간 안에 있어야 합니다."""
-        if not self.keep:
-            raise ValueError("남길 토막을 하나도 두지 않으면 영상이 비어 버립니다.")
-        length = self.end - self.start
-        previous = 0.0
-        for start, end in self.keep:
-            if end <= start:
-                raise ValueError("남길 토막의 끝은 시작보다 뒤여야 합니다.")
-            if start < previous:
-                raise ValueError("남길 토막은 앞에서 뒤로, 겹치지 않게 적어야 합니다.")
-            if end > length + 1e-6:
-                raise ValueError("남길 토막이 선택 구간을 넘습니다.")
-            previous = end
 
 
 def clip_cues(cues: list[Cue], start: float, end: float) -> list[Cue]:
@@ -205,6 +210,42 @@ def _clip_words(words: list[Word] | None, start: float, end: float) -> list[Word
             text=w.text,
         )
         for w in words
+    ]
+
+
+def concat_cues(cues: list[Cue], segments: list[TimeSpan]) -> list[Cue]:
+    """이어 붙인 시간축으로 자막을 옮깁니다.
+
+    구간에 걸친 자막은 그 구간 안쪽만 남습니다. 배속을 걸면 그만큼 짧아집니다.
+    한 프레임(0.04초)보다 짧아진 조각은 화면에 보이지 않으므로 버립니다.
+
+    **단어 시각도 같이 옮깁니다.** `clip_cues`가 살려 둔 것을 여기서 버리면
+    노래방·단어별 등장이 말과 어긋납니다.
+    """
+    moved: list[Cue] = []
+    offset = 0.0
+    for span in segments:
+        for cue in clip_cues(cues, span.start, span.end):
+            start, end = offset + cue.start / span.speed, offset + cue.end / span.speed
+            if end - start >= 0.04:
+                moved.append(
+                    Cue(
+                        start=start,
+                        end=end,
+                        text=cue.text,
+                        words=_shift_words(cue.words, offset, span.speed),
+                    )
+                )
+        offset += span.output_seconds
+    return moved
+
+
+def _shift_words(words: list[Word] | None, offset: float, speed: float) -> list[Word] | None:
+    """단어 시각을 이어 붙인 시간축으로. 배속을 걸면 그만큼 당겨집니다."""
+    if not words:
+        return None
+    return [
+        Word(start=offset + w.start / speed, end=offset + w.end / speed, text=w.text) for w in words
     ]
 
 

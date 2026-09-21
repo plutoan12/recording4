@@ -22,24 +22,12 @@ class WorkflowOptions(BaseModel):
     clip: EditSpec | None = None
     transcript: list[Cue] | None = Field(default=None, max_length=5000)
     translated_cues: list[Cue] | None = Field(default=None, max_length=5000)
-    # 한 문장이 여러 자막으로 잘려 있으면 합쳐서 번역하고 다시 나눕니다.
-    # 글자 수가 늘지 않아 요금은 그대로여서 기본으로 켭니다. 더빙에는 쓰지
-    # 않습니다(아래에서 꺼집니다). 문장부호가 거의 없는 대본에서도 묶지
-    # 않습니다(`pipeline.translation_context.punctuated`).
-    translate_context: bool = True
-    # 기계 번역이 어색한 자막만 골라 LLM으로 다시 번역합니다. 유료입니다.
-    # 기본으로 켜 두되 서버에 LLM 키·모델 이름이 없으면 조용히 건너뜁니다.
-    translate_polish: bool = True
     budget_usd: Decimal = Field(default=Decimal("0"), ge=0, le=10000, decimal_places=4)
 
     @model_validator(mode="after")
     def consistent(self):
         if self.audio_mode != "dub" and self.lipsync:
             raise ValueError("립싱크는 더빙 작업에만 사용할 수 있습니다.")
-        if self.audio_mode == "dub":
-            # 더빙은 자막 조각이 곧 그 구간의 발화라 문장을 다시 나누면 말이
-            # 어긋납니다. 기본값이므로 막지 않고 끕니다.
-            object.__setattr__(self, "translate_context", False)
         return self
 
 

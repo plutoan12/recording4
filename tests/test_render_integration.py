@@ -3,11 +3,12 @@
 import os
 import shutil
 import subprocess
+import uuid
 
 import pytest
 
-from pipeline.editing import Cue, EditSpec, ReframeSettings, TransitionSettings, TrimSettings
-from worker.rendering import render_clip
+from pipeline.editing import Cue, EditSpec, ReframeSettings, TransitionSettings
+from worker.rendering import RenderError, render_clip, render_preview
 
 
 @pytest.mark.parametrize("mode", ["pad", "crop"])
@@ -67,183 +68,149 @@ def test_real_render(tmp_path, mode):
     assert "mean_volume:" in decoded.stderr and "mean_volume: -inf" not in decoded.stderr
 
 
-def _probe_seconds(binary: str, path) -> float:
-    """실제 길이(초). ffprobe는 FFmpeg와 함께 설치됩니다."""
-    probe = shutil.which("ffprobe") or binary.replace("ffmpeg", "ffprobe")
-    result = subprocess.run(
-        [probe, "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(path)],
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    return float(result.stdout.strip())
-
-
-def test_real_render_cuts_the_silent_parts(tmp_path):
-    """무음 컷은 필터 문자열이 맞아야 돌아갑니다. 실제로 렌더해서 길이를 잽니다.
-
-    발화 구간은 직접 넣습니다. 여기서 보는 것은 **자르는 쪽**이지 찾는 쪽이
-    아닙니다(찾는 쪽은 worker.analysis에 따로 있습니다).
-    """
+def ffmpeg_or_skip() -> str:
     binary = os.environ.get("R4_FFMPEG_BINARY") or shutil.which("ffmpeg")
     if not binary:
         pytest.skip("FFmpeg required; CI installs it")
+    return binary
+
+
+def make_source(binary: str, path, seconds: int, *, audio: bool = True) -> None:
+    command = [binary, "-y", "-v", "error", "-f", "lavfi", "-i", "testsrc2=size=320x240:rate=24"]
+    if audio:
+        command += ["-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000"]
+    command += ["-t", str(seconds), "-c:v", "libx264"]
+    if audio:
+        command += ["-c:a", "aac"]
+    subprocess.run([*command, str(path)], check=True)
+
+
+def probe_value(path, stream: str, entry: str) -> str:
+    binary = os.environ.get("R4_FFPROBE_BINARY") or shutil.which("ffprobe")
+    if not binary:
+        pytest.skip("ffprobe required; CI installs it")
+    out = subprocess.run(
+        [binary, "-v", "error", "-select_streams", stream, "-show_entries", entry,
+         "-of", "default=nw=1:nk=1", str(path)],
+        check=True, capture_output=True, text=True,
+    )  # fmt: skip
+    return out.stdout.strip().splitlines()[0]
+
+
+def test_real_render_joins_segments_and_applies_speed(tmp_path):
+    """여러 구간을 이어 붙이고 배속을 걸면 결과 길이가 그만큼 됩니다."""
+    binary = ffmpeg_or_skip()
     source = tmp_path / "source.mp4"
-    subprocess.run(
-        [
-            binary,
-            "-y",
-            "-v",
-            "error",
-            "-f",
-            "lavfi",
-            "-i",
-            "testsrc2=size=320x240:rate=24",
-            "-f",
-            "lavfi",
-            "-i",
-            "sine=frequency=440:sample_rate=48000",
-            "-t",
-            "9",
-            "-c:v",
-            "libx264",
-            "-c:a",
-            "aac",
-            str(source),
-        ],
-        check=True,
-    )
-    plain, trimmed = tmp_path / "plain.mp4", tmp_path / "trimmed.mp4"
+    make_source(binary, source, 12)
+    output = tmp_path / "joined.mp4"
     spec = EditSpec(
         start=0,
-        end=9,
-        width=180,
-        height=320,
-        cues=[Cue(start=3.2, end=4.8, text="남는 말"), Cue(start=6.5, end=7.0, text="잘리는 말")],
+        end=12,
+        segments=[{"start": 0, "end": 2}, {"start": 8, "end": 12, "speed": 2.0}],
+        cues=[Cue(start=0.5, end=1.5, text="앞"), Cue(start=9, end=11, text="뒤")],
     )
-    render_clip(source, plain, spec)
-    # 3~5초만 말이 있다고 알려 줍니다. 나머지는 잘려야 합니다.
-    render_clip(
-        source,
-        trimmed,
-        spec.model_copy(update={"silence": TrimSettings(pad=0.1)}),
-        speech=[(3.0, 5.0)],
+    assert spec.output_seconds == 4.0
+    render_clip(source, output, spec, has_audio=True)
+    assert abs(float(probe_value(output, "v:0", "format=duration")) - 4.0) < 0.4
+    # 소리도 함께 이어 붙습니다. 트랙이 사라지면 더빙·게시가 망가집니다.
+    assert probe_value(output, "a:0", "stream=codec_type") == "audio"
+
+
+def test_real_render_mixes_background_music_and_fades(tmp_path):
+    binary = ffmpeg_or_skip()
+    source, music = tmp_path / "source.mp4", tmp_path / "music.m4a"
+    make_source(binary, source, 6)
+    subprocess.run(
+        [binary, "-y", "-v", "error", "-f", "lavfi", "-i", "sine=frequency=220",
+         "-t", "2", "-c:a", "aac", str(music)],
+        check=True,
+    )  # fmt: skip
+    output = tmp_path / "with-music.mp4"
+    spec = EditSpec(
+        start=0, end=6, fade_in=0.5, fade_out=0.5, music_asset_id=uuid.uuid4(), music_gain_db=-12
     )
-    whole = _probe_seconds(binary, plain)
-    cut = _probe_seconds(binary, trimmed)
-    assert whole == pytest.approx(9.0, abs=0.5)
-    # 남길 토막은 2.9~5.1초, 곧 2.2초입니다.
-    assert cut == pytest.approx(2.2, abs=0.4), f"자른 뒤 {cut:.2f}초 (원본 {whole:.2f}초)"
+    # 음악이 2초뿐이라 되풀이해서 6초를 채웁니다.
+    render_clip(source, output, spec, music=music, has_audio=True)
+    assert abs(float(probe_value(output, "v:0", "format=duration")) - 6.0) < 0.4
+    assert probe_value(output, "a:0", "stream=codec_type") == "audio"
+
+
+def test_real_render_keeps_going_when_the_source_has_no_audio(tmp_path):
+    binary = ffmpeg_or_skip()
+    source = tmp_path / "silent.mp4"
+    make_source(binary, source, 6, audio=False)
+    output = tmp_path / "out.mp4"
+    spec = EditSpec(start=0, end=6, segments=[{"start": 0, "end": 2}, {"start": 4, "end": 6}])
+    render_clip(source, output, spec, has_audio=False)
+    assert abs(float(probe_value(output, "v:0", "format=duration")) - 4.0) < 0.4
+
+
+def test_real_preview_makes_one_frame_at_the_output_size(tmp_path):
+    binary = ffmpeg_or_skip()
+    source = tmp_path / "source.mp4"
+    make_source(binary, source, 12)
+    output = tmp_path / "preview.png"
+    spec = EditSpec(
+        start=0,
+        end=12,
+        segments=[{"start": 0, "end": 2}, {"start": 8, "end": 12}],
+        cues=[Cue(start=2.5, end=3.5, text="뒤 구간 자막")],
+    )
+    # 결과 3초는 원본 9초입니다. 그 자리의 자막이 그려집니다.
+    render_preview(source, output, spec, 3.0)
+    assert output.exists() and output.stat().st_size > 0
+    assert probe_value(output, "v:0", "stream=width") == "1080"
+    assert probe_value(output, "v:0", "stream=height") == "1920"
+    with pytest.raises(RenderError):
+        render_preview(source, tmp_path / "bad.png", spec, 99.0)
+
+
+def test_real_render_joins_the_segments_with_a_transition(tmp_path):
+    """전환은 필터 문자열이 맞아야 돌아갑니다. 실제로 렌더해서 길이를 잽니다.
+
+    두 구간(각 3초)을 딱 붙이면 6.0초, 0.3초씩 겹치면 5.7초입니다. 겹친 만큼
+    짧아지는 것을 `output_seconds`와 실제 파일 양쪽에서 봅니다.
+    """
+    binary = ffmpeg_or_skip()
+    source = tmp_path / "source.mp4"
+    make_source(binary, source, 12)
+    segments = [{"start": 0, "end": 3}, {"start": 6, "end": 9}]
+
+    hard = tmp_path / "hard.mp4"
+    render_clip(source, hard, EditSpec(start=0, end=12, segments=segments))
+    assert abs(float(probe_value(hard, "v:0", "format=duration")) - 6.0) < 0.4
+
+    faded = tmp_path / "faded.mp4"
+    spec = EditSpec(
+        start=0,
+        end=12,
+        segments=segments,
+        transition=TransitionSettings(kind="fade", seconds=0.3),
+    )
+    render_clip(source, faded, spec)
+    assert abs(float(probe_value(faded, "v:0", "format=duration")) - 5.7) < 0.4
 
 
 def test_real_render_follows_a_moving_centre_and_denoises(tmp_path):
-    """crop 식과 음성 필터가 실제로 FFmpeg를 통과하는지 봅니다.
+    """crop 식과 잡음 제거가 FFmpeg를 통과하는지. 모양이 아니라 **도는지**를 봅니다.
 
-    얼굴 위치는 직접 넣습니다. 여기서 보는 것은 **따라가는 쪽**이지 찾는 쪽이
-    아닙니다(찾는 쪽은 worker.analysis.face_track 에 따로 있습니다).
+    얼굴 경로는 직접 넣습니다. 여기서 보는 것은 따라가는 쪽이지 찾는 쪽이
+    아닙니다(찾는 쪽은 worker.analysis에 따로 있습니다).
     """
-    binary = os.environ.get("R4_FFMPEG_BINARY") or shutil.which("ffmpeg")
-    if not binary:
-        pytest.skip("FFmpeg required; CI installs it")
+    binary = ffmpeg_or_skip()
     source = tmp_path / "source.mp4"
-    subprocess.run(
-        [
-            binary,
-            "-y",
-            "-v",
-            "error",
-            "-f",
-            "lavfi",
-            "-i",
-            "testsrc2=size=640x360:rate=24",
-            "-f",
-            "lavfi",
-            "-i",
-            "sine=frequency=440:sample_rate=48000",
-            "-t",
-            "4",
-            "-c:v",
-            "libx264",
-            "-c:a",
-            "aac",
-            str(source),
-        ],
-        check=True,
-    )
+    make_source(binary, source, 6)
     output = tmp_path / "out.mp4"
-    render_clip(
-        source,
-        output,
-        EditSpec(
-            start=0,
-            end=4,
-            mode="crop",
-            width=180,
-            height=320,
-            denoise="soft",
-            reframe=ReframeSettings(),
-            cues=[Cue(start=0.5, end=2.0, text="따라가기")],
-        ),
-        # 왼쪽에서 오른쪽으로 옮겨 갑니다.
-        faces=[(0.0, 0.2), (1.0, 0.4), (2.0, 0.6), (3.0, 0.8)],
-    )
-    assert output.stat().st_size > 1000
-    assert _probe_seconds(binary, output) == pytest.approx(4.0, abs=0.5)
-
-
-def test_real_render_joins_the_cuts_with_a_transition(tmp_path):
-    """전환 그래프가 실제로 FFmpeg를 통과하고 길이가 겹친 만큼 줄어드는지."""
-    binary = os.environ.get("R4_FFMPEG_BINARY") or shutil.which("ffmpeg")
-    if not binary:
-        pytest.skip("FFmpeg required; CI installs it")
-    source = tmp_path / "source.mp4"
-    subprocess.run(
-        [
-            binary,
-            "-y",
-            "-v",
-            "error",
-            "-f",
-            "lavfi",
-            "-i",
-            "testsrc2=size=320x240:rate=24",
-            "-f",
-            "lavfi",
-            "-i",
-            "sine=frequency=440:sample_rate=48000",
-            "-t",
-            "12",
-            "-c:v",
-            "libx264",
-            "-c:a",
-            "aac",
-            str(source),
-        ],
-        check=True,
-    )
-    hard, faded = tmp_path / "hard.mp4", tmp_path / "faded.mp4"
     spec = EditSpec(
-        start=0, end=12, width=180, height=320, cues=[Cue(start=6.2, end=7.0, text="둘째 토막")]
+        start=0,
+        end=6,
+        mode="crop",
+        width=360,
+        height=640,
+        reframe=ReframeSettings(deadzone=0.0, max_speed=2.0),
+        denoise="soft",
     )
-    # 세 토막(각 2초)만 남깁니다. 붙이면 6초입니다.
-    speech = [(0.2, 1.8), (5.2, 6.8), (9.2, 10.8)]
-    render_clip(
-        source, hard, spec.model_copy(update={"silence": TrimSettings(pad=0.2)}), speech=speech
-    )
-    render_clip(
-        source,
-        faded,
-        spec.model_copy(
-            update={
-                "silence": TrimSettings(pad=0.2),
-                "transition": TransitionSettings(kind="fade", seconds=0.3),
-            }
-        ),
-        speech=speech,
-    )
-    plain, joined = _probe_seconds(binary, hard), _probe_seconds(binary, faded)
-    assert plain == pytest.approx(6.0, abs=0.4), f"딱 붙였을 때 {plain:.2f}초"
-    # 이음매 두 곳에서 0.3초씩 겹치므로 0.6초 짧습니다.
-    assert joined == pytest.approx(
-        plain - 0.6, abs=0.4
-    ), f"전환 {joined:.2f}초 / 하드 {plain:.2f}초"
+    render_clip(source, output, spec, faces=[(0.0, 0.2), (3.0, 0.8), (6.0, 0.5)])
+    assert probe_value(output, "v:0", "stream=width") == "360"
+    assert probe_value(output, "v:0", "stream=height") == "640"
+    assert abs(float(probe_value(output, "v:0", "format=duration")) - 6.0) < 0.4

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from pipeline.editing import EditSpec, ReframeSettings
+from pipeline.editing import EditSpec, ReframeSettings, TimeSpan
 from pipeline.reframe import center_expression, crop_x, follow, keyframes
 from worker.rendering import clip_path, video_filter
 
@@ -74,36 +74,52 @@ def spec(**extra) -> EditSpec:
     return EditSpec(start=10, end=20, mode="crop", reframe=ReframeSettings(**extra))
 
 
-def test_reframing_is_off_for_padded_output(tmp_path):
+def test_reframing_is_off_for_padded_output():
     """`pad`는 화면 전체를 남기므로 따라갈 것이 없습니다."""
-    source = tmp_path / "a.mp4"
-    source.write_bytes(b"x")
     padded = EditSpec(start=10, end=20, mode="pad", reframe=ReframeSettings())
-    assert clip_path(source, padded, [(0.0, 10.0)], [(0.0, 0.8)]) == []
+    assert clip_path(padded, [(0.0, 0.8)]) == []
 
 
-def test_reframing_is_off_without_settings(tmp_path):
-    source = tmp_path / "a.mp4"
-    source.write_bytes(b"x")
-    assert clip_path(source, EditSpec(start=10, end=20), [(0.0, 10.0)], [(0.0, 0.8)]) == []
+def test_reframing_is_off_without_settings():
+    assert clip_path(EditSpec(start=10, end=20), [(0.0, 0.8)]) == []
 
 
-def test_face_times_move_onto_the_trimmed_timeline(tmp_path):
-    """crop은 자르기 뒤에 옵니다. 얼굴 시각도 잘린 뒤의 시각이어야 합니다."""
-    source = tmp_path / "a.mp4"
-    source.write_bytes(b"x")
-    kept = [(0.0, 2.0), (5.0, 7.0)]
-    faces = [(1.0, 0.5), (3.0, 0.9), (6.0, 0.5)]  # 3.0초는 잘려 나간 자리입니다
-    path = clip_path(source, spec(deadzone=0.0, max_speed=2.0), kept, faces)
-    assert [round(at, 2) for at, _ in path] == [1.0, 3.0]  # 6.0초 → 3.0초
+def test_no_faces_means_no_path_to_follow():
+    assert clip_path(spec(), None) == []
+    assert clip_path(spec(), []) == []
 
 
-def test_the_whole_clip_keeps_the_original_times(tmp_path):
-    source = tmp_path / "a.mp4"
-    source.write_bytes(b"x")
-    faces = [(1.0, 0.5), (3.0, 0.9)]
-    path = clip_path(source, spec(deadzone=0.0, max_speed=2.0), [(0.0, 10.0)], faces)
-    assert [at for at, _ in path] == [1.0, 3.0]
+def test_face_times_move_onto_the_joined_timeline():
+    """crop은 이어 붙이기 뒤에 옵니다. 얼굴 시각도 그 뒤의 시각이어야 합니다."""
+    chosen = EditSpec(
+        start=0,
+        end=10,
+        mode="crop",
+        reframe=ReframeSettings(deadzone=0.0, max_speed=2.0),
+        segments=[TimeSpan(start=0.0, end=2.0), TimeSpan(start=5.0, end=7.0)],
+    )
+    # 3.0초는 빠진 자리입니다. 6.0초는 두 번째 구간의 1.0초 → 결과 3.0초입니다.
+    path = clip_path(chosen, [(1.0, 0.5), (3.0, 0.9), (6.0, 0.5)])
+    assert [round(at, 2) for at, _ in path] == [1.0, 3.0]
+
+
+def test_speed_pulls_the_face_times_in():
+    """배속을 걸면 얼굴 시각도 그만큼 당겨집니다."""
+    chosen = EditSpec(
+        start=0,
+        end=10,
+        mode="crop",
+        reframe=ReframeSettings(deadzone=0.0, max_speed=2.0),
+        segments=[TimeSpan(start=0.0, end=4.0, speed=2.0)],
+    )
+    assert [round(at, 2) for at, _ in clip_path(chosen, [(2.0, 0.5)])] == [1.0]
+
+
+def test_the_whole_clip_keeps_the_original_times():
+    chosen = spec(deadzone=0.0, max_speed=2.0)
+    path = clip_path(chosen, [(11.0, 0.5), (13.0, 0.9)])
+    # 구간을 고르지 않았으면 start~end 하나이고, 시각은 그 시작 기준입니다.
+    assert [round(at, 2) for at, _ in path] == [1.0, 3.0]
 
 
 def test_no_usable_detector_says_so_instead_of_reporting_zero_faces(monkeypatch, tmp_path):

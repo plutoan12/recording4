@@ -104,22 +104,52 @@ def mix_speech(paths: list[Path], cues: list[Cue], duration: float, output: Path
     return aligned
 
 
-def compose_dub(source: Path, audio: Path, output: Path, start: float, duration: float) -> None:
-    # Original dialogue is removed; background separation is deliberately not implied.
-    ffmpeg(
-        [
-            "-ss",
-            str(start),
-            "-i",
-            str(source),
-            "-i",
-            str(audio),
-            "-t",
-            str(duration),
+def dub_filter(gain_db: float) -> str:
+    """더빙 음성 아래에 배경음을 깔 때 쓰는 필터.
+
+    `amix`는 기본으로 입력 수만큼 음량을 나눕니다. 그대로 쓰면 대사가 절반으로
+    작아지므로 `normalize=0`으로 끕니다. 배경음은 `gain_db`만큼 줄여서 깝니다.
+    길이는 대사 쪽에 맞춥니다(`duration=first`). 배경음이 더 길어도 영상 길이는
+    이미 `-t`로 정해져 있습니다.
+    """
+    return f"[2:a]volume={gain_db}dB[bg];" "[1:a][bg]amix=inputs=2:duration=first:normalize=0[out]"
+
+
+def compose_dub(
+    source: Path,
+    audio: Path,
+    output: Path,
+    start: float,
+    duration: float,
+    *,
+    background: Path | None = None,
+    background_gain_db: float = -9.0,
+) -> None:
+    """더빙 음성을 영상에 붙입니다.
+
+    `background`가 없으면 원본 오디오는 **통째로** 사라집니다. 말만 바뀌는 것이
+    아니라 음악과 효과음도 같이 지워집니다. 원본에서 목소리만 뺀 소리를 주면
+    그것을 대사 아래에 깔아 음악이 남습니다. 만드는 쪽은 `worker.separation`.
+    """
+    inputs = ["-ss", str(start), "-i", str(source), "-i", str(audio)]
+    if background is None:
+        mapping = ["-map", "0:v:0", "-map", "1:a:0"]
+    else:
+        inputs += ["-i", str(background)]
+        mapping = [
+            "-filter_complex",
+            dub_filter(background_gain_db),
             "-map",
             "0:v:0",
             "-map",
-            "1:a:0",
+            "[out]",
+        ]
+    ffmpeg(
+        [
+            *inputs,
+            "-t",
+            str(duration),
+            *mapping,
             "-c:v",
             "libx264",
             "-preset",

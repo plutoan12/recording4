@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import tempfile
 import uuid
 from dataclasses import asdict
@@ -14,6 +15,7 @@ from urllib.parse import urlparse
 
 import httpx
 from sqlalchemy import or_, select, update
+from sqlalchemy.exc import IntegrityError
 
 from adminapi.config import get_settings
 from adminapi.db import get_session_factory
@@ -21,39 +23,67 @@ from adminapi.models import (
     Artifact,
     Budget,
     BudgetReservation,
+    Glossary,
     Job,
     SourceAsset,
     StageRun,
     TranscriptSegment,
+    TranslationMemory,
     utcnow,
 )
 from adminapi.outbox import enqueue
 from adminapi.services.budget import reserve, settle
-from adminapi.services.glossary import active_glossary
 from adminapi.storage import get_storage
+from pipeline.batching import batch_starts
 from pipeline.budget import BudgetShortfall
 from pipeline.editing import Cue, clip_cues
-from pipeline.glossary import protect
+from pipeline.glossary import apply_terms, protect, restore
 from pipeline.hashing import StageInputs
+from pipeline.languages import is_supported
 from pipeline.states import JobState, StageRunState
-from pipeline.translation_context import groups, join, split_across
-from pipeline.translation_review import pick, review, review_limit
+from pipeline.translation_jobs import build_job
+from pipeline.translation_qa import grouped, review
 from pipeline.workflow import WorkflowOptions, rendered_cues, rendered_language
 from worker.analysis import transcribe
 from worker.celery_app import celery_app
 from worker.composition import TimingError, compose_dub, mix_speech, render_final
 from worker.providers import (
+    TRANSLATE_PROMPT_VERSION,
     ClaudeTranslator,
+    DeepLTranslator,
     ElevenLabsSpeech,
     GoogleTranslator,
-    ProviderError,
+    HuggingFaceTranslator,
     SyncLipsync,
 )
+from worker.separation import MissingDependency as SeparationMissing
+from worker.separation import separate_background
 from worker.subtitle_rules import rules_from_settings
 
 
 class Blocked(RuntimeError):
     pass
+
+
+log = logging.getLogger(__name__)
+# 공급자별 배치 상한. DeepL은 요청당 50문장입니다.
+PROVIDER_MAX_LINES = {"deepl": 50}
+
+
+def separated_background(source: Path, directory: Path, settings) -> Path | None:  # noqa: ANN001
+    """원본에서 목소리를 뺀 소리. 분리를 못 하면 None이고, 더빙은 그대로 갑니다.
+
+    분리가 안 된다고 더빙 전체를 멈추지 않습니다. 배경음이 없는 결과가 나올
+    뿐이고, 그건 이 설정을 켜기 전과 같습니다. 대신 **왜 없는지 기록에
+    남깁니다.** 조용히 넘어가면 설정을 켜 놓고도 배경음이 없는 이유를 알 수
+    없습니다.
+    """
+    output = directory / "background.wav"
+    try:
+        return separate_background(source, output, device=settings.whisper_device).background
+    except SeparationMissing as exc:
+        logging.getLogger(__name__).warning("배경음 분리를 건너뜁니다: %s", exc)
+        return None
 
 
 class RemoteTerminalFailure(Blocked):
@@ -146,157 +176,30 @@ def voice_output(data, key, checksum):
     }
 
 
-def translate_glossary(session, options, data, settings):
-    """번역에 쓸 우리 용어집.
-
-    Google 자체 용어집을 설정해 두었으면 그쪽이 처리하므로 우리 표시는 넣지
-    않습니다. 비용 계산과 실제 호출이 **같은 판단**을 하도록 한곳에 둡니다.
-    """
-    if settings.google_translate_glossary:
-        return None
-    return active_glossary(session, options.source_language, data.get("target"))
-
-
-def context_plan(batch, options):
-    """문맥 배치 묶음. 쓰지 않으면 자막마다 한 묶음입니다."""
-    if not options.translate_context or options.audio_mode == "dub":
-        return [[index] for index in range(len(batch))]
-    return groups([cue["text"] for cue in batch])
-
-
-def run_translation(batch, data, options, settings, glossary):
-    """한 묶음을 번역합니다. (번역문, 묶여서 번역된 자리, 빠진 용어) 순입니다.
-
-    문맥 배치를 켜면 한 문장으로 이어진 자막을 **합쳐서** 번역하고 번역문을
-    원래 자막 수만큼 다시 나눕니다. 나눌 수 없으면 그 묶음만 지금까지처럼
-    자막별로 다시 번역합니다.
-    """
-    target, source = data["target"], options.source_language
-    plan = context_plan(batch, options)
-    translator = GoogleTranslator(
-        settings.google_cloud_project,
-        allow_paid=True,
-        glossary_resource=settings.google_translate_glossary,
-    )
-    joined = [join([batch[index]["text"] for index in group], source) for group in plan]
-    output = translator.translate(joined, target, source, glossary=glossary)
-
-    texts = [""] * len(batch)
-    grouped, again, gone = [], [], {}
-    for position, (group, translated) in enumerate(zip(plan, output, strict=True)):
-        lost = translator.missing_terms.get(position)
-        if lost:
-            gone[group[0]] = lost
-        if len(group) == 1:
-            texts[group[0]] = translated
-            continue
-        spans = [batch[index]["end"] - batch[index]["start"] for index in group]
-        pieces = split_across(translated, spans, target)
-        if pieces is None:
-            again += group
-            continue
-        for index, piece in zip(group, pieces, strict=True):
-            texts[index] = piece
-        grouped += group
-    if again:
-        # 나누지 못한 묶음만 자막별로 다시 부릅니다. 나머지는 그대로 씁니다.
-        retry = GoogleTranslator(
-            settings.google_cloud_project,
-            allow_paid=True,
-            glossary_resource=settings.google_translate_glossary,
-        )
-        for index, translated in zip(
-            again,
-            retry.translate([batch[i]["text"] for i in again], target, source, glossary=glossary),
-            strict=True,
-        ):
-            texts[index] = translated
-        for position, lost in retry.missing_terms.items():
-            gone[again[position]] = lost
-    return texts, grouped, gone
-
-
-def polish(batch, texts, grouped, gone, data, options, settings, glossary):
-    """어색한 자막만 LLM으로 다시 번역합니다. (번역문, 기록) 순입니다.
-
-    실패해도 기계 번역을 그대로 씁니다. **다시 쓰기에 실패했다고 자막을
-    버리지 않습니다.** 무슨 일이 있었는지는 단계 결과에 남깁니다.
-    """
-    if not options.translate_polish:
-        return texts, {}
-    if not settings.anthropic_api_key or not settings.llm_translate_model:
-        # 기본으로 켜져 있으므로 설정이 없다고 작업을 막거나 오류를 남기지
-        # 않습니다. 화면은 `/workflow/configuration`의 `llm_translate_configured`로
-        # 설정이 없다는 것을 이미 보여 줍니다.
-        return texts, {}
-    sources = [cue["text"] for cue in batch]
-    chosen = pick(
-        review(list(zip(sources, texts, strict=True)), missing_terms=gone, grouped=grouped),
-        len(texts),
-    )
-    if not chosen:
-        return texts, {"llm_retranslated": 0}
-    items = [
-        {
-            "source": sources[index],
-            "draft": texts[index],
-            "context": " ".join(sources[max(0, index - 1) : index + 2]),
-        }
-        for index in chosen
-    ]
-    try:
-        with httpx.Client() as client:
-            better = ClaudeTranslator(
-                settings.anthropic_api_key,
-                client=client,
-                model=settings.llm_translate_model,
-                allow_paid=True,
-            ).retranslate(items, data["target"], options.source_language, glossary=glossary)
-    except (ProviderError, httpx.HTTPError) as exc:
-        return texts, {"llm_translate_error": str(exc)}
-    for index, text in zip(chosen, better, strict=True):
-        texts[index] = text
-    return texts, {"llm_retranslated": len(chosen)}
-
-
-def llm_chars(batch, options, settings):
-    """LLM 재번역에 보낼 글자 수의 상한.
-
-    실제로 몇 개가 걸릴지는 번역해 봐야 알므로 **상한**으로 잡습니다. 가장 긴
-    자막이 상한만큼 걸린다고 보고, 자막마다 원문·기계 번역·앞뒤 문맥·출력
-    네 몫을 셉니다. 여기에 지시문 몫을 더합니다.
-    """
-    if not options.translate_polish or not settings.llm_translate_model:
-        return 0
-    count = review_limit(len(batch))
-    if not count:
-        return 0
-    longest = sorted((len(cue["text"]) for cue in batch), reverse=True)[:count]
-    return sum(longest) * 4 + 600
-
-
 def paid_estimate(name, data, options, settings, session=None):
-    llm_cost = Decimal("0")
     if name.startswith("translate:"):
         if options.translated_cues is not None or options.source_language == data.get("target"):
             return None
-        rate = settings.translate_usd_per_1k_chars
-        if not settings.google_cloud_project:
-            raise Blocked("Google Cloud 프로젝트와 인증을 설정하세요.")
-        # 용어집이 걸린 문장은 표시가 붙은 채로 나갑니다. Google은 표시 글자도
-        # 세어 청구하므로 **보낼 글자 그대로** 잽니다.
-        glossary = translate_glossary(session, options, data, settings) if session else None
-        batch = translation_batch(data)
-        count = sum(len(protect(c["text"], glossary)[0]) for c in batch)
-        units = Decimal(count) / 1000
-        extra = llm_chars(batch, options, settings)
-        if extra:
-            llm_rate = settings.llm_translate_usd_per_1k_chars
-            if llm_rate is None or llm_rate <= 0:
-                raise Blocked("LLM 재번역의 보수적인 단가 상한을 서버에 설정하세요.")
-            llm_cost = (Decimal(extra) / 1000 * llm_rate).quantize(
-                Decimal("0.0001"), rounding=ROUND_UP
+        texts = [c["text"] for c in translation_batch(data, settings)]
+        if session is not None:
+            # 기억에 있는 문장은 공급자에 보내지 않으므로 비용에도 넣지 않습니다.
+            _, version = glossary_for(session, options.source_language, data["target"])
+            known = cached_translations(
+                session,
+                texts,
+                options.source_language,
+                data["target"],
+                final_suffix(settings, version),
             )
+            texts = [t for t in texts if t not in known]
+        if not texts:
+            return None
+        count = sum(len(t) for t in set(texts))
+        rate = translation_rate(settings)
+        if rate is None:
+            # 로컬 모델만 쓰고 보정도 없으면 돈이 들지 않습니다.
+            return None
+        units = Decimal(count) / 1000
     elif name.startswith("dub:"):
         rate = settings.tts_usd_per_1k_chars
         if not settings.elevenlabs_api_key or not options.voice_id:
@@ -316,18 +219,237 @@ def paid_estimate(name, data, options, settings, session=None):
         raise Blocked("서버의 유료 처리 설정이 꺼져 있습니다.")
     if rate is None or rate <= 0:
         raise Blocked("해당 공급자의 보수적인 단가 상한을 서버에 설정하세요.")
-    total = (units * rate).quantize(Decimal("0.0001"), rounding=ROUND_UP)
-    return total + llm_cost
+    return (units * rate).quantize(Decimal("0.0001"), rounding=ROUND_UP)
 
 
-def translation_batch(data):
-    batch, size = [], 0
-    for cue in data["cues"][len(data.get("translated", [])) :]:
-        if batch and (size + len(cue["text"]) > 25000 or len(batch) >= 100):
-            break
-        batch.append(cue)
-        size += len(cue["text"])
-    return batch
+def translation_rate(settings):
+    """글자당 단가. 기계 번역 단가와 보정 단가를 더합니다. 둘 다 없으면 None."""
+    rate = Decimal("0")
+    if settings.translation_provider == "google":
+        if not settings.google_cloud_project:
+            raise Blocked("Google Cloud 프로젝트와 인증을 설정하세요.")
+        rate += _positive(settings.translate_usd_per_1k_chars, "번역")
+    elif settings.translation_provider == "deepl":
+        if not settings.deepl_api_key:
+            raise Blocked("DeepL API 키를 설정하세요.")
+        rate += _positive(settings.translate_usd_per_1k_chars, "번역")
+    if settings.translation_refine_enabled:
+        rate += _positive(settings.refine_usd_per_1k_chars, "번역 보정")
+    return rate if rate > 0 else None
+
+
+def _positive(rate, label):
+    if rate is None or rate <= 0:
+        raise Blocked(f"{label} 공급자의 보수적인 단가 상한을 서버에 설정하세요.")
+    return rate
+
+
+def translation_batch(data, settings=None):
+    """다음에 보낼 묶음. 장면 경계(LLM-Subtrans 방식)로 나눈 묶음 중 offset에서 시작하는 것.
+
+    옛 데이터가 묶음 경계가 아닌 곳에서 멈춰 있어도 다음 경계까지를 한 묶음으로 봅니다.
+    """
+    cues, offset = data["cues"], len(data.get("translated", []))
+    options = {}
+    if settings is not None:
+        options = {
+            "scene_gap": settings.translate_scene_gap_seconds,
+            "min_lines": settings.translate_min_batch_lines,
+            "max_lines": min(
+                settings.translate_max_batch_lines,
+                PROVIDER_MAX_LINES.get(settings.translation_provider, 100),
+            ),
+        }
+    boundary = next((s for s in batch_starts(cues, **options) if s > offset), len(cues))
+    return cues[offset:boundary]
+
+
+def glossary_for(session, source, target):
+    """이 방향에 적용할 용어집과 그 버전. `*`는 모든 언어에 적용되는 행입니다.
+
+    좁은 행이 넓은 행을 덮습니다: (*,*) < (source,*) < (*,target) < (source,target).
+    버전 문자열은 기억 키에 들어가므로 용어집이 바뀌면 옛 번역을 다시 쓰지 않습니다.
+    """
+    entries, parts = {}, []
+    for s, t in (("*", "*"), (source or "*", "*"), ("*", target), (source or "*", target)):
+        row = session.scalar(
+            select(Glossary)
+            .where(
+                Glossary.scope == "project",
+                Glossary.source_language == s,
+                Glossary.target_language == t,
+                Glossary.effective_from <= utcnow(),
+            )
+            .order_by(Glossary.version.desc())
+        )
+        if row is None:
+            continue
+        entries.update(row.entries)
+        parts.append(f"{s}-{t}:{row.version}")
+    return entries, "|".join(parts) or None
+
+
+def draft_suffix(settings, glossary_version):
+    """기계 번역 초안의 기억 키 접미사. 공급자·모델·용어집 버전이 바뀌면 새 항목입니다.
+
+    rockbenben/subtitle-translator의 generateCacheSuffix 방식입니다: 기존 MT는
+    {출발, 목표, 공급자}만, 모델이 있는 공급자는 모델까지 키에 넣습니다.
+    """
+    parts = [settings.translation_provider]
+    if settings.translation_provider == "huggingface":
+        parts.append(settings.huggingface_translation_model)
+    parts.append(glossary_version or "")
+    return "|".join(parts)
+
+
+def final_suffix(settings, glossary_version):
+    """보정까지 끝난 번역의 기억 키 접미사. 보정을 안 쓰면 초안과 같습니다."""
+    suffix = draft_suffix(settings, glossary_version)
+    if settings.translation_refine_enabled:
+        suffix += f"|refine:{settings.translation_refine_model}:{TRANSLATE_PROMPT_VERSION}"
+    return suffix
+
+
+def memory_hash(text, suffix):
+    return hashlib.sha256(f"{suffix}\n{text}".encode()).hexdigest()
+
+
+def cached_translations(session, texts, source, target, suffix):
+    """기억에 있는 번역. 원문 → 번역문."""
+    wanted = {memory_hash(t, suffix): t for t in set(texts)}
+    if not wanted:
+        return {}
+    rows = session.scalars(
+        select(TranslationMemory).where(
+            TranslationMemory.source_language == (source or "auto"),
+            TranslationMemory.target_language == target,
+            TranslationMemory.text_hash.in_(list(wanted)),
+        )
+    )
+    return {row.source_text: row.translated_text for row in rows}
+
+
+def remember(session, pairs, source, target, suffix, provider):
+    """공급자가 낸 답을 기억에 넣습니다. 다른 작업이 먼저 넣었으면 그대로 둡니다."""
+    for text, translated in pairs:
+        session.add(
+            TranslationMemory(
+                source_language=source or "auto",
+                target_language=target,
+                text_hash=memory_hash(text, suffix),
+                source_text=text,
+                translated_text=translated,
+                provider=provider,
+                glossary_version=suffix,
+            )
+        )
+    try:
+        session.commit()
+    except IntegrityError:
+        session.rollback()
+
+
+def machine_translate(settings, texts, target, source):
+    """설정한 공급자로 초안을 만듭니다. Google·DeepL은 유료, Hugging Face는 로컬입니다."""
+    provider = settings.translation_provider
+    if provider == "google":
+        return GoogleTranslator(settings.google_cloud_project, allow_paid=True).translate(
+            texts, target, source
+        )
+    if provider == "deepl":
+        with httpx.Client() as client:
+            return DeepLTranslator(
+                settings.deepl_api_key, client=client, allow_paid=True
+            ).translate(texts, target, source)
+    if provider == "huggingface":
+        return HuggingFaceTranslator(
+            settings.huggingface_translation_model, device=settings.whisper_device
+        ).translate(texts, target, source)
+    raise Blocked(f"알 수 없는 번역 공급자: {provider}")
+
+
+def translate_texts(settings, texts, target, source, *, before=(), after=()):
+    """기억 → 기계 번역(용어·숫자 보호) → 용어집 → Claude 보정 → 기억에 저장.
+
+    같은 묶음 안의 같은 문장도 한 번만 보냅니다. 초안과 보정본을 따로 기억하므로
+    보정이 실패해 단계가 다시 돌아도 기계 번역은 다시 사지 않습니다.
+    자리표시자가 답에서 사라진 문장은 되돌릴 수 없어 그대로 두고 기록에 남깁니다.
+    """
+    if source and not is_supported(source, target):
+        raise Blocked(f"지원하지 않는 번역 방향입니다: {source} → {target}")
+    factory = get_session_factory()
+    with factory() as session:
+        entries, version = glossary_for(session, source, target)
+        suffix, draft_key = final_suffix(settings, version), draft_suffix(settings, version)
+        memory = cached_translations(session, texts, source, target, suffix)
+        missing = list(dict.fromkeys(t for t in texts if t not in memory))
+        if not missing:
+            return [memory[t] for t in texts]
+        drafts = cached_translations(session, missing, source, target, draft_key)
+        fresh = [t for t in missing if t not in drafts]
+        if fresh:
+            protected = protect(fresh, entries)
+            output = machine_translate(settings, protected.texts, target, source)
+            restored, lost = restore(output, protected)
+            for index in lost:
+                log.warning("용어집 자리표시자가 번역에서 사라졌습니다: %r", fresh[index])
+            terms = {term: (target_text or term) for term, target_text in entries.items()}
+            restored = [apply_terms(text, terms) for text in restored]
+            drafts.update(zip(fresh, restored, strict=True))
+            if suffix != draft_key:
+                remember(
+                    session,
+                    list(zip(fresh, restored, strict=True)),
+                    source,
+                    target,
+                    draft_key,
+                    settings.translation_provider,
+                )
+        final = [drafts[t] for t in missing]
+        if settings.translation_refine_enabled:
+            job = build_job(
+                missing,
+                source=source,
+                target=target,
+                before=before,
+                after=after,
+                entries=entries,
+                context_lines=settings.translate_context_lines,
+            )
+            final = ClaudeTranslator(
+                allow_paid=True, model=settings.translation_refine_model
+            ).translate(job, drafts=final)
+            final = [apply_terms(text, terms_for(entries)) for text in final]
+        remember(
+            session,
+            list(zip(missing, final, strict=True)),
+            source,
+            target,
+            suffix,
+            settings.translation_provider
+            + (":refine" if settings.translation_refine_enabled else ""),
+        )
+        memory.update(zip(missing, final, strict=True))
+    return [memory[t] for t in texts]
+
+
+def terms_for(entries):
+    return {term: (target or term) for term, target in entries.items()}
+
+
+def translation_qa(session, settings, source, target, cues, translated):
+    """번역 뒤 검사(pipeline.translation_qa). 자동으로 고치지 않고 검수 화면에 보여 줄 문제만."""
+    entries, _ = glossary_for(session, source, target)
+    issues = review(
+        [c["text"] for c in cues],
+        translated,
+        source=source,
+        target=target,
+        entries=entries,
+        timings=[(float(c["start"]), float(c["end"])) for c in cues],
+        rules=rules_from_settings(settings, target),
+    )
+    return grouped(issues)
 
 
 def hold_budgets(session, job, stage, estimate):
@@ -411,7 +533,7 @@ def execute_step(name, options, data, asset, directory, stage_id, remote_id, sav
             raise Blocked("음성이 감지되지 않았습니다. 대본을 입력하세요.")
         return {"cues": [c.model_dump() for c in cues]}
     if name.startswith("translate:"):
-        batch = translation_batch(data)
+        batch = translation_batch(data, settings)
         offset = len(data.get("translated", []))
         if options.translated_cues is not None:
             supplied = options.translated_cues
@@ -421,19 +543,30 @@ def execute_step(name, options, data, asset, directory, stage_id, remote_id, sav
         elif options.source_language == data["target"]:
             texts = [c["text"] for c in batch]
         else:
+            cues = data["cues"]
+            texts = translate_texts(
+                settings,
+                [c["text"] for c in batch],
+                data["target"],
+                options.source_language,
+                before=[c["text"] for c in cues[max(0, offset - 20) : offset]],
+                after=[c["text"] for c in cues[offset + len(batch) : offset + len(batch) + 20]],
+            )
+        translated = data.get("translated", []) + [
+            {**cue, "text": text} for cue, text in zip(batch, texts, strict=True)
+        ]
+        result = {"translated": translated}
+        if options.translated_cues is None and options.source_language != data["target"]:
             with get_session_factory()() as session:
-                glossary = translate_glossary(session, options, data, settings)
-            texts, grouped, gone = run_translation(batch, data, options, settings, glossary)
-            texts, notes = polish(batch, texts, grouped, gone, data, options, settings, glossary)
-            return {
-                "translated": data.get("translated", [])
-                + [{**cue, "text": text} for cue, text in zip(batch, texts, strict=True)],
-                **notes,
-            }
-        return {
-            "translated": data.get("translated", [])
-            + [{**cue, "text": text} for cue, text in zip(batch, texts, strict=True)]
-        }
+                result["translation_qa"] = translation_qa(
+                    session,
+                    settings,
+                    options.source_language,
+                    data["target"],
+                    data["cues"][: len(translated)],
+                    [c["text"] for c in translated],
+                )
+        return result
     if name.startswith("dub:"):
         cue = data["translated"][len(data.get("voices", []))]
         voice = directory / "voice.mp3"
@@ -464,8 +597,26 @@ def execute_step(name, options, data, asset, directory, stage_id, remote_id, sav
         audio = directory / "speech.wav"
         storage.download_file(data["audio_key"], audio)
         output = directory / "dubbed.mp4"
-        compose_dub(source, audio, output, data["start"], data["duration"])
-        return {"base_key": upload(storage, f"{prefix}/dubbed.mp4", output, "video/mp4")}
+        # 배경음을 켜지 않으면 원본 오디오가 통째로 사라집니다. 음악 위에서
+        # 말하는 영상이면 더빙본은 말만 남습니다.
+        background = (
+            separated_background(source, directory, settings)
+            if settings.background_audio_enabled
+            else None
+        )
+        compose_dub(
+            source,
+            audio,
+            output,
+            data["start"],
+            data["duration"],
+            background=background,
+            background_gain_db=settings.background_gain_db,
+        )
+        return {
+            "base_key": upload(storage, f"{prefix}/dubbed.mp4", output, "video/mp4"),
+            "background": bool(background),
+        }
     if name == "lipsync":
         with httpx.Client(follow_redirects=False) as client:
             adapter = SyncLipsync(settings.sync_api_key, client=client, allow_paid=True)

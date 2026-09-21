@@ -202,4 +202,4 @@ python -m worker.cli suggest /path/to/transcript.json /path/to/candidates.json -
 
 ## 남은 제품 기능
 
-LLM 하이라이트 추천, 자동 얼굴 추적, 다중 구간 조합, 정교한 타임라인 UI, 단어별 자막 강조, 프리뷰 전용 저해상도 렌더, 정교한 오디오 믹싱은 별도 구현 대상입니다. 단계별 더빙·게시 연결은 [후속 구현](CONNECTED_WORKFLOW.md)을 참고하세요.
+LLM 하이라이트 추천, 얼굴을 따라 움직이는 자르기(시간에 따라 변하는 crop), 다중 구간 조합, 정교한 타임라인 UI, 단어별 자막 강조, 프리뷰 전용 저해상도 렌더, 정교한 오디오 믹싱은 별도 구현 대상입니다. 단계별 더빙·게시 연결은 [후속 구현](CONNECTED_WORKFLOW.md)을 참고하세요.

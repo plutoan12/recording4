@@ -1,162 +1,139 @@
-"""숏폼으로 쓸 만한 구간 추천. 장면 경계와 발화 구간만 보고 점수를 매깁니다.
+"""LLM이 고른 하이라이트 구간을 **대본에 맞춰 보는** 자리. 망을 타지 않습니다.
 
-PySceneDetect는 이미 붙어 있었지만 **장면 경계를 내놓는 데서 끝났습니다.**
-사람이 그 목록을 보고 직접 구간을 골라야 했습니다. 이 모듈은 그 경계와
-발화 구간(`worker.analysis.speech_spans`)을 합쳐 "여기를 잘라 보세요"까지
-갑니다.
+`editing.suggest_clips`는 문장 경계로 자르는 규칙입니다. 무엇이 재미있는지는
+모릅니다. 그걸 LLM에게 묻습니다. 문제는 **LLM이 없는 시각을 만들어낸다**는
+것입니다. "12분 34초가 좋습니다"라는 답은 그럴듯하지만 거기에 그 말이 없을 수
+있습니다.
 
-## 무엇을 보는가
+그래서 **시각을 묻지 않습니다. 자막 번호를 묻습니다.** 번호를 받아 시각은
+대본에서 꺼내 씁니다. 없는 번호는 그 자리에서 걸립니다. 지어낸 시각은 확인할
+길이 없지만 지어낸 번호는 있습니다.
 
-| 신호 | 왜 | 비중 |
-|---|---|---|
-| 말이 차 있는 비율 | 숏폼은 말이 끊기면 바로 넘깁니다. 빈 화면이 적어야 합니다. | 0.60 |
-| 장면 전환 빈도 | 화면이 바뀌면 덜 지루합니다. 다만 너무 잦으면 정신없습니다. | 0.25 |
-| 영상에서의 자리 | 맨 앞(인사)과 맨 뒤(마무리)는 대체로 알맹이가 아닙니다. | 0.15 |
+번호를 받아도 그대로 쓰지 않습니다. 길이·겹침·범위를 여기서 다시 봅니다.
+**버린 것은 왜 버렸는지 함께 돌려줍니다.** 조용히 줄어든 목록은 모델이 잘한
+건지 우리가 다 버린 건지 알 수 없습니다.
 
-**비중은 잰 값이 아니라 정한 값입니다.** 조회수로 검증한 적이 없습니다.
-순위를 매기는 데 쓰는 것이지 "이 구간이 좋다"는 근거가 아닙니다.
-
-## 규칙
-
-- 후보는 **장면 경계에서 시작하고 장면 경계에서 끝납니다.** 말 중간이나
-  화면 중간에서 시작하면 잘린 느낌이 납니다.
-- 길이가 `minimum`~`maximum` 밖이면 버리고, `target`에 가까울수록 좋습니다.
-- 겹치는 후보는 점수가 높은 쪽만 남깁니다.
-- 장면 경계가 없으면(전환이 없는 영상) `target` 간격으로 잘라 후보를 만듭니다.
-- **말이 거의 없는 구간은 후보로 보지 않습니다.** 이 추천은 말하는 영상
-  기준이라 음악·풍경 영상에서는 아무것도 내놓지 않습니다.
+결과는 `suggest_clips`와 **같은 모양**입니다. 관리화면은 어느 쪽이 만든
+후보인지 몰라도 됩니다. 두 쪽을 나란히 놓고 비교할 수도 있습니다.
 """
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from dataclasses import dataclass
 
-from pydantic import BaseModel, ConfigDict, Field
+from pipeline.editing import Cue
 
-Span = tuple[float, float]
-
-# 비중. 셋을 더하면 1입니다.
-SPEECH_WEIGHT = 0.60
-VARIETY_WEIGHT = 0.25
-PLACE_WEIGHT = 0.15
-# 1분에 이만큼 전환하면 충분히 활기차다고 봅니다. 그 위로는 더 쳐주지 않습니다.
-LIVELY_CUTS_PER_MINUTE = 6.0
-# 앞뒤 이만큼은 인사·마무리로 보고 점수를 깎습니다.
-EDGE_RATIO = 0.1
-# 이 점수 아래는 추천하지 않습니다.
-FLOOR = 0.25
-# 말이 이만큼도 차 있지 않으면 후보로 보지 않습니다. 이 추천은 **말하는
-# 영상** 기준입니다. 음악·풍경 영상에서는 아무것도 추천하지 않습니다.
-MIN_SPEECH = 0.35
+# 한 번에 물어볼 수 있는 대본 크기. 넘으면 자르지 않고 거절합니다. 조용히
+# 자르면 뒷부분이 통째로 후보에서 빠진 것을 아무도 모릅니다.
+MAX_CUES = 800
+MAX_CHARS = 60_000
+# 숏폼 한 편의 길이. 위쪽 한계는 EditSpec과 같습니다.
+MIN_SECONDS = 5.0
+MAX_SECONDS = 180.0
 
 
-class Highlight(BaseModel):
-    """추천 구간 하나. 왜 골랐는지 숫자와 함께 돌려줍니다."""
+@dataclass(frozen=True)
+class Pick:
+    """모델이 고른 것. **시각이 아니라 자막 번호입니다.**"""
 
-    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
-
-    start: float = Field(ge=0)
-    end: float = Field(gt=0)
-    score: float = Field(ge=0, le=1)
-    speech_ratio: float = Field(ge=0, le=1)
-    scene_cuts: int = Field(ge=0)
-
-    @property
-    def seconds(self) -> float:
-        return self.end - self.start
+    first: int
+    last: int
+    title: str = ""
+    reason: str = ""
 
 
-def covered(window: Span, spans: Sequence[Span]) -> float:
-    """구간 안에서 `spans`가 차지하는 시간."""
-    start, end = window
-    return sum(max(0.0, min(end, high) - max(start, low)) for low, high in spans)
+@dataclass(frozen=True)
+class Rejected:
+    """버린 후보와 그 이유. 사람이 읽습니다."""
+
+    pick: Pick
+    why: str
 
 
-def _boundaries(scenes: Sequence[dict], duration: float, target: float) -> list[float]:
-    """후보가 시작·끝날 수 있는 시각. 장면이 없으면 일정 간격으로 만듭니다."""
-    found = {0.0, duration}
-    for scene in scenes:
-        for key in ("start", "end"):
-            value = float(scene[key])
-            if 0.0 <= value <= duration:
-                found.add(value)
-    if len(found) <= 2 and target > 0:
-        step = target / 2
-        found.update(step * at for at in range(1, int(duration / step) + 1))
-    return sorted(found)
+class TooMuchTranscript(ValueError):
+    """대본이 한 번에 물어보기에 너무 큽니다."""
 
 
-def _place(window: Span, duration: float) -> float:
-    """영상에서의 자리 점수. 맨 앞·맨 뒤일수록 깎습니다."""
-    if duration <= 0:
-        return 1.0
-    edge = duration * EDGE_RATIO
-    start, end = window
-    if start >= edge and end <= duration - edge:
-        return 1.0
-    outside = max(0.0, edge - start) + max(0.0, end - (duration - edge))
-    return max(0.0, 1.0 - outside / max(edge, 1e-6))
+def ordered(cues: list[Cue]) -> list[Cue]:
+    return sorted(cues, key=lambda c: (c.start, c.end))
 
 
-def _fit(seconds: float, target: float) -> float:
-    """길이가 목표에 얼마나 가까운지. 1에 가까울수록 좋습니다."""
-    if target <= 0:
-        return 1.0
-    return max(0.0, 1.0 - abs(seconds - target) / target)
+def numbered(cues: list[Cue]) -> str:
+    """모델에게 보낼 대본. 번호와 시각을 함께 보여 주되 답은 번호로 받습니다.
+
+    시각을 보여 주는 이유는 길이를 가늠하게 하기 위해서입니다. 답에 시각이
+    들어와도 쓰지 않습니다.
+    """
+    rows = ordered(cues)
+    if len(rows) > MAX_CUES:
+        raise TooMuchTranscript(f"자막이 {len(rows)}개입니다. {MAX_CUES}개까지만 물어봅니다.")
+    body = "\n".join(f"{i}\t{c.start:.1f}\t{c.end:.1f}\t{c.text}" for i, c in enumerate(rows))
+    if len(body) > MAX_CHARS:
+        raise TooMuchTranscript(f"대본이 {len(body)}자입니다. {MAX_CHARS}자까지만 물어봅니다.")
+    return body
 
 
-def suggest(
-    scenes: Sequence[dict],
-    speech: Sequence[Span],
+def _fault(
+    pick: Pick, count: int, span: tuple[float, float], duration: float, max_seconds: float
+) -> str | None:
+    """이 후보를 버려야 하는 이유. 버릴 것이 없으면 None."""
+    if not 0 <= pick.first < count or not 0 <= pick.last < count:
+        return f"대본에 없는 번호입니다(자막 0~{count - 1})."
+    if pick.last < pick.first:
+        return "끝 번호가 시작 번호보다 앞입니다."
+    start, end = span
+    if end > duration:
+        return f"구간 끝({end:.1f}초)이 영상 길이({duration:.1f}초)를 넘습니다."
+    length = end - start
+    if length < MIN_SECONDS:
+        return f"{length:.1f}초뿐입니다. {MIN_SECONDS:.0f}초는 넘어야 합니다."
+    if length > max_seconds:
+        return f"{length:.1f}초입니다. {max_seconds:.0f}초를 넘습니다."
+    return None
+
+
+def accept(
+    cues: list[Cue],
+    picks: list[Pick],
     *,
     duration: float,
-    target: float = 45.0,
-    minimum: float = 15.0,
-    maximum: float = 90.0,
-    count: int = 5,
-    floor: float = FLOOR,
-) -> list[Highlight]:
-    """점수가 높은 순으로 겹치지 않는 후보 구간을 돌려줍니다."""
-    if duration <= 0 or count <= 0:
-        return []
-    edges = _boundaries(scenes, duration, target)
-    cuts = sorted(
-        {float(scene["start"]) for scene in scenes if 0.0 < float(scene["start"]) < duration}
-    )
-    found: list[Highlight] = []
-    for at, start in enumerate(edges):
-        for end in edges[at + 1 :]:
-            seconds = end - start
-            if seconds < minimum:
-                continue
-            if seconds > maximum:
-                break
-            ratio = covered((start, end), speech) / seconds
-            if ratio < MIN_SPEECH:
-                continue
-            inside = sum(1 for cut in cuts if start < cut < end)
-            variety = min(inside / (seconds / 60 * LIVELY_CUTS_PER_MINUTE), 1.0) if seconds else 0.0
-            score = (
-                SPEECH_WEIGHT * ratio
-                + VARIETY_WEIGHT * variety
-                + PLACE_WEIGHT * _place((start, end), duration)
-            ) * _fit(seconds, target)
-            found.append(
-                Highlight(
-                    start=start,
-                    end=end,
-                    score=round(min(1.0, score), 4),
-                    speech_ratio=round(min(1.0, ratio), 4),
-                    scene_cuts=inside,
-                )
-            )
-    chosen: list[Highlight] = []
-    for item in sorted(found, key=lambda h: (-h.score, h.start)):
-        if item.score < floor:
-            break
-        if any(item.start < other.end and other.start < item.end for other in chosen):
+    limit: int = 5,
+    max_seconds: float = MAX_SECONDS,
+) -> tuple[list[dict], list[Rejected]]:
+    """고른 것을 대본에 맞춰 보고 (쓸 것, 버린 것)을 돌려줍니다.
+
+    앞에 온 것을 먼저 씁니다. 모델이 매긴 순서가 곧 추천 순서입니다.
+    """
+    rows = ordered(cues)
+    taken: list[dict] = []
+    thrown: list[Rejected] = []
+    for pick in picks:
+        if len(taken) >= limit:
+            thrown.append(Rejected(pick, f"{limit}개까지만 씁니다."))
             continue
-        chosen.append(item)
-        if len(chosen) >= count:
-            break
-    return sorted(chosen, key=lambda h: h.start)
+        inside = 0 <= pick.first < len(rows) and 0 <= pick.last < len(rows)
+        span = (
+            (rows[pick.first].start, rows[pick.last].end)
+            if inside and pick.last >= pick.first
+            else (0.0, 0.0)
+        )
+        fault = _fault(pick, len(rows), span, duration, max_seconds)
+        if fault:
+            thrown.append(Rejected(pick, fault))
+            continue
+        start, end = span
+        if any(start < used["end"] and end > used["start"] for used in taken):
+            thrown.append(Rejected(pick, "이미 고른 구간과 겹칩니다."))
+            continue
+        title = (pick.title or rows[pick.first].text)[:100]
+        why = pick.reason.strip() or "이유를 말하지 않았습니다."
+        taken.append(
+            {
+                "start": start,
+                "end": end,
+                "title": title,
+                # 어디서 온 제안인지 남깁니다. 규칙이 고른 것과 섞이기 때문입니다.
+                "reason": f"LLM 추천(자막 {pick.first}~{pick.last}): {why}",
+            }
+        )
+    return taken, thrown

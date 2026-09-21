@@ -3,8 +3,8 @@
 import sqlalchemy as sa
 from alembic import op
 
-revision = "0007_transcript_words"
-down_revision = "0006_sync"
+revision = "0011_transcript_words"
+down_revision = "0010_silence_preview"
 branch_labels = None
 depends_on = None
 

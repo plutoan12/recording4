@@ -9,7 +9,7 @@ import tempfile
 from collections.abc import Sequence
 from pathlib import Path
 
-from pipeline.editing import EditSpec, clip_cues
+from pipeline.editing import Cue, EditSpec, clip_cues, concat_cues
 from pipeline.reframe import Point, crop_x, follow
 from pipeline.subtitle_files import plain_ass
 from pipeline.subtitle_stickers import (
@@ -20,44 +20,27 @@ from pipeline.subtitle_stickers import (
 )
 from pipeline.subtitle_templates import SubtitleTemplate, resolve_template, styled_document
 from pipeline.subtitles import DEFAULT_RULES, SubtitleRules, apply_rules, pacing_rules
-from pipeline.trimming import (
-    Span,
-    keeps,
-    kept_seconds,
-    moved,
-    moved_cues,
-    moved_span,
-    overlap_seconds,
-    select_expression,
-    trims,
-)
 
 __all__ = [
     "RenderError",
-    "audio_filter_args",
-    "has_audio",
-    "transition_graph",
-    "clip_keeps",
-    "clip_overlap",
-    "clip_path",
-    "cut_with_transitions",
     "ffmpeg_binary",
+    "has_audio",
     "plain_ass",
     "render_clip",
+    "render_preview",
     "stickers_dir",
     "subtitles_filter",
-    "trim_filters",
-    "trimmed_spec",
+    "transition_graph",
     "video_filter_args",
     "write_subtitles",
 ]
 
-# 자르고 나서 이보다 짧게 남으면 영상이라 보기 어렵습니다.
-MIN_TRIMMED_SECONDS = 0.5
-
 # 잡음 제거 세기. FFmpeg 내장 `afftdn`의 잡음 바닥(dB)입니다. 낮출수록 많이
 # 깎이고 목소리도 같이 깎입니다. 잰 값이 아니라 정한 값입니다.
 DENOISE = {"soft": "afftdn=nf=-20", "strong": "afftdn=nf=-35"}
+
+# 배경음악을 깔 때 말소리 기준으로 음량을 낮추는 값. 잰 값이 아니라 정한 값입니다.
+DUCK = "sidechaincompress=threshold=0.03:ratio=8:attack=20:release=400"
 
 
 class RenderError(RuntimeError):
@@ -69,61 +52,6 @@ def ffmpeg_binary() -> str:
     if not binary:
         raise RenderError("FFmpeg가 없습니다. 워커 이미지를 사용하거나 FFmpeg를 설치하세요.")
     return binary
-
-
-def write_subtitles(
-    path: Path,
-    spec: EditSpec,
-    rules: SubtitleRules = DEFAULT_RULES,
-    template: SubtitleTemplate | str | None = None,
-) -> None:
-    """굽는 자막 ASS 파일을 씁니다.
-
-    모양은 템플릿이 정합니다. 주지 않으면 `spec.subtitle_template`(없으면 default)을
-    쓰고, `spec.subtitle_preset`·`spec.subtitle_animation`이 있으면 그 값으로 바꿉니다.
-    줄바꿈과
-    분할은 여기서 확정합니다. libass 자동 줄바꿈에 맡기지 않습니다.
-    """
-    if template is None:
-        template = getattr(spec, "subtitle_template", None)
-    animation = getattr(spec, "subtitle_animation", None)
-    preset = getattr(spec, "subtitle_preset", None)
-    try:
-        chosen = resolve_template(template)
-        if preset is not None:
-            chosen = chosen.with_preset(preset)
-        if animation:
-            chosen = chosen.with_animation(animation)
-    except ValueError as exc:
-        raise RenderError(str(exc)) from None
-    # 끊는 방식을 고르면 그 규칙을 씁니다. 비우면 부르는 쪽이 준 규칙 그대로입니다.
-    pacing = getattr(spec, "subtitle_pacing", None)
-    if pacing:
-        try:
-            rules = pacing_rules(pacing, getattr(spec, "caption_language", None), rules)
-        except ValueError as exc:
-            raise RenderError(str(exc)) from None
-    cues = (
-        clip_cues(spec.cues, spec.start, spec.end) if getattr(spec, "burn_subtitles", True) else []
-    )
-    document = styled_document(
-        apply_rules(cues, rules),
-        chosen,
-        width=spec.width,
-        height=spec.height,
-        duration=spec.end - spec.start,
-        title=spec.title,
-        font_size=getattr(spec, "font_size", None),
-    )
-    # 벡터 스티커는 자막과 같은 문서에 들어갑니다. 이미지 스티커는 합성 단계(overlay)입니다.
-    add_sticker_events(
-        document,
-        clip_stickers(getattr(spec, "stickers", None) or [], spec.start, spec.end),
-        width=spec.width,
-        height=spec.height,
-        duration=spec.end - spec.start,
-    )
-    document.save(str(path), encoding="utf-8")
 
 
 def stickers_dir() -> Path | None:
@@ -169,169 +97,6 @@ def subtitles_filter(filename: str = "captions.ass") -> str:
     return f"subtitles={filename}:fontsdir='{escaped}'"
 
 
-def video_filter(spec: EditSpec, path: Sequence[Point] = ()) -> str:
-    """영상 필터 체인. `path`가 있으면 가로 중심이 그 경로를 따라갑니다."""
-    w, h = spec.width, spec.height
-    if spec.mode == "crop":
-        # 식에 쉼표가 있어 작은따옴표로 묶습니다(묶지 않으면 필터 구분자입니다).
-        x = f"'{crop_x(path, spec.focus_x)}'" if path else f"(iw-ow)*{spec.focus_x}"
-        frame = (
-            f"scale={w}:{h}:force_original_aspect_ratio=increase,"
-            f"crop={w}:{h}:{x}:(ih-oh)*{spec.focus_y}"
-        )
-    else:
-        frame = (
-            f"scale={w}:{h}:force_original_aspect_ratio=decrease:force_divisible_by=2,"
-            f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:color=black"
-        )
-    return f"{frame},setsar=1,{subtitles_filter()},format=yuv420p"
-
-
-def clip_keeps(source: Path, spec: EditSpec, speech: Sequence[Span] | None = None) -> list[Span]:
-    """이 구간에서 남길 토막. `spec.silence`가 비어 있으면 통째로 하나입니다.
-
-    발화 구간을 주지 않으면 여기서 찾습니다(Silero VAD, 실패하면 FFmpeg
-    무음 감지). 테스트와 미리 재기는 직접 넣어 씁니다.
-    """
-    whole = [(0.0, spec.end - spec.start)]
-    chosen = getattr(spec, "keep", None)
-    if chosen:
-        # 사람이 화면에서 고친 토막입니다. 기계가 다시 덮지 않습니다.
-        return [(float(start), float(end)) for start, end in chosen]
-    settings = getattr(spec, "silence", None)
-    if settings is None:
-        return whole
-    if speech is None:
-        from worker.analysis import speech_spans
-
-        speech = speech_spans(source)
-    return keeps(speech, start=spec.start, end=spec.end, settings=settings)
-
-
-def clip_path(
-    source: Path,
-    spec: EditSpec,
-    kept: Sequence[Span],
-    faces: Sequence[Point] | None = None,
-    overlap: float = 0.0,
-) -> list[Point]:
-    """가로 중심이 따라갈 경로. 쓰지 않으면 빈 목록입니다.
-
-    **무음 컷과 같은 시간축을 씁니다.** `crop`은 자르기(`select`) 뒤에 오므로
-    얼굴 시각도 잘린 뒤의 시각으로 옮겨야 합니다. 잘려 나간 자리의 점은
-    버립니다.
-    """
-    settings = getattr(spec, "reframe", None)
-    if settings is None or spec.mode != "crop":
-        return []
-    if faces is None:
-        from worker.analysis import face_track
-
-        faces = face_track(source, start=spec.start, end=spec.end)[0]
-    if trims(kept, spec.end - spec.start):
-        shifted = [(moved(at, kept, overlap), value) for at, value in faces]
-        faces = [(at, value) for at, value in shifted if at is not None]
-    return follow(faces, settings=settings)
-
-
-def trimmed_spec(spec: EditSpec, kept: Sequence[Span], overlap: float = 0.0) -> EditSpec:
-    """자른 뒤의 시간축으로 옮긴 편집 지시.
-
-    구간이 0초에서 시작하고 자막·스티커가 이미 옮겨져 있으므로, 뒤따르는
-    `clip_cues`·`clip_stickers`는 그대로 지나갑니다.
-    """
-    length = kept_seconds(kept, overlap)
-    if length < MIN_TRIMMED_SECONDS:
-        raise RenderError(
-            f"무음을 자르고 나면 {length:.1f}초만 남습니다. 구간을 넓히거나 컷을 약하게 하세요."
-        )
-    stickers = []
-    for sticker in clip_stickers(getattr(spec, "stickers", None) or [], spec.start, spec.end):
-        span = moved_span(sticker.start, sticker.end, kept, overlap)
-        if span:
-            stickers.append(sticker.model_copy(update={"start": span[0], "end": span[1]}))
-    return spec.model_copy(
-        update={
-            "start": 0.0,
-            "end": length,
-            "cues": moved_cues(clip_cues(spec.cues, spec.start, spec.end), kept, overlap),
-            "stickers": stickers,
-            "silence": None,
-            "keep": None,
-            "transition": None,
-        }
-    )
-
-
-def clip_overlap(spec: EditSpec, kept: Sequence[Span]) -> float:
-    """이어 붙인 자리에서 실제로 겹칠 길이. 전환을 쓰지 않으면 0입니다."""
-    settings = getattr(spec, "transition", None)
-    return overlap_seconds(kept, settings.seconds) if settings else 0.0
-
-
-def cut_with_transitions(
-    source: Path, spec: EditSpec, kept: Sequence[Span], overlap: float, destination: Path
-) -> None:
-    """1차 통과: 자르고 전환으로 이어 임시 파일로 냅니다.
-
-    **두 번에 나눠 합니다.** 전환 그래프와 기존 체인(크기·자막·스티커)을 한
-    그래프에 욱여넣으면 꼬리표가 얽혀 고치기 어려워집니다. 다시 인코딩하는
-    만큼 화질이 조금 깎이므로 중간 파일은 `crf 18`로 넉넉히 둡니다.
-    """
-    kind = getattr(spec, "transition").kind  # noqa: B009 - 부르는 쪽이 있는지 확인했습니다.
-    audio = has_audio(source)
-    graph, video, sound = transition_graph(kept, kind=kind, overlap=overlap, audio=audio)
-    command = [
-        ffmpeg_binary(),
-        "-hide_banner",
-        "-loglevel",
-        "error",
-        "-nostdin",
-        "-y",
-        "-ss",
-        str(spec.start),
-        "-i",
-        str(source),
-        "-t",
-        str(spec.end - spec.start),
-        "-filter_complex",
-        graph,
-        "-map",
-        video,
-        *(["-map", sound] if audio else []),
-        "-c:v",
-        "libx264",
-        "-preset",
-        "fast",
-        "-crf",
-        "18",
-        *(["-c:a", "aac", "-b:a", "192k"] if audio else []),
-        str(destination),
-    ]
-    try:
-        completed = subprocess.run(command, capture_output=True, timeout=3600)
-    except subprocess.TimeoutExpired as exc:
-        raise RenderError("전환 합성이 1시간 제한을 넘었습니다.") from exc
-    if completed.returncode or not destination.exists():
-        raise RenderError("FFmpeg 전환 합성 실패: 전환 종류와 토막 길이를 확인하세요.")
-
-
-def trim_filters(kept: Sequence[Span], length: float) -> tuple[str, list[str]]:
-    """(영상 체인 앞머리, 음성 필터 조각). 자를 것이 없으면 빈 값입니다.
-
-    `select`는 남길 프레임만 통과시키고 `setpts`가 남은 프레임의 시각을 도로
-    0부터 세어 빈자리를 없앱니다. 식에 쉼표가 있어 작은따옴표로 묶습니다
-    (묶지 않으면 필터 인자 구분자로 읽힙니다).
-    """
-    if not trims(kept, length):
-        return "", []
-    expression = select_expression(kept)
-    return (
-        f"select='{expression}',setpts=N/FRAME_RATE/TB,",
-        [f"aselect='{expression}'", "asetpts=N/SR/TB"],
-    )
-
-
 def has_audio(source: Path) -> bool:
     """소리가 들어 있는지. 없는 영상에 음성 그래프를 붙이면 FFmpeg가 멈춥니다."""
     probe = shutil.which("ffprobe") or ffmpeg_binary().replace("ffmpeg", "ffprobe")
@@ -358,89 +123,132 @@ def has_audio(source: Path) -> bool:
     return bool(found.stdout.strip())
 
 
-def transition_graph(
-    kept: Sequence[Span], *, kind: str, overlap: float, audio: bool
-) -> tuple[str, str, str]:
-    """토막을 잘라 전환으로 잇는 그래프. (그래프, 영상 꼬리표, 소리 꼬리표)입니다.
+def write_subtitles(
+    path: Path,
+    spec: EditSpec,
+    rules: SubtitleRules = DEFAULT_RULES,
+    template: SubtitleTemplate | str | None = None,
+) -> None:
+    """굽는 자막 ASS 파일을 씁니다.
 
-    `select`로 자르면 토막이 **딱 붙습니다.** 전환을 넣으려면 토막을 각각
-    따로 떠서(`trim`) 겹쳐야 하므로(`xfade`) 그래프가 달라집니다. 소리도
-    같은 길이로 겹칩니다(`acrossfade`).
-
-    `xfade`는 겹친 만큼 짧아지므로 이어 붙일 때마다 길이를 다시 셉니다.
+    모양은 템플릿이 정합니다. 주지 않으면 `spec.subtitle_template`(없으면 default)을
+    쓰고, `spec.subtitle_preset`·`spec.subtitle_animation`이 있으면 그 값으로 바꿉니다.
+    줄바꿈과
+    분할은 여기서 확정합니다. libass 자동 줄바꿈에 맡기지 않습니다.
     """
-    parts = [
-        f"[0:v]trim=start={start:.3f}:end={end:.3f},setpts=PTS-STARTPTS[v{at}]"
-        for at, (start, end) in enumerate(kept)
-    ]
-    if audio:
-        parts += [
-            f"[0:a]atrim=start={start:.3f}:end={end:.3f},asetpts=PTS-STARTPTS[a{at}]"
-            for at, (start, end) in enumerate(kept)
-        ]
-    video, sound = "[v0]", "[a0]"
-    length = kept[0][1] - kept[0][0]
-    for at, (start, end) in enumerate(kept[1:], start=1):
-        parts.append(
-            f"{video}[v{at}]xfade=transition={kind}:duration={overlap:.3f}"
-            f":offset={length - overlap:.3f}[x{at}]"
+    if template is None:
+        template = getattr(spec, "subtitle_template", None)
+    animation = getattr(spec, "subtitle_animation", None)
+    preset = getattr(spec, "subtitle_preset", None)
+    try:
+        chosen = resolve_template(template)
+        if preset is not None:
+            chosen = chosen.with_preset(preset)
+        if animation:
+            chosen = chosen.with_animation(animation)
+    except ValueError as exc:
+        raise RenderError(str(exc)) from None
+    # 끊는 방식을 고르면 그 규칙을 씁니다. 비우면 부르는 쪽이 준 규칙 그대로입니다.
+    pacing = getattr(spec, "subtitle_pacing", None)
+    if pacing:
+        try:
+            rules = pacing_rules(pacing, getattr(spec, "caption_language", None), rules)
+        except ValueError as exc:
+            raise RenderError(str(exc)) from None
+    segments = getattr(spec, "segments", None)
+    if not getattr(spec, "burn_subtitles", True):
+        cues = []
+    elif segments:
+        # 이어 붙인 시간축으로 옮깁니다. 빠진 구간의 자막은 함께 빠집니다.
+        cues = concat_cues(spec.cues, segments)
+    else:
+        cues = clip_cues(spec.cues, spec.start, spec.end)
+    length = getattr(spec, "output_seconds", spec.end - spec.start)
+    document = styled_document(
+        apply_rules(cues, rules),
+        chosen,
+        width=spec.width,
+        height=spec.height,
+        duration=length,
+        title=spec.title,
+        font_size=getattr(spec, "font_size", None),
+    )
+    # 벡터 스티커는 자막과 같은 문서에 들어갑니다. 이미지 스티커는 합성 단계(overlay)입니다.
+    add_sticker_events(
+        document,
+        clip_stickers(getattr(spec, "stickers", None) or [], spec.start, spec.end),
+        width=spec.width,
+        height=spec.height,
+        duration=length,
+    )
+    document.save(str(path), encoding="utf-8")
+
+
+def video_filter(spec: EditSpec, path: Sequence[Point] = ()) -> str:
+    """영상 필터 체인. `path`가 있으면 가로 중심이 그 경로를 따라갑니다."""
+    w, h = spec.width, spec.height
+    if spec.mode == "crop":
+        # 식에 쉼표가 있어 작은따옴표로 묶습니다(묶지 않으면 필터 구분자입니다).
+        x = f"'{crop_x(path, spec.focus_x)}'" if path else f"(iw-ow)*{spec.focus_x}"
+        frame = (
+            f"scale={w}:{h}:force_original_aspect_ratio=increase,"
+            f"crop={w}:{h}:{x}:(ih-oh)*{spec.focus_y}"
         )
-        if audio:
-            parts.append(f"{sound}[a{at}]acrossfade=d={overlap:.3f}[y{at}]")
-        video, sound = f"[x{at}]", f"[y{at}]"
-        length += (end - start) - overlap
-    return ";".join(parts), video, sound
+    else:
+        frame = (
+            f"scale={w}:{h}:force_original_aspect_ratio=decrease:force_divisible_by=2,"
+            f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:color=black"
+        )
+    return f"{frame},setsar=1,{subtitles_filter()},format=yuv420p"
 
 
-def audio_filter_args(spec: EditSpec, kept: Sequence[Span], length: float) -> list[str]:
-    """`-filter:a` 인자. 무음 컷과 잡음 제거를 한 체인으로 잇습니다.
-
-    **자르기가 먼저입니다.** 버릴 구간까지 잡음을 깎는 것은 헛일이고, 잡음
-    제거가 이어 붙인 자리의 이음매를 뭉개는 편이 낫습니다.
-    """
-    chain = trim_filters(kept, length)[1]
-    level = getattr(spec, "denoise", None)
-    if level:
-        chain.append(DENOISE[level])
-    return ["-filter:a", ",".join(chain)] if chain else []
+def source_time(spec: EditSpec, at: float) -> float:
+    """결과 영상의 `at`초가 원본의 몇 초인지. 구간을 이어 붙였으면 그것을 따라갑니다."""
+    offset = 0.0
+    for span in spec.spans:
+        if at < offset + span.output_seconds:
+            return span.start + (at - offset) * span.speed
+        offset += span.output_seconds
+    return spec.spans[-1].end
 
 
-def render_clip(
+def write_preview_subtitles(
+    path: Path, spec: EditSpec, at: float, rules: SubtitleRules = DEFAULT_RULES
+) -> None:
+    """그 순간에 떠 있는 자막만 0초로 옮겨 담습니다. 한 장을 뽑을 때 씁니다."""
+    frozen = spec.model_copy(update={"fade_in": 0.0, "fade_out": 0.0})
+    shown = (
+        concat_cues(spec.cues, spec.segments)
+        if spec.segments
+        else clip_cues(spec.cues, spec.start, spec.end)
+    )
+    now = [
+        Cue(start=0, end=1, text=cue.text)
+        for cue in apply_rules(shown, rules)
+        if cue.start <= at < cue.end
+    ]
+    write_subtitles(path, frozen.model_copy(update={"cues": now, "segments": []}), rules)
+
+
+def render_preview(
     source: Path,
     output: Path,
     spec: EditSpec,
+    at: float,
     *,
     rules: SubtitleRules = DEFAULT_RULES,
-    speech: Sequence[Span] | None = None,
-    faces: Sequence[Point] | None = None,
 ) -> None:
+    """결과의 `at`초 한 장을 PNG로 뽑습니다. 전체를 합성하지 않습니다."""
     source, output = source.resolve(), output.resolve()
     if not source.is_file() or source == output:
         raise RenderError("유효한 원본과 별도 출력 경로가 필요합니다.")
+    if not 0 <= at < spec.output_seconds:
+        raise RenderError("미리볼 시각이 결과 길이 밖입니다.")
     output.parent.mkdir(parents=True, exist_ok=True)
-    kept = clip_keeps(source, spec, speech)
-    length = spec.end - spec.start
-    overlap = clip_overlap(spec, kept)
-    # 자른 뒤에는 시간축이 달라집니다. 자막·스티커·얼굴 경로를 먼저 옮깁니다.
-    shown = trimmed_spec(spec, kept, overlap) if trims(kept, length) else spec
-    path = clip_path(source, spec, kept, faces, overlap)
-    with tempfile.TemporaryDirectory(prefix="r4-render-") as directory:
+    with tempfile.TemporaryDirectory(prefix="r4-preview-") as directory:
         temp = Path(directory)
-        if overlap:
-            # 전환은 토막을 따로 떠서 겹쳐야 하므로 먼저 한 번 굽습니다.
-            media = temp / "cut.mp4"
-            cut_with_transitions(source, spec, kept, overlap, media)
-            window, prefix = (0.0, shown.end), ""
-            cut_audio, cut_length = [(0.0, shown.end)], shown.end
-        else:
-            media = source
-            window, cut_audio, cut_length = (spec.start, length), kept, length
-            prefix, _ = trim_filters(kept, length)
-        write_subtitles(temp / "captions.ass", shown, rules)
-        try:
-            filters = video_filter_args(shown, base_chain=prefix + video_filter(shown, path))
-        except ValueError as exc:
-            raise RenderError(str(exc)) from None
+        # 자막을 0초에 두었으므로 그 자리에 seek해서 한 장만 뽑습니다.
+        write_preview_subtitles(temp / "captions.ass", spec, at, rules)
         command = [
             ffmpeg_binary(),
             "-hide_banner",
@@ -449,36 +257,324 @@ def render_clip(
             "-nostdin",
             "-y",
             "-ss",
-            str(window[0]),
+            str(round(source_time(spec, at), 3)),
             "-i",
-            str(media),
-            "-t",
-            str(window[1]),
-            *filters,
+            str(source),
             "-map",
-            "0:a:0?",
-            *audio_filter_args(spec, cut_audio, cut_length),
-            "-c:v",
-            "libx264",
-            "-preset",
-            "fast",
-            "-crf",
-            "22",
-            "-c:a",
-            "aac",
-            "-b:a",
-            "160k",
-            "-movflags",
-            "+faststart",
-            str(temp / "result.mp4"),
+            "0:v:0",
+            "-vf",
+            video_filter(spec),
+            "-frames:v",
+            "1",
+            "-update",
+            "1",
+            str(temp / "result.png"),
         ]
+        run_ffmpeg(command, temp, output, produced="result.png")
+
+
+def tempo_chain(speed: float) -> str:
+    """배속을 소리에도 겁니다. atempo는 한 번에 0.5~2.0배까지라 필요하면 이어 붙입니다."""
+    if speed == 1.0:
+        return ""
+    steps, remaining = [], speed
+    while remaining > 2.0:
+        steps.append("atempo=2.0")
+        remaining /= 2.0
+    while remaining < 0.5:
+        steps.append("atempo=0.5")
+        remaining /= 0.5
+    steps.append(f"atempo={remaining:g}")
+    return "," + ",".join(steps)
+
+
+def simple(spec: EditSpec) -> bool:
+    """예전의 단순한 한 구간 경로로 충분한지.
+
+    구간 고르기·페이드·전환·잡음 제거·리프레이밍 가운데 하나라도 있으면
+    그래프 경로로 갑니다.
+    """
+    return not (
+        spec.segments
+        or spec.fade_in
+        or spec.fade_out
+        or getattr(spec, "denoise", None)
+        or getattr(spec, "transition", None)
+    )
+
+
+# 겹쳐 잇기가 눈에 띄지도 않으면서 계산만 복잡해지는 아래쪽 한계.
+MIN_OVERLAP = 0.05
+
+
+def transition_seconds(spec: EditSpec) -> float:
+    """실제로 쓸 전환 길이. 토막보다 길게 겹칠 수는 없습니다.
+
+    xfade는 두 토막을 `duration`만큼 겹치므로 **가장 짧은 토막의 절반**까지로
+    줄입니다. 그래도 너무 짧으면 0이고, 부르는 쪽은 전환 없이 딱 붙입니다.
+    탐지 결과 때문에 렌더가 실패하면 사람이 고칠 방법이 없습니다.
+    """
+    settings = getattr(spec, "transition", None)
+    spans = spec.spans
+    if settings is None or len(spans) < 2:
+        return 0.0
+    shortest = min(span.output_seconds for span in spans)
+    usable = min(settings.seconds, shortest / 2)
+    return round(usable, 3) if usable >= MIN_OVERLAP else 0.0
+
+
+def output_seconds(spec: EditSpec) -> float:
+    """결과 길이. 전환을 넣으면 이음매마다 겹친 만큼 짧아집니다."""
+    overlap = transition_seconds(spec)
+    return spec.output_seconds - max(0, len(spec.spans) - 1) * overlap
+
+
+def transition_graph(spec: EditSpec, count: int, overlap: float) -> list[str]:
+    """토막을 xfade/acrossfade로 겹쳐 잇는 그래프 조각. 출력은 [vx]·[ax]입니다.
+
+    xfade의 `offset`은 **지금까지 이어 붙인 길이**에서 겹칠 만큼 당긴 자리입니다.
+    한 번 겹칠 때마다 결과가 그만큼 짧아지므로 다음 offset도 함께 당겨집니다.
+    """
+    kind = spec.transition.kind
+    spans = spec.spans
+    parts: list[str] = []
+    video, sound = "[v0]", "[a0]"
+    elapsed = spans[0].output_seconds
+    for index in range(1, count):
+        offset = round(elapsed - overlap, 3)
+        last = index == count - 1
+        video_out = "[vx]" if last else f"[vt{index}]"
+        sound_out = "[ax]" if last else f"[at{index}]"
+        parts.append(
+            f"{video}[v{index}]xfade=transition={kind}:duration={overlap}:"
+            f"offset={offset}{video_out}"
+        )
+        parts.append(f"{sound}[a{index}]acrossfade=d={overlap}{sound_out}")
+        video, sound = video_out, sound_out
+        elapsed = offset + spans[index].output_seconds
+    return parts
+
+
+def complex_filter(
+    spec: EditSpec, *, audio: str, music: str | None, path: Sequence[Point] = ()
+) -> tuple[str, str]:
+    """(filter_complex, 소리 출력 이름). 영상 출력은 늘 [vout]입니다.
+
+    구간마다 잘라 배속을 걸고 이어 붙인 뒤(concat 또는 xfade), 화면을 맞추고
+    자막을 굽습니다. 같은 입력을 여러 번 쓰려면 먼저 split해야 해서 구간이
+    둘 이상이면 나눕니다.
+
+    `spec.transition`이 있으면 딱 붙이는 대신 겹쳐 잇습니다. 겹친 만큼
+    짧아지므로 길이는 `transition_seconds`를 빼고 셉니다. `spec.denoise`는
+    소리에만 겁니다.
+    """
+    spans, parts = spec.spans, []
+    count = len(spans)
+    if count > 1:
+        parts.append(f"[0:v]split={count}" + "".join(f"[vin{i}]" for i in range(count)))
+        parts.append(f"{audio}asplit={count}" + "".join(f"[ain{i}]" for i in range(count)))
+        sources = [(f"[vin{i}]", f"[ain{i}]") for i in range(count)]
+    else:
+        sources = [("[0:v]", audio)]
+    for index, span in enumerate(spans):
+        video_in, audio_in = sources[index]
+        parts.append(
+            f"{video_in}trim=start={span.start}:end={span.end},"
+            f"setpts=(PTS-STARTPTS)/{span.speed}[v{index}]"
+        )
+        parts.append(
+            f"{audio_in}atrim=start={span.start}:end={span.end},"
+            f"asetpts=PTS-STARTPTS{tempo_chain(span.speed)}[a{index}]"
+        )
+    overlap = transition_seconds(spec)
+    if count > 1 and overlap:
+        parts += transition_graph(spec, count, overlap)
+        video_label, audio_label = "[vx]", "[ax]"
+    elif count > 1:
+        joined = "".join(f"[v{i}][a{i}]" for i in range(count))
+        parts.append(f"{joined}concat=n={count}:v=1:a=1[vc][ac]")
+        video_label, audio_label = "[vc]", "[ac]"
+    else:
+        video_label, audio_label = "[v0]", "[a0]"
+
+    total = output_seconds(spec)
+    if spec.denoise:
+        parts.append(f"{audio_label}{DENOISE[spec.denoise]}[adn]")
+        audio_label = "[adn]"
+    fades = []
+    if spec.fade_in:
+        fades.append(f"fade=t=in:st=0:d={spec.fade_in}")
+    if spec.fade_out:
+        fades.append(f"fade=t=out:st={round(total - spec.fade_out, 3)}:d={spec.fade_out}")
+    parts.append(video_label + ",".join([video_filter(spec, path), *fades]) + "[vout]")
+
+    sound = [f.replace("fade=", "afade=") for f in fades]
+    if sound:
+        parts.append(audio_label + ",".join(sound) + "[af]")
+        audio_label = "[af]"
+    if music is not None:
+        parts.append(
+            f"{music}atrim=start=0:end={total},asetpts=PTS-STARTPTS,"
+            f"volume={spec.music_gain_db}dB" + ("," + ",".join(sound) if sound else "") + "[mus]"
+        )
+        if spec.music_duck:
+            # 말소리를 기준으로 배경음악만 낮춥니다. 말소리는 두 갈래로 나눠 씁니다.
+            parts.append(f"{audio_label}asplit=2[speech][key]")
+            parts.append(f"[mus][key]{DUCK}[duck]")
+            parts.append("[speech][duck]amix=inputs=2:normalize=0:duration=first[aout]")
+        else:
+            parts.append(f"{audio_label}[mus]amix=inputs=2:normalize=0:duration=first[aout]")
+        audio_label = "[aout]"
+    return ";".join(parts), audio_label
+
+
+def moved_face_time(at: float, spec: EditSpec) -> float | None:
+    """원본 시각을 이어 붙인 뒤의 시각으로. 빠진 구간이면 `None`입니다.
+
+    `crop`은 자르고 이어 붙인 **뒤에** 오므로 얼굴 시각도 그 시간축이어야
+    합니다. 배속을 걸면 그만큼 당겨집니다.
+    """
+    offset = 0.0
+    for span in spec.spans:
+        if span.start <= at <= span.end:
+            return offset + (at - span.start) / span.speed
+        offset += span.output_seconds
+    return None
+
+
+def clip_path(spec: EditSpec, faces: Sequence[Point] | None) -> list[Point]:
+    """가로 중심이 따라갈 경로. 쓰지 않으면 빈 목록입니다.
+
+    `mode="crop"`이고 `reframe`을 켰을 때만 씁니다(`pad`는 화면 전체를 남기므로
+    따라갈 것이 없습니다). 검출기가 얼굴을 못 찾았으면 빈 목록이고, 그때 crop은
+    지금까지대로 `focus_x` 고정입니다.
+    """
+    settings = getattr(spec, "reframe", None)
+    if settings is None or spec.mode != "crop" or not faces:
+        return []
+    moved = [(moved_face_time(at, spec), value) for at, value in faces]
+    return follow([(at, value) for at, value in moved if at is not None], settings=settings)
+
+
+def render_clip(
+    source: Path,
+    output: Path,
+    spec: EditSpec,
+    *,
+    rules: SubtitleRules = DEFAULT_RULES,
+    music: Path | None = None,
+    has_audio: bool | None = None,
+    faces: Sequence[Point] | None = None,
+) -> None:
+    source, output = source.resolve(), output.resolve()
+    if not source.is_file() or source == output:
+        raise RenderError("유효한 원본과 별도 출력 경로가 필요합니다.")
+    if spec.music_asset_id is not None and music is None:
+        raise RenderError("배경음악 원본을 내려받지 못했습니다.")
+    output.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="r4-render-") as directory:
+        temp = Path(directory)
+        write_subtitles(temp / "captions.ass", spec, rules)
+        path = clip_path(spec, faces)
         try:
-            completed = subprocess.run(command, cwd=temp, capture_output=True, timeout=3600)
-        except subprocess.TimeoutExpired as exc:
-            raise RenderError("영상 합성이 1시간 제한을 넘었습니다.") from exc
-        if completed.returncode:
-            # Do not expose full commands/paths or credentials in job errors.
-            raise RenderError(
-                "FFmpeg 합성 실패: 설치된 코덱·subtitles 필터·입력 영상을 확인하세요."
+            command = (
+                simple_command(source, temp, spec, path)
+                if simple(spec) and music is None and not path
+                else graph_command(source, temp, spec, music, has_audio, path)
             )
-        shutil.copyfile(temp / "result.mp4", output)
+        except ValueError as exc:
+            # 스티커 디렉터리처럼 **설정** 때문에 못 만드는 경우입니다. 작업
+            # 오류로 보여 줄 수 있게 렌더 오류로 바꿉니다.
+            raise RenderError(str(exc)) from None
+        run_ffmpeg(command, temp, output)
+
+
+ENCODE = [
+    "-c:v",
+    "libx264",
+    "-preset",
+    "fast",
+    "-crf",
+    "22",
+    "-c:a",
+    "aac",
+    "-b:a",
+    "160k",
+    "-movflags",
+    "+faststart",
+]
+
+
+def simple_command(
+    source: Path, temp: Path, spec: EditSpec, path: Sequence[Point] = ()
+) -> list[str]:
+    """한 구간을 그대로 잘라 내는 예전 경로. 결과가 달라지지 않게 그대로 둡니다."""
+    return [
+        ffmpeg_binary(),
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-nostdin",
+        "-y",
+        "-ss",
+        str(spec.start),
+        "-i",
+        str(source),
+        "-t",
+        str(spec.end - spec.start),
+        *video_filter_args(spec, base_chain=video_filter(spec, path)),
+        "-map",
+        "0:a:0?",
+        *ENCODE,
+        str(temp / "result.mp4"),
+    ]
+
+
+def graph_command(
+    source: Path,
+    temp: Path,
+    spec: EditSpec,
+    music: Path | None,
+    has_audio: bool | None,
+    path: Sequence[Point] = (),
+) -> list[str]:
+    """구간 이어 붙이기·배속·페이드·배경음악을 쓰는 경로."""
+    if has_audio is None:
+        # 소리가 있는지 모르면 **있다고 봅니다.** 없다고 잘못 보면 원본 소리를 조용히
+        # 버리게 되는데, 그쪽이 훨씬 나쁩니다.
+        has_audio = True
+    command = [ffmpeg_binary(), "-hide_banner", "-loglevel", "error", "-nostdin", "-y"]
+    command += ["-i", str(source)]
+    audio = "[0:a]"
+    if not has_audio:
+        command += ["-f", "lavfi", "-t", str(spec.end + 1), "-i", "anullsrc=r=48000:cl=stereo"]
+        audio = "[1:a]"
+    music_label = None
+    if music is not None:
+        # 음악이 짧으면 되풀이합니다. 길면 아래 -t가 잘라 냅니다.
+        command += ["-stream_loop", "-1", "-i", str(music)]
+        music_label = f"[{len(command_inputs(command)) - 1}:a]"
+    graph, audio_out = complex_filter(spec, audio=audio, music=music_label, path=path)
+    command += ["-filter_complex", graph, "-map", "[vout]", "-map", audio_out]
+    command += [
+        *ENCODE,
+        "-t",
+        str(round(output_seconds(spec), 3)),
+        str(temp / "result.mp4"),
+    ]
+    return command
+
+
+def command_inputs(command: list[str]) -> list[str]:
+    return [value for flag, value in zip(command, command[1:], strict=False) if flag == "-i"]
+
+
+def run_ffmpeg(command: list[str], temp: Path, output: Path, produced: str = "result.mp4") -> None:
+    try:
+        completed = subprocess.run(command, cwd=temp, capture_output=True, timeout=3600)
+    except subprocess.TimeoutExpired as exc:
+        raise RenderError("영상 합성이 1시간 제한을 넘었습니다.") from exc
+    if completed.returncode:
+        # Do not expose full commands/paths or credentials in job errors.
+        raise RenderError("FFmpeg 합성 실패: 설치된 코덱·subtitles 필터·입력 영상을 확인하세요.")
+    shutil.copyfile(temp / produced, output)
