@@ -28,6 +28,20 @@ def _fraction(numerator, denominator):
     return numerator / denominator if denominator else None
 
 
+def _intervals(mask, frame_rate):
+    intervals = []
+    start = None
+    for frame, active in enumerate(mask + [False]):
+        if active and start is None:
+            start = frame
+        elif not active and start is not None:
+            intervals.append(
+                {"start": start / frame_rate, "end": frame / frame_rate}
+            )
+            start = None
+    return intervals
+
+
 def compare(active, diarization, *, active_sha256, diarization_sha256):
     if (
         not isinstance(active, dict)
@@ -121,6 +135,9 @@ def compare(active, diarization, *, active_sha256, diarization_sha256):
         visual >= 2 and audio >= 2 for visual, audio in zip(visual_count, audio_count, strict=True)
     )
     unknown_frames = sum(visual_unknown)
+    visual_overlap_only = [visual >= 2 and audio < 2 for visual, audio in zip(visual_count, audio_count, strict=True)]
+    audio_overlap_only = [audio >= 2 and visual < 2 for visual, audio in zip(visual_count, audio_count, strict=True)]
+    unknown_visual = list(visual_unknown)
     return {
         "schema": 1,
         "metric": "active_speaker_audio_disagreement",
@@ -148,6 +165,13 @@ def compare(active, diarization, *, active_sha256, diarization_sha256):
         "audio_overlap_supported_by_visual_fraction_lower_bound": _fraction(
             overlap_agreement, audio_overlap
         ),
+        "review_intervals": {
+            "visual_overlap_without_audio_overlap": _intervals(
+                visual_overlap_only, frame_rate
+            ),
+            "audio_overlap_without_visual_overlap": _intervals(audio_overlap_only, frame_rate),
+            "visual_unscored": _intervals(unknown_visual, frame_rate),
+        },
         "human_ground_truth": False,
         "accuracy_claim_allowed": False,
         "deploy_allowed": False,

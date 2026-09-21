@@ -51,6 +51,9 @@ def test_disagreement_preserves_unknown_frames_and_lower_bounds(evidence, monkey
     assert result["audio_overlap_supported_by_visual_fraction_lower_bound"] == pytest.approx(2 / 3)
     assert result["accuracy_claim_allowed"] is False
     assert result["deploy_allowed"] is False
+    assert result["review_intervals"]["visual_overlap_without_audio_overlap"] == [
+        {"start": 2.0, "end": 2.5}
+    ]
 
 
 def test_same_speaker_chunks_and_turn_boundaries_do_not_create_overlap(evidence, monkeypatch):
