@@ -365,3 +365,37 @@ def test_style_applies_a_preset_by_name_or_json_file(srt, tmp_path):
     )
     assert "\\fscx58" in pysubs2.load(str(out)).events[0].text
     assert main(["style", str(srt), str(out), "--preset", "없는프리셋"]) == EXIT_ERROR
+
+
+def test_presets_pack_and_import_make_files_you_can_keep(tmp_path, capsys, monkeypatch):
+    import zipfile
+
+    archive_path = tmp_path / "kinetic.zip"
+    assert main(["presets", "pack", "kinetic", str(archive_path)]) == EXIT_OK
+    assert "키네틱 팩 34종" in capsys.readouterr().out
+    with zipfile.ZipFile(archive_path) as archive:
+        names = archive.namelist()
+        assert "읽어보기.txt" in names and "elastic-in.json" in names and len(names) == 35
+        assert json.loads(archive.read("elastic-in.json"))["label"] == "탱탱볼 등장"
+    assert main(["presets", "pack", "nope", str(archive_path)]) == EXIT_ERROR
+
+    exported = tmp_path / "mine.json"
+    assert main(["presets", "export", "bob", str(exported)]) == EXIT_OK
+    capsys.readouterr()
+    # 디렉터리를 알려 주지 않으면 넣을 곳이 없습니다.
+    assert main(["presets", "import", str(exported)]) == EXIT_ERROR
+    directory = tmp_path / "mine"
+    directory.mkdir()
+    monkeypatch.setenv("R4_PRESETS_DIR", str(directory))
+    # 내장과 같은 이름은 막습니다.
+    assert main(["presets", "import", str(exported)]) == EXIT_ERROR
+    body = json.loads(exported.read_text(encoding="utf-8"))
+    body["name"] = "my-bob"
+    exported.write_text(json.dumps(body, ensure_ascii=False), encoding="utf-8")
+    assert main(["presets", "import", str(exported)]) == EXIT_OK
+    stored = json.loads((directory / "my-bob.json").read_text(encoding="utf-8"))
+    assert stored["pack"] == "user"
+    assert main(["presets", "list"]) == EXIT_OK
+    assert "my-bob" in capsys.readouterr().out
+    # 넣은 프리셋은 바로 영상 자막에 쓸 수 있습니다.
+    assert main(["presets", "show", "my-bob"]) == EXIT_OK

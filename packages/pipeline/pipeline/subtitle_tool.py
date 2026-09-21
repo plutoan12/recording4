@@ -37,6 +37,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import zipfile
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -54,8 +55,10 @@ from pipeline.subtitle_fonts import FONT_FAMILIES
 from pipeline.subtitle_motion import ANIMATION_LABELS
 from pipeline.subtitle_presets import (
     PACK_LABELS,
+    PRESET_README,
     MotionPreset,
     all_presets,
+    load_preset,
     presets_by_pack,
     register_preset,
     resolve_preset,
@@ -269,6 +272,35 @@ def cmd_presets(args: argparse.Namespace) -> int:
             print(f"{name}: {reason}")
         print(f"프리셋 {len(presets)}종 가운데 {len(bad)}종에 문제가 있습니다.")
         return EXIT_ERROR if bad else EXIT_OK
+    if args.action == "pack":
+        grouped = presets_by_pack()
+        if args.pack not in grouped:
+            raise ToolError(f"모르는 팩입니다: {args.pack}. 쓸 수 있는 것: {', '.join(grouped)}")
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        with zipfile.ZipFile(args.output, "w", zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr("읽어보기.txt", PRESET_README)
+            for preset in grouped[args.pack]:
+                archive.writestr(f"{preset.name}.json", preset.to_json())
+        print(
+            f"{args.output}: {PACK_LABELS[args.pack]} {len(grouped[args.pack])}종을 "
+            "zip으로 묶었습니다."
+        )
+        return EXIT_OK
+    if args.action == "import":
+        directory = user_presets_dir()
+        if directory is None:
+            raise ToolError("내 프리셋 디렉터리가 없습니다. R4_PRESETS_DIR를 만들고 가리키세요.")
+        try:
+            preset = load_preset(args.file)
+        except ValueError as exc:
+            raise ToolError(str(exc)) from None
+        builtin = {name for name, item in all_presets().items() if item.pack != "user"}
+        if preset.name in builtin:
+            raise ToolError(f"내장 프리셋과 같은 이름입니다: {preset.name}")
+        stored = preset.model_copy(update={"pack": "user"})
+        _write_text(directory / f"{preset.name}.json", stored.to_json())
+        print(f"{directory / (preset.name + '.json')}: 내 프리셋으로 넣었습니다.")
+        return EXIT_OK
     if args.action == "new":
         preset = MotionPreset(
             name=args.name,
@@ -1207,6 +1239,15 @@ def build_parser() -> argparse.ArgumentParser:
     )
     export_preset.add_argument("name", help="프리셋 이름 또는 JSON 파일")
     export_preset.add_argument("output", type=Path)
+    pack_preset = preset_action.add_parser(
+        "pack", help="팩 하나를 zip으로 묶기 (프리셋 JSON + 읽어보기)"
+    )
+    pack_preset.add_argument("pack", help="basic, short, kinetic, user")
+    pack_preset.add_argument("output", type=Path)
+    import_preset = preset_action.add_parser(
+        "import", help="프리셋 JSON을 내 프리셋(R4_PRESETS_DIR)으로 넣기"
+    )
+    import_preset.add_argument("file", type=Path)
     new_preset = preset_action.add_parser("new", help="새 프리셋 JSON 뼈대 만들기")
     new_preset.add_argument("output", type=Path)
     new_preset.add_argument("--name", required=True, help="영문 소문자·숫자·하이픈")

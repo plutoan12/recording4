@@ -36,6 +36,7 @@ from pipeline.subtitle_motion import run_slots, state_before
 __all__ = [
     "BUILTIN_PRESETS",
     "PACK_LABELS",
+    "PRESET_README",
     "MotionPreset",
     "MotionStep",
     "PresetBox",
@@ -52,6 +53,19 @@ __all__ = [
 ]
 
 PRESET_NAME = r"^[a-z][a-z0-9-]{1,39}$"
+
+# 프리셋 파일을 내려받는 사람이 어디에 넣는지 알 수 있게 함께 넣는 설명입니다.
+PRESET_README = """R4 모션 프리셋
+
+- JSON 한 장이 프리셋 하나입니다. 값을 고쳐 쓰셔도 됩니다.
+- 쓰는 법 1: 관리화면 자막 편집의 "모션 프리셋"에서 [프리셋 올리기]로 넣으면
+  "내 프리셋" 팩에 나오고 바로 고를 수 있습니다.
+- 쓰는 법 2: 명령줄에서 영상에 바로 굽습니다.
+    r4-subtitles burn 영상.mp4 자막.srt 결과.mp4 --preset 프리셋.json
+- 쓰는 법 3: 서버(워커·API)의 R4_PRESETS_DIR 디렉터리에 파일을 넣어 두면
+  모두가 고를 수 있는 프리셋이 됩니다.
+- 동작(step) 항목 설명은 docs/SUBTITLE_TOOL.md의 "모션 프리셋"에 있습니다.
+"""
 
 StepKind = Literal[
     "fade",

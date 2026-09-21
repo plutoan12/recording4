@@ -1,4 +1,5 @@
 import base64
+import io
 import uuid
 from decimal import Decimal
 
@@ -580,3 +581,66 @@ def test_stickers_are_listed_and_previewed_and_stored_with_the_clip(
     assert task.settings["stickers"][0]["kind"] == "sparkle"
     bad = client.post("/clips", headers=auth_headers, json={**data, "stickers": [{"kind": "nope"}]})
     assert bad.status_code == 422
+
+
+def test_presets_can_be_downloaded_as_files_and_uploaded_back(
+    client, auth_headers, tmp_path, monkeypatch
+):
+    import json
+    import zipfile
+
+    # 프리셋 하나는 JSON 파일로 받습니다(고쳐서 다시 올리거나 명령줄에서 씁니다).
+    one = client.get("/subtitle-presets/from-below/file", headers=auth_headers)
+    assert one.status_code == 200
+    assert one.headers["content-disposition"] == 'attachment; filename="from-below.json"'
+    body = json.loads(one.content)
+    assert body["label"] == "아래 등장" and body["steps"][0]["kind"] == "move"
+    assert client.get("/subtitle-presets/없는거/file", headers=auth_headers).status_code == 422
+    assert client.get("/subtitle-presets/no-such-one/file", headers=auth_headers).status_code == 404
+
+    # 팩은 통째로 zip입니다. 읽어보기 파일이 함께 들어갑니다.
+    pack = client.get("/subtitle-preset-packs/kinetic", headers=auth_headers)
+    assert pack.status_code == 200 and pack.headers["content-type"] == "application/zip"
+    with zipfile.ZipFile(io.BytesIO(pack.content)) as archive:
+        names = archive.namelist()
+        assert "읽어보기.txt" in names and "elastic-in.json" in names and len(names) == 35
+        assert "R4_PRESETS_DIR" in archive.read("읽어보기.txt").decode("utf-8")
+    assert client.get("/subtitle-preset-packs/nope", headers=auth_headers).status_code == 404
+
+    mine = {
+        "name": "my-slide",
+        "label": "내 슬라이드",
+        "steps": [{"kind": "move", "phase": "in", "direction": "left", "amount": 60}],
+    }
+    # 서버에 프리셋 디렉터리가 없으면 저장할 곳이 없습니다.
+    assert client.post("/subtitle-presets", headers=auth_headers, json=mine).status_code == 503
+    monkeypatch.setenv("R4_PRESETS_DIR", str(tmp_path))
+    saved = client.post("/subtitle-presets", headers=auth_headers, json=mine)
+    assert saved.status_code == 201 and saved.json() == {
+        "name": "my-slide",
+        "label": "내 슬라이드",
+        "pack": "user",
+    }
+    assert json.loads((tmp_path / "my-slide.json").read_text(encoding="utf-8"))["pack"] == "user"
+    listed = client.get("/subtitle-presets", headers=auth_headers).json()
+    entry = next(p for p in listed if p["name"] == "my-slide")
+    assert entry["pack_label"] == "내 프리셋" and entry["editable"] is True
+    assert all(not p["editable"] for p in listed if p["pack"] != "user")
+    # 내장과 같은 이름, 잘못된 값은 막습니다.
+    assert (
+        client.post(
+            "/subtitle-presets", headers=auth_headers, json={**mine, "name": "from-below"}
+        ).status_code
+        == 409
+    )
+    assert (
+        client.post(
+            "/subtitle-presets", headers=auth_headers, json={**mine, "steps": []}
+        ).status_code
+        == 422
+    )
+    # 내 프리셋만 지울 수 있습니다.
+    assert client.delete("/subtitle-presets/from-below", headers=auth_headers).status_code == 409
+    assert client.delete("/subtitle-presets/my-slide", headers=auth_headers).status_code == 204
+    assert not (tmp_path / "my-slide.json").exists()
+    assert client.delete("/subtitle-presets/my-slide", headers=auth_headers).status_code == 404

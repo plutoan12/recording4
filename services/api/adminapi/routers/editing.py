@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import base64
 import binascii
+import io
 import re
 import uuid
+import zipfile
 from datetime import UTC, datetime
 from typing import Literal
 
@@ -42,7 +44,16 @@ from pipeline.subtitle_files import (
 )
 from pipeline.subtitle_metrics import font_file_for
 from pipeline.subtitle_motion import ANIMATION_LABELS
-from pipeline.subtitle_presets import PACK_LABELS, presets_by_pack
+from pipeline.subtitle_presets import (
+    PACK_LABELS,
+    PRESET_NAME,
+    PRESET_README,
+    MotionPreset,
+    all_presets,
+    get_preset,
+    presets_by_pack,
+    user_presets_dir,
+)
 from pipeline.subtitle_stickers import STICKER_LABELS, Sticker, add_sticker_events
 from pipeline.subtitle_templates import (
     CATEGORY_LABELS,
@@ -511,10 +522,93 @@ def subtitle_presets(user: CurrentUser) -> list[dict]:
             "pack_label": PACK_LABELS[pack],
             "summary": preset.summary,
             "description": preset.description,
+            # 내 프리셋만 지울 수 있습니다(내장은 파일이 없습니다).
+            "editable": pack == "user",
         }
         for pack, presets in presets_by_pack().items()
         for preset in presets
     ]
+
+
+
+def _preset_or_404(name: str) -> MotionPreset:
+    if not re.fullmatch(PRESET_NAME, name):
+        raise HTTPException(422, "프리셋 이름 형식이 아닙니다.")
+    try:
+        return get_preset(name)
+    except ValueError:
+        raise HTTPException(404, f"모르는 프리셋입니다: {name}") from None
+
+
+def _attachment(filename: str) -> dict[str, str]:
+    return {"Content-Disposition": f'attachment; filename="{filename}"'}
+
+
+@router.get("/subtitle-presets/{name}/file")
+def subtitle_preset_file(name: str, user: CurrentUser) -> Response:
+    """프리셋 하나를 JSON 파일로 내려줍니다. 고쳐서 다시 올리거나 명령줄에서 씁니다."""
+    preset = _preset_or_404(name)
+    return Response(
+        content=preset.to_json(),
+        media_type="application/json",
+        headers=_attachment(f"{preset.name}.json"),
+    )
+
+
+@router.get("/subtitle-preset-packs/{pack}")
+def subtitle_preset_pack(pack: str, user: CurrentUser) -> Response:
+    """팩 하나를 통째로 zip으로 내려줍니다. 프리셋 JSON과 읽어보기 파일이 들어갑니다."""
+    grouped = presets_by_pack()
+    if pack not in grouped:
+        raise HTTPException(404, f"모르는 팩입니다: {pack}. 쓸 수 있는 것: {', '.join(grouped)}")
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("읽어보기.txt", PRESET_README)
+        for preset in grouped[pack]:
+            archive.writestr(f"{preset.name}.json", preset.to_json())
+    return Response(
+        content=buffer.getvalue(),
+        media_type="application/zip",
+        headers=_attachment(f"r4-presets-{pack}.zip"),
+    )
+
+
+@router.post("/subtitle-presets", status_code=201)
+def save_subtitle_preset(payload: MotionPreset, user: CurrentUser) -> dict:
+    """프리셋 파일을 올려 "내 프리셋"으로 저장합니다(서버의 R4_PRESETS_DIR).
+
+    내장 프리셋과 같은 이름은 받지 않습니다. 저장한 프리셋은 목록·편집기·렌더에서
+    바로 쓸 수 있습니다. 실제로 영상에 구우려면 워커도 같은 디렉터리를 봐야 합니다.
+    """
+    directory = user_presets_dir()
+    if directory is None:
+        raise HTTPException(503, "서버에 프리셋 디렉터리(R4_PRESETS_DIR)가 없습니다.")
+    builtin = {name for name, preset in all_presets().items() if preset.pack != "user"}
+    if payload.name in builtin:
+        raise HTTPException(409, f"내장 프리셋과 같은 이름입니다: {payload.name}")
+    target = directory / f"{payload.name}.json"
+    if not target.exists() and len(list(directory.glob("*.json"))) >= 200:
+        raise HTTPException(409, "프리셋 디렉터리가 가득 찼습니다(200개).")
+    stored = payload.model_copy(update={"pack": "user"})
+    try:
+        target.write_text(stored.to_json(), encoding="utf-8")
+    except OSError:
+        raise HTTPException(503, "프리셋을 저장하지 못했습니다.") from None
+    return {"name": stored.name, "label": stored.label, "pack": "user"}
+
+
+@router.delete("/subtitle-presets/{name}", status_code=204)
+def delete_subtitle_preset(name: str, user: CurrentUser) -> Response:
+    """내 프리셋을 지웁니다. 내장 프리셋은 지울 수 없습니다."""
+    preset = _preset_or_404(name)
+    directory = user_presets_dir()
+    if preset.pack != "user" or directory is None:
+        raise HTTPException(409, "내 프리셋만 지울 수 있습니다.")
+    target = directory / f"{name}.json"
+    if not target.is_file():
+        raise HTTPException(404, f"프리셋 파일이 없습니다: {name}")
+    target.unlink()
+    return Response(status_code=204)
 
 
 @router.get("/subtitle-animations")

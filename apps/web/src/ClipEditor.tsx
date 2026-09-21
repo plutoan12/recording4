@@ -17,7 +17,7 @@ type Template = { name: string; label: string; description: string; category: st
   animation: string; animation_ms: number | null; animation_label: string;
   gradient_color: string; gradient_direction: 'vertical' | 'horizontal' }
 type AnimationChoice = { name: string; label: string }
-type PresetChoice = { name: string; label: string; pack: string; pack_label: string; summary: string }
+type PresetChoice = { name: string; label: string; pack: string; pack_label: string; summary: string; editable: boolean }
 type StickerKind = { kind: string; label: string; images?: string[] }
 // 워커의 pipeline.subtitle_stickers.Sticker와 같은 항목입니다. 시각은 원본 영상 기준 초입니다.
 type Sticker = { kind: string; image?: string | null; x: number; y: number; size: number; start: number; end: number | null;
@@ -129,6 +129,7 @@ export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWo
   const [animation,setAnimation] = useState('')
   const [preset,setPreset] = useState('')
   const [presets,setPresets] = useState<PresetChoice[]>([])
+  const presetFile = useRef<HTMLInputElement>(null)
   const [animations,setAnimations] = useState<AnimationChoice[]>([])
   const [stickerKinds,setStickerKinds] = useState<StickerKind[]>([])
   const [stickers,setStickers] = useState<Sticker[]>([])
@@ -154,6 +155,12 @@ export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWo
     try { setTasks(await request<Task[]>('/media-tasks')) }
     catch (e) { setMessage(e instanceof Error ? e.message : '작업 조회 실패') }
   }, [])
+  // 프리셋 목록은 파일을 올리거나 지운 뒤에도 다시 읽습니다.
+  const loadPresets = useCallback(
+    () => request<PresetChoice[]>('/subtitle-presets').then(setPresets).catch(() => setPresets([])),
+    [],
+  )
+
   useEffect(() => {
     void refresh()
     const timer = setInterval(() => void refresh(), 5000)
@@ -163,7 +170,7 @@ export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWo
     // 내장 템플릿 목록은 서버가 정합니다. 못 받으면 기본 템플릿만 남겨 렌더는 계속할 수 있게 합니다.
     request<Template[]>('/subtitle-templates').then(setTemplates).catch(() => setTemplates([]))
     request<AnimationChoice[]>('/subtitle-animations').then(setAnimations).catch(() => setAnimations([]))
-    request<PresetChoice[]>('/subtitle-presets').then(setPresets).catch(() => setPresets([]))
+    void loadPresets()
     request<StickerKind[]>('/stickers').then(setStickerKinds).catch(() => setStickerKinds([]))
   }, [])
 
@@ -217,6 +224,32 @@ export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWo
   function updateCue(index: number, patch: Partial<Cue>) {
     setCaptions(current => current.map((cue, i) => i === index ? {...cue, ...patch, ...(patch.text !== undefined && patch.text !== cue.text ? {words: null} : {})} : cue))
   }
+  const chosenPreset = presets.find(p => p.name === preset)
+
+  async function savePresetFile(file: File) {
+    try {
+      const body = JSON.parse(await file.text())
+      const saved = await request<{name:string}>('/subtitle-presets', {method:'POST', body: JSON.stringify(body)})
+      await loadPresets()
+      setPreset(saved.name)
+      setMessage(`프리셋 ${saved.name}을 내 프리셋으로 넣었습니다.`)
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : '프리셋 파일을 읽지 못했습니다.')
+    }
+  }
+
+  async function removePreset() {
+    if (!chosenPreset?.editable) return
+    try {
+      await request(`/subtitle-presets/${chosenPreset.name}`, {method:'DELETE'})
+      setPreset('')
+      await loadPresets()
+      setMessage(`프리셋 ${chosenPreset.name}을 지웠습니다.`)
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : '프리셋을 지우지 못했습니다.')
+    }
+  }
+
   return <section className="clip-editor">
     <h2>롱폼 → 숏폼 편집</h2>
     <p>원본 구간을 고르고 세로 화면·제목·자막을 편집하세요. 저장할 때마다 독립된 결과물을 만듭니다.</p>
@@ -305,6 +338,13 @@ export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWo
           </optgroup>
         ))}
       </select></label>
+      <div className="preset-files">
+        <button type="button" disabled={!preset} onClick={() => void downloadFile(`/subtitle-presets/${preset}/file`, `${preset}.json`)}>이 프리셋 파일 받기</button>
+        <button type="button" disabled={!chosenPreset} onClick={() => void downloadFile(`/subtitle-preset-packs/${chosenPreset?.pack}`, `r4-presets-${chosenPreset?.pack}.zip`)}>{chosenPreset ? `${chosenPreset.pack_label} 전체 받기` : '팩 전체 받기'}</button>
+        <button type="button" onClick={() => presetFile.current?.click()}>프리셋 올리기</button>
+        {chosenPreset?.editable && <button type="button" onClick={() => void removePreset()}>내 프리셋 지우기</button>}
+        <input ref={presetFile} type="file" accept="application/json,.json" hidden onChange={e => { const file = e.target.files?.[0]; e.target.value = ''; if (file) void savePresetFile(file) }} />
+      </div>
       <label>자막 움직임<select value={animation} disabled={!burn||!!preset} onChange={e=>setAnimation(e.target.value)}>
         <option value="">템플릿 기본{(() => { const chosen = templates.find(t => t.name === template); return chosen ? ` (${chosen.animation_label})` : '' })()}</option>
         {animations.map(a => <option key={a.name} value={a.name}>{a.label}</option>)}

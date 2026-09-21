@@ -195,6 +195,31 @@ r4-subtitles style in.srt out.ass --template karaoke-yellow           # 움직�
 - `wipe`는 글자 사각형을 알아야 해서 자막에만 쓸 수 있습니다(화면 제목·시트에는 빠집니다). `\clip`은 사각형이라 원형 마스크는 못 만듭니다.
 - 계속되는 동작이 만드는 `\t` 수는 한계가 있어, 자막이 길면 주기를 늘려 맞춥니다.
 
+#### 영상에 프리셋 넣기
+
+고른 프리셋은 자막에 붙어 영상에 구워집니다. 편집기에서는 **모션 프리셋**을 고르고 구간을 만들면 되고, 명령줄에서는 자막 파일과 영상만 있으면 바로 굽습니다.
+
+```bash
+# 영상 + 자막 파일 + 프리셋 → 프리셋이 들어간 영상
+r4-subtitles burn 영상.mp4 자막.srt 결과.mp4 --preset blur-zoom --template pop-jalnan --fonts-dir .fonts
+
+# 프리셋만 눈으로 확인(2초 영상)
+r4-subtitles preview 확인.mp4 --preset blur-zoom --text "이렇게 들어갑니다" --fonts-dir .fonts
+```
+
+#### 프리셋 파일로 가지기
+
+프리셋은 JSON 한 장이라 받아서 보관하고, 고쳐서 다시 넣을 수 있습니다. 팩 전체를 zip으로 묶으면 다른 사람에게 그대로 건넬 수 있습니다(zip에는 쓰는 법을 적은 `읽어보기.txt`가 함께 들어갑니다).
+
+| 하고 싶은 것 | 편집기 | 명령줄 | API |
+|---|---|---|---|
+| 프리셋 하나 받기 | **이 프리셋 파일 받기** | `presets export 이름 out.json` | `GET /subtitle-presets/{이름}/file` |
+| 팩 전체 받기 | **팩 전체 받기** | `presets pack kinetic out.zip` | `GET /subtitle-preset-packs/{팩}` |
+| 받은 파일 넣기 | **프리셋 올리기** | `presets import mine.json` | `POST /subtitle-presets` |
+| 내 프리셋 지우기 | **내 프리셋 지우기** | 파일을 지웁니다 | `DELETE /subtitle-presets/{이름}` |
+
+올린 프리셋은 서버의 `R4_PRESETS_DIR`에 저장돼 **내 프리셋** 팩으로 목록에 나옵니다. 실제로 영상에 구우려면 워커도 같은 디렉터리를 봐야 합니다(같은 볼륨을 붙이세요). 내장 프리셋과 같은 이름은 받지 않고, 내장 프리셋은 지울 수 없습니다.
+
 #### 내가 만들기
 
 ```bash

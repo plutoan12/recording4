@@ -1,3 +1,12 @@
+## 2026-09-21: 프리셋을 영상에 넣고 파일로 가지기 (Claude)
+
+- 사용자 요청: "프리셋 127종 중에서 본인이 프리셋을 선택해서 영상에 프리셋을 넣거나 그 프리셋 파일을 갖을 수 있게 해야지". [PR #36](https://github.com/plutoan12/recording4/pull/36) 후속 커밋. 담당: `adminapi/routers/editing.py`, `pipeline/subtitle_presets.py`(읽어보기 글귀), `pipeline/subtitle_tool.py`, `apps/web`(ClipEditor.tsx, styles.css), 테스트·문서.
+- 영상에 넣기: 편집기에서 프리셋을 고르면 그대로 구워지고, 명령줄은 `r4-subtitles burn 영상.mp4 자막.srt 결과.mp4 --preset 이름`입니다(이미 되던 길을 문서에 표로 정리).
+- 파일로 가지기: `GET /subtitle-presets/{이름}/file`(JSON 한 장), `GET /subtitle-preset-packs/{팩}`(zip, `읽어보기.txt` 포함), `POST /subtitle-presets`(올려서 내 프리셋으로 저장), `DELETE /subtitle-presets/{이름}`(내 프리셋만). 명령줄은 `presets pack`·`presets import`를 더했습니다. 편집기에는 [이 프리셋 파일 받기]·[팩 전체 받기]·[프리셋 올리기]·[내 프리셋 지우기] 단추를 붙였습니다.
+- 저장 위치는 서버의 `R4_PRESETS_DIR`입니다. 내장 이름과 겹치면 409, 디렉터리가 없으면 503, 200개를 넘으면 409로 막습니다. 워커도 같은 디렉터리를 봐야 실제 렌더에 적용됩니다.
+- 검증: API 테스트로 파일 내려받기(헤더·내용), zip 35개 항목, 올리기·지우기·거절을 확인했고, 명령줄은 zip 묶기와 들여오기를 확인했습니다.
+- 하지 않은 것: 사용자가 보내 준 "영상 편집 기능" 요청은 이 정정으로 프리셋 적용·배포로 좁혔습니다. 컷 편집·보정·배경음악 같은 일반 영상 편집은 넣지 않았습니다.
+
 ## 2026-09-21: 키네틱 팩 34종 추가 (프리셋 127종) (Claude)
 
 - 사용자 요청: "다른 프리셋도 있으면 추가시켜줘". [PR #36](https://github.com/plutoan12/recording4/pull/36) 후속 커밋. 담당: `pipeline/subtitle_presets.py`, 테스트·문서.
