@@ -15,7 +15,7 @@ import inspect
 import re
 from dataclasses import dataclass
 
-from pipeline.editing import Cue
+from pipeline.editing import Cue, Word
 
 _SPACE = re.compile(r"\s+")
 
@@ -140,10 +140,20 @@ def cues_for_lines(lines: list[str], words: list[WordTiming]) -> list[Cue] | Non
         start, end = words[first].start, words[index - 1].end
         if end <= start:
             return None
-        cues.append(Cue(start=start, end=end, text=line))
+        cues.append(Cue(start=start, end=end, text=line, words=cue_words(words[first:index])))
     if index != len(words):
         return None
     return cues
+
+
+def cue_words(words: list[WordTiming]) -> list[Word] | None:
+    """정렬기 단어 시각을 자막의 `words`로 바꿉니다. 빈 단어는 빼고, 없으면 None입니다."""
+    kept = [
+        Word(start=w.start, end=max(w.start, w.end), text=w.text.strip())
+        for w in words
+        if w.text.strip() and w.start >= 0
+    ]
+    return kept or None
 
 
 def supported_options(factory, wanted: dict) -> dict:  # noqa: ANN001

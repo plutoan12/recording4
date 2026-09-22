@@ -1,4 +1,5 @@
 import base64
+import io
 import uuid
 from decimal import Decimal
 
@@ -49,13 +50,18 @@ def test_transcript_snapshots_and_suggestions(client, auth_headers, asset):
     cues = [{"start": 2, "end": 10, "text": "hello"}]
     assert client.put(path, headers=auth_headers, json={"cues": cues}).json()["version"] == 1
     assert client.get(path, headers=auth_headers).json() == cues
+    # 단어 시각은 저장되고 그대로 돌아옵니다. 없으면 항목 자체가 빠집니다.
+    timed = [{**cues[0], "words": [{"start": 2.0, "end": 2.5, "text": "hello"}]}]
+    assert client.put(path, headers=auth_headers, json={"cues": timed}).json()["version"] == 2
+    assert client.get(path, headers=auth_headers).json() == timed
+    assert client.put(path, headers=auth_headers, json={"cues": cues}).json()["version"] == 3
     assert (
         client.get(f"/source-assets/{asset.id}/suggestions", headers=auth_headers).json()[0][
             "start"
         ]
         == 2
     )
-    assert client.put(path, headers=auth_headers, json={"cues": cues}).json()["version"] == 2
+    assert client.put(path, headers=auth_headers, json={"cues": cues}).json()["version"] == 4
     cues[0]["end"] = 200
     assert client.put(path, headers=auth_headers, json={"cues": cues}).status_code == 422
 
@@ -441,3 +447,274 @@ def test_sync_saves_a_new_version_and_keeps_the_old_one(client, auth_headers, as
     assert client.get(f"/source-assets/{asset.id}/transcript", headers=auth_headers).json() == [
         {"start": 5.0, "end": 7.0, "text": "어긋난 자막"}
     ]
+
+
+def test_subtitle_templates_are_listed_and_a_clip_remembers_its_template(
+    client, auth_headers, asset, session
+):
+    from adminapi.models import ClipEdit, MediaTask
+
+    assert client.get("/subtitle-templates").status_code == 401
+    listed = client.get("/subtitle-templates", headers=auth_headers)
+    assert listed.status_code == 200
+    names = [t["name"] for t in listed.json()]
+    assert names[0] == "default" and "yellow" in names
+    assert all(
+        {"label", "font_size", "primary_color", "category_label", "sample"} <= set(t)
+        for t in listed.json()
+    )
+    assert listed.json()[0]["category_label"] == "기본"
+
+    data = {"source_asset_id": str(asset.id), "start": 10, "end": 40, "subtitle_template": "yellow"}
+    created = client.post("/clips", headers=auth_headers, json=data)
+    assert created.status_code == 202, created.text
+    clip = session.get(ClipEdit, uuid.UUID(created.json()["clip_edit_id"]))
+    assert clip.subtitle_style == {
+        "template": "yellow",
+        "font_size": 64,
+        "animation": "none",
+        "preset": "",
+        "pacing": "broadcast",
+    }
+    task = session.get(MediaTask, uuid.UUID(created.json()["id"]))
+    assert task.settings["subtitle_template"] == "yellow"
+
+    # 템플릿을 안 주면 기본이고, 모르는 이름은 저장 전에 거절합니다.
+    plain = client.post("/clips", headers=auth_headers, json={**data, "subtitle_template": None})
+    assert plain.status_code == 422
+    del data["subtitle_template"]
+    assert client.post("/clips", headers=auth_headers, json=data).status_code == 202
+    unknown = client.post(
+        "/clips", headers=auth_headers, json={**data, "subtitle_template": "nope"}
+    )
+    assert unknown.status_code == 422 and "모르는 자막 템플릿" in unknown.json()["detail"]
+
+    # 움직임은 템플릿 값을 덮어쓰고 편집본에 기록됩니다. 모르는 이름은 거절합니다.
+    animations = client.get("/subtitle-animations", headers=auth_headers).json()
+    assert {"name": "pop", "label": "팝(튀어나옴)"} in animations
+    assert listed.json()[0]["animation_label"] == "없음"
+    moving = client.post("/clips", headers=auth_headers, json={**data, "subtitle_animation": "pop"})
+    assert moving.status_code == 202, moving.text
+    clip = session.get(ClipEdit, uuid.UUID(moving.json()["clip_edit_id"]))
+    assert clip.subtitle_style["animation"] == "pop"
+    assert (
+        session.get(MediaTask, uuid.UUID(moving.json()["id"])).settings["subtitle_animation"]
+        == "pop"
+    )
+    bad = client.post("/clips", headers=auth_headers, json={**data, "subtitle_animation": "spin"})
+    assert bad.status_code == 422 and "모르는 움직임" in bad.json()["detail"]
+
+    # 모션 프리셋은 팩별로 내려주고, 고르면 움직임보다 먼저 편집본에 기록됩니다.
+    presets = client.get("/subtitle-presets", headers=auth_headers).json()
+    names = {p["name"] for p in presets}
+    assert {"from-below", "blur-zoom", "karaoke"} <= names
+    assert {p["pack_label"] for p in presets} == {"기본 팩", "숏폼 팩", "키네틱 팩"}
+    assert next(p for p in presets if p["name"] == "from-below")["label"] == "아래 등장"
+    with_preset = client.post(
+        "/clips", headers=auth_headers, json={**data, "subtitle_preset": "blur-zoom"}
+    )
+    assert with_preset.status_code == 202, with_preset.text
+    saved = session.get(ClipEdit, uuid.UUID(with_preset.json()["clip_edit_id"]))
+    assert saved.subtitle_style["preset"] == "blur-zoom"
+    assert (
+        session.get(MediaTask, uuid.UUID(with_preset.json()["id"])).settings["subtitle_preset"]
+        == "blur-zoom"
+    )
+    missing = client.post(
+        "/clips", headers=auth_headers, json={**data, "subtitle_preset": "nope-nope"}
+    )
+    assert missing.status_code == 422 and "모르는 프리셋" in missing.json()["detail"]
+
+    # 자막 끊기: 숏폼을 고르면 편집본에 남고, 모르는 값은 규격에서 막습니다.
+    pacings = client.get("/subtitle-pacings", headers=auth_headers).json()
+    assert {p["name"] for p in pacings} == {"broadcast", "shortform"}
+    short = client.post(
+        "/clips", headers=auth_headers, json={**data, "subtitle_pacing": "shortform"}
+    )
+    assert short.status_code == 202, short.text
+    saved_pacing = session.get(ClipEdit, uuid.UUID(short.json()["clip_edit_id"]))
+    assert saved_pacing.subtitle_style["pacing"] == "shortform"
+    assert (
+        session.get(MediaTask, uuid.UUID(short.json()["id"])).settings["subtitle_pacing"]
+        == "shortform"
+    )
+    assert (
+        client.post("/clips", headers=auth_headers, json={**data, "subtitle_pacing": "tiktok"})
+    ).status_code == 422
+
+
+def test_subtitle_preview_returns_the_worker_ass_and_its_fonts(client, auth_headers):
+    assert client.post("/subtitle-preview", json={}).status_code == 401
+    made = client.post(
+        "/subtitle-preview",
+        headers=auth_headers,
+        json={"template": "pop-jalnan", "text": "안녕 🍓", "seconds": 2},
+    )
+    assert made.status_code == 200, made.text
+    body = made.json()
+    assert body["width"] == 540 and body["height"] == 960 and body["seconds"] == 2
+    assert "PlayResX: 540" in body["ass"] and "\\fscx40" in body["ass"]  # 팝 움직임
+    assert "Jalnan" in body["fonts"] and any("Emoji" in f for f in body["fonts"])
+    # 움직임 덮어쓰기와 빈 예문(템플릿 예문 사용), 모르는 이름 거절.
+    plain = client.post(
+        "/subtitle-preview", headers=auth_headers, json={"template": "yellow", "animation": "fade"}
+    ).json()
+    assert "\\fad(" in plain["ass"] and "이거 진짜 맛있다" in plain["ass"]
+    # 프리셋은 움직임보다 먼저 쓰입니다(아래에서 올라오는 `\\move`).
+    moved = client.post(
+        "/subtitle-preview",
+        headers=auth_headers,
+        json={"template": "yellow", "preset": "from-below", "animation": "fade"},
+    ).json()
+    assert "\\move(" in moved["ass"]
+    assert (
+        client.post(
+            "/subtitle-preview", headers=auth_headers, json={"template": "yellow", "preset": "nope"}
+        ).status_code
+        == 422
+    )
+    # 숏폼 끊기는 미리보기에서도 한 줄로 짧게 나옵니다.
+    long_text = "우리가 어제 말했던 그 영상 편집 진짜 잘 나왔어요"
+    wide = client.post(
+        "/subtitle-preview",
+        headers=auth_headers,
+        json={"template": "yellow", "text": long_text, "seconds": 5},
+    ).json()["ass"]
+    narrow = client.post(
+        "/subtitle-preview",
+        headers=auth_headers,
+        json={"template": "yellow", "text": long_text, "seconds": 5, "pacing": "shortform"},
+    ).json()["ass"]
+    assert narrow.count("Dialogue:") > wide.count("Dialogue:")
+    assert (
+        client.post(
+            "/subtitle-preview", headers=auth_headers, json={"template": "nope"}
+        ).status_code
+        == 422
+    )
+    assert (
+        client.post(
+            "/subtitle-preview", headers=auth_headers, json={"animation": "spin"}
+        ).status_code
+        == 422
+    )
+    assert (
+        client.post("/subtitle-preview", headers=auth_headers, json={"width": 541}).status_code
+        == 422
+    )
+
+
+def test_subtitle_font_endpoint_serves_installed_fonts_by_family(
+    client, auth_headers, tmp_path, monkeypatch
+):
+    from adminapi.routers import editing as editing_router
+
+    font = tmp_path / "Jalnan.otf"
+    font.write_bytes(b"OTTO fake font bytes")
+    monkeypatch.setattr(
+        editing_router, "font_file_for", lambda family: font if family == "Jalnan" else None
+    )
+    assert client.get("/subtitle-fonts/Jalnan").status_code == 401
+    served = client.get("/subtitle-fonts/Jalnan", headers=auth_headers)
+    assert served.status_code == 200 and served.content == font.read_bytes()
+    assert served.headers["content-type"].startswith("font/otf")
+    assert client.get("/subtitle-fonts/Nope", headers=auth_headers).status_code == 404
+    # 경로가 아니라 이름만 받습니다.
+    assert client.get("/subtitle-fonts/..%2Fetc%2Fpasswd", headers=auth_headers).status_code in (
+        404,
+        422,
+    )
+    assert client.get("/subtitle-fonts/a%7Bb", headers=auth_headers).status_code == 422
+
+
+def test_stickers_are_listed_and_previewed_and_stored_with_the_clip(
+    client, auth_headers, asset, session, tmp_path, monkeypatch
+):
+    from adminapi.models import MediaTask
+
+    (tmp_path / "wow.png").write_bytes(b"\x89PNG")
+    monkeypatch.setenv("R4_STICKERS_DIR", str(tmp_path))
+    listed = client.get("/stickers", headers=auth_headers).json()
+    assert {"kind": "arrow-right", "label": "화살표 →"} in listed
+    assert next(k for k in listed if k["kind"] == "image")["images"] == ["wow.png"]
+    preview = client.post(
+        "/subtitle-preview",
+        headers=auth_headers,
+        json={"template": "yellow", "stickers": [{"kind": "heart", "x": 0.5, "y": 0.2}]},
+    ).json()
+    assert "Sticker" in preview["ass"] and "\\p1" in preview["ass"]
+    data = {
+        "source_asset_id": str(asset.id),
+        "start": 10,
+        "end": 40,
+        "stickers": [{"kind": "sparkle", "start": 12, "end": 20, "animation": "pulse"}],
+    }
+    created = client.post("/clips", headers=auth_headers, json=data)
+    assert created.status_code == 202, created.text
+    task = session.get(MediaTask, uuid.UUID(created.json()["id"]))
+    assert task.settings["stickers"][0]["kind"] == "sparkle"
+    bad = client.post("/clips", headers=auth_headers, json={**data, "stickers": [{"kind": "nope"}]})
+    assert bad.status_code == 422
+
+
+def test_presets_can_be_downloaded_as_files_and_uploaded_back(
+    client, auth_headers, tmp_path, monkeypatch
+):
+    import json
+    import zipfile
+
+    # 프리셋 하나는 JSON 파일로 받습니다(고쳐서 다시 올리거나 명령줄에서 씁니다).
+    one = client.get("/subtitle-presets/from-below/file", headers=auth_headers)
+    assert one.status_code == 200
+    assert one.headers["content-disposition"] == 'attachment; filename="from-below.json"'
+    body = json.loads(one.content)
+    assert body["label"] == "아래 등장" and body["steps"][0]["kind"] == "move"
+    assert client.get("/subtitle-presets/없는거/file", headers=auth_headers).status_code == 422
+    assert client.get("/subtitle-presets/no-such-one/file", headers=auth_headers).status_code == 404
+
+    # 팩은 통째로 zip입니다. 읽어보기 파일이 함께 들어갑니다.
+    pack = client.get("/subtitle-preset-packs/kinetic", headers=auth_headers)
+    assert pack.status_code == 200 and pack.headers["content-type"] == "application/zip"
+    with zipfile.ZipFile(io.BytesIO(pack.content)) as archive:
+        names = archive.namelist()
+        assert "읽어보기.txt" in names and "elastic-in.json" in names and len(names) == 35
+        assert "R4_PRESETS_DIR" in archive.read("읽어보기.txt").decode("utf-8")
+    assert client.get("/subtitle-preset-packs/nope", headers=auth_headers).status_code == 404
+
+    mine = {
+        "name": "my-slide",
+        "label": "내 슬라이드",
+        "steps": [{"kind": "move", "phase": "in", "direction": "left", "amount": 60}],
+    }
+    # 서버에 프리셋 디렉터리가 없으면 저장할 곳이 없습니다.
+    assert client.post("/subtitle-presets", headers=auth_headers, json=mine).status_code == 503
+    monkeypatch.setenv("R4_PRESETS_DIR", str(tmp_path))
+    saved = client.post("/subtitle-presets", headers=auth_headers, json=mine)
+    assert saved.status_code == 201 and saved.json() == {
+        "name": "my-slide",
+        "label": "내 슬라이드",
+        "pack": "user",
+    }
+    assert json.loads((tmp_path / "my-slide.json").read_text(encoding="utf-8"))["pack"] == "user"
+    listed = client.get("/subtitle-presets", headers=auth_headers).json()
+    entry = next(p for p in listed if p["name"] == "my-slide")
+    assert entry["pack_label"] == "내 프리셋" and entry["editable"] is True
+    assert all(not p["editable"] for p in listed if p["pack"] != "user")
+    # 내장과 같은 이름, 잘못된 값은 막습니다.
+    assert (
+        client.post(
+            "/subtitle-presets", headers=auth_headers, json={**mine, "name": "from-below"}
+        ).status_code
+        == 409
+    )
+    assert (
+        client.post(
+            "/subtitle-presets", headers=auth_headers, json={**mine, "steps": []}
+        ).status_code
+        == 422
+    )
+    # 내 프리셋만 지울 수 있습니다.
+    assert client.delete("/subtitle-presets/from-below", headers=auth_headers).status_code == 409
+    assert client.delete("/subtitle-presets/my-slide", headers=auth_headers).status_code == 204
+    assert not (tmp_path / "my-slide.json").exists()
+    assert client.delete("/subtitle-presets/my-slide", headers=auth_headers).status_code == 404

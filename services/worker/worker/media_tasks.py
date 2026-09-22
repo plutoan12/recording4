@@ -16,6 +16,7 @@ from adminapi.models import Artifact, MediaTask, SourceAsset, TranscriptSegment,
 from adminapi.storage import get_storage
 from pipeline.cuts import keep_spans, kept_seconds, within
 from pipeline.editing import Cue, EditSpec
+from pipeline.scene_highlights import suggest
 from pipeline.speakers import SpeakerTurn, assign_speakers, speaker_totals
 from worker.analysis import (
     MissingDependency,
@@ -24,6 +25,7 @@ from worker.analysis import (
     detect_scenes,
     diarize,
     silence_spans,
+    speech_spans,
     sync_subtitles,
     transcribe,
     vad_spans,
@@ -76,7 +78,10 @@ def latest_transcript(session, task_uuid) -> list[Cue]:  # noqa: ANN001
         )
         .order_by(TranscriptSegment.start_seconds)
     )
-    return [Cue(start=float(r.start_seconds), end=float(r.end_seconds), text=r.text) for r in rows]
+    return [
+        Cue(start=float(r.start_seconds), end=float(r.end_seconds), text=r.text, words=r.words)
+        for r in rows
+    ]
 
 
 @celery_app.task(name="worker.media_tasks.run_media", soft_time_limit=3500, time_limit=3600)
@@ -95,6 +100,7 @@ def run_media(task_id: str) -> dict:
         task = session.get(MediaTask, task_uuid)
         asset = session.get(SourceAsset, task.source_asset_id)
         source_key, spec, kind, attempt = asset.storage_key, task.settings, task.kind, task.attempt
+        duration = float(asset.duration_seconds or 0)
 
     try:
         storage = get_storage()
@@ -167,6 +173,18 @@ def run_media(task_id: str) -> dict:
                 # 제안만 만듭니다. focus_x를 여기서 바꾸지 않습니다. 검출기가
                 # 틀리면 사람이 맞춘 값을 망칩니다.
                 result = {"focus": asdict(suggest_focus_point(source))}
+            elif kind == "highlights":
+                # 장면 경계와 발화 구간을 합쳐 숏폼으로 쓸 만한 구간을 추천합니다.
+                # LLM 추천(`pipeline.highlights`)과 달리 유료 호출이 없습니다.
+                if duration <= 0:
+                    raise ValueError("원본 길이를 모릅니다. 파일 검사가 끝난 뒤에 실행하세요.")
+                found = suggest(
+                    detect_scenes(source),
+                    speech_spans(source),
+                    duration=duration,
+                    target=float(spec.get("target") or 45.0),
+                )
+                result = {"highlights": [item.model_dump() for item in found]}
             elif kind == "diarize":
                 # 누가 말했는지만 찾습니다. 대본 글자는 건드리지 않습니다.
                 turns = diarize(
@@ -277,6 +295,7 @@ def run_media(task_id: str) -> dict:
                                     end_seconds=row.end_seconds,
                                     text=row.text,
                                     speaker=label,
+                                    words=row.words,
                                 )
                             )
                         result["transcript_version"] = version + 1
@@ -304,6 +323,7 @@ def run_media(task_id: str) -> dict:
                                 start_seconds=cue.start,
                                 end_seconds=cue.end,
                                 text=cue.text,
+                                words=[w.model_dump() for w in cue.words] if cue.words else None,
                             )
                         )
                     result = {**result, "transcript_version": version, "count": len(cues)}

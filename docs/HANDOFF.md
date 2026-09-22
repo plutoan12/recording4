@@ -1,3 +1,225 @@
+## 2026-09-22: 마이그레이션 머리가 PR 둘에 걸쳐 갈라질 예정 (Claude)
+
+**아직 안 터졌지만 예정된 것입니다.** PR #36(이 브랜치)과 PR #39(`claude/claude-md-design-review-v8qdz4`)가 둘 다 `0010_silence_preview` 뒤에 `0011`을 답니다.
+
+| PR | 리비전 | 부모 |
+|---|---|---|
+| #36 | `0011_transcript_words` | `0010_silence_preview` |
+| #39 | `0011_transcript_overlap` | `0010_silence_preview` |
+
+각 PR 안에서는 머리가 하나라 **양쪽 CI 모두 통과합니다.** 둘 다 머지되면 main 에 머리가 둘이 되어 `alembic upgrade head` 가 "Multiple head revisions are present" 로 막힙니다. 나중에 머지하는 쪽이 밟습니다.
+
+**정한 것: #36 이 비킵니다.** #39 가 먼저 들어가면 이 브랜치가 main 을 당겨 온 뒤 `0011_transcript_words` 를 `0012_transcript_words` 로 옮기고 부모를 `0011_transcript_overlap` 으로 바꿉니다.
+
+**지금 미리 바꿀 수는 없습니다.** 부모 리비전 파일이 같은 `migrations/versions/` 안에 있어야 합니다. 없는 이름을 부모로 적으면 `KeyError: '0011_transcript_overlap'` 로 alembic 이 바로 깨지고 CI(ci.yml 의 `alembic upgrade head`)도 같이 깨집니다. 실제로 해 보고 확인했습니다.
+
+반대로 #36 이 먼저 머지되면 #39 가 같은 방식으로 비키면 됩니다. 어느 쪽이든 **나중에 머지하는 쪽이 부모를 앞엣것으로 바꾸는 것**이 규칙입니다.
+
+## 2026-09-21: main(PR #17)과 합치면서 겹친 기능을 정리함 (Claude)
+
+PR #36을 밀고 있는 동안 main에 PR #17이 들어왔고, **같은 기능을 양쪽이 따로 만들어 둔 것**이 드러났습니다. 22개 파일이 충돌했습니다. 규칙을 하나로 두고 풀었습니다 — **트렁크(main)에 이미 들어간 쪽을 쓰고, 내 쪽에만 있는 것을 그 위에 올린다.** 두 벌을 나란히 두면 어느 시간축인지 아무도 모르게 됩니다.
+
+버린 것(내 쪽):
+
+- `pipeline/glossary.py`(HTML `translate="no"` 표시) → main의 자리표시자 `⟦n⟧` 방식. 번역기가 표시를 지키는지에 기대지 않고, 표시 글자가 청구되지도 않습니다. 내 `/glossaries` API·`GlossaryPanel.tsx`도 main의 `/workflow/glossary`와 그 화면으로 대체했습니다.
+- `pipeline/translation_context.py`(문맥 배치)·`translation_review.py`(어색한 것만 골라 LLM 재번역) → main의 `translate_texts`가 기억(캐시)·용어집·Claude 보정·QA를 한 줄로 합니다. 문맥도 `build_job(before=, after=)`으로 LLM에 넘깁니다. 두 파이프라인을 겹칠 수는 없습니다.
+- `pipeline/trimming.py`(무음 컷 계산·`select` 기반 렌더·`EditSpec.silence`/`keep`) → main의 `pipeline/cuts.py`(auto-editor 알고리즘, 출처 표기 있음) + `EditSpec.segments`. main의 `silence` 작업이 내놓는 모양이 그대로 `segments`라 흐름이 하나로 이어집니다.
+
+남긴 것(내 쪽에만 있음, main의 `segments` 위로 옮김):
+
+- **이음매 전환**(`EditSpec.transition`): `concat` 대신 `xfade`/`acrossfade`로 겹쳐 잇습니다. 두 번 렌더하던 것을 `complex_filter` 한 그래프 안으로 넣었습니다.
+- **자동 리프레이밍**(`EditSpec.reframe`): 얼굴 시각을 이어 붙인 시간축으로 옮겨(`moved_face_time`) crop의 x를 시간의 식으로 만듭니다.
+- **잡음 제거**(`EditSpec.denoise`), 자막 템플릿·프리셋·스티커(`write_subtitles`), 장면·발화 기반 무료 구간 추천(`pipeline/scene_highlights.py` — main의 LLM `highlights`와 이름이 겹쳐 옮겼습니다).
+
+합치면서 고친 것:
+
+- `concat_cues`가 **단어 시각을 버리고 있었습니다.** `clip_cues`는 살려 두는데 이어 붙이는 쪽에서 떨어뜨려, 구간을 고르면 노래방·단어별 등장이 말과 어긋났습니다.
+- 얼굴 캐스케이드를 두 곳에서 따로 열던 것을 `worker.faces._cascade` 하나로 모았습니다(그쪽이 objdetect 없는 5.x 휠과 빈 분류기까지 걸러 냅니다).
+- `EditSpec`에 `segments`와 무음 컷을 함께 주지 못하게 했습니다 → 무음 컷 쪽을 아예 없애면서 이 규칙도 필요 없어졌습니다.
+
+검증: 전체 765 passed·4 skipped·**0 failed**. 실제 렌더 8개 통과 — 전환은 3초 구간 둘을 0.3초씩 겹쳐 5.7초(딱 붙이면 6.0초), 움직이는 crop 식과 `afftdn`이 FFmpeg를 통과합니다. 번역 쪽은 main 것을 그대로 쓰므로 main의 검증이 그대로 유효합니다.
+
+**의존성을 건드렸으면 빈 venv에서 재세요.** 이 병합에서 `pyproject.toml`의 `dev` 묶음에 numpy를 `2.2.6`·`2.4.6` 둘로 남겼고, CI의 `파이썬 검사`가 설치 단계에서 `ResolutionImpossible`로 죽었습니다. 이 환경에는 numpy가 이미 깔려 있어 pip이 다시 풀 일이 없었고 테스트는 멀쩡히 통과했습니다. 앞으로는 이렇게 확인합니다:
+
+```
+python -m venv /tmp/civenv && /tmp/civenv/bin/pip install -e ".[dev,providers]"
+/tmp/civenv/bin/python -m pytest -q && /tmp/civenv/bin/ruff check . && /tmp/civenv/bin/ruff format --check .
+```
+
+**앞 기록의 정정**: 그동안 여러 항목에 "`test_caption_track_is_uploaded_once_for_track_only_video`는 이 환경에서만 실패하고 CI에서는 통과한다"고 적었습니다. 위 깨끗한 venv에서는 **통과합니다.** 기준 커밋에서도 실패한 것은 맞지만 원인은 코드나 기준 커밋이 아니라 **이 컨테이너 주 환경에 딸려 들어온 무언가**였습니다. 앞으로 "이 환경에서만"이라고 적기 전에 깨끗한 venv에서 한 번 더 봅니다.
+
+## 2026-09-21: 환경을 핑계로 미룬 검증을 직접 하고, 얼굴 검출 결함 둘을 고침 (Claude)
+
+- 사용자 질문("너는 원격이 안 돼? 코덱스는 다 해주는데"). 확인해 보니 **미룰 이유가 없었습니다.** 이 컨테이너에서 `apt-get install ffmpeg`가 됩니다. 앞선 항목들이 "FFmpeg가 없어 CI가 봅니다"라고 적은 것은 **시도하지 않은 결과**였습니다. 그 판단 때문에 빨간 커밋을 세 개 밀었고 CI가 대신 버그를 잡았습니다.
+- FFmpeg·ffprobe를 설치하고 실제 렌더 테스트 5개를 직접 돌려 전부 통과를 확인했습니다(무음 컷 9초→2.2초, 리프레이밍 crop 식, 전환 6.0→5.4초 포함).
+- MediaPipe도 설치해 보고 **결함 둘을 찾았습니다.**
+  1. **`mediapipe.solutions`가 1.0.1에 없습니다.** 제가 부른 API입니다. `try/except`가 조용히 삼켜서 114MB 의존성이 **한 번도 쓰이지 않았습니다.** 지금의 Tasks API(`mediapipe.tasks.python.vision.FaceDetector`)로 고쳤습니다. 모델 `.tflite`는 들어 있지 않아 따로 받아야 하므로 `scripts/fetch_face_model.py`(고정 URL·SHA-256, 230KB)를 더했고 `R4_FACE_MODEL`로 알려 줍니다. 워커 이미지에 `libegl1`·`libgles2`를 넣었습니다(없으면 공유 라이브러리를 못 엽니다).
+  2. **OpenCV 대체 경로도 깨져 있었습니다.** `scenedetect`가 끌고 오는 opencv-headless 에는 haarcascade XML 이 없고, 그때 `CascadeClassifier`는 예외 없이 **빈 분류기**가 되어 얼굴을 영영 0개로 보고합니다. 이제 `cascade.empty()`를 보고 걸러 내며, 쓸 수 있는 검출기가 없으면 `face_track()`이 `"none"`을 돌려주고 리프레이밍은 `focus_x` 고정으로 돌아갑니다.
+- 검증: 새 테스트 3개(검출기 없음, 모델 파일 유무, opencv 없는 워커). 전체 660 passed, 6 skipped(FFmpeg가 생겨 건너뛰던 렌더 테스트가 실제로 돕니다). 실패 1건(`test_caption_track_is_uploaded_once_for_track_only_video`)은 여전히 변경 전에도 이 환경에서만 실패하며 CI에서는 통과합니다(YouTube 자막 트랙 쪽이고 이번 작업과 무관).
+- **그 고침이 CI를 깨뜨렸습니다.** `face_track()`이 `cv2`가 없으면 `MissingDependency`를 던지게 두었는데, CI의 `파이썬 검사`는 `.[dev,providers]`만 깔아서 opencv가 없습니다. "검출기가 없으면 `"none"`"이라고 적어 놓고 그 앞에서 예외를 던진 셈입니다. 이제 **검출기부터 보고**, 프레임을 읽을 `cv2`가 없으면 그대로 `([], "none")`입니다. 리프레이밍은 곁다리라 `[analysis]` 없는 워커에서도 렌더는 끝까지 가야 합니다. 이 조건을 테스트(`cv2`·`mediapipe` 임포트를 막고 확인)로 고정했습니다.
+- **남은 진짜 제약**: Google 자격증명과 LLM 키는 이 세션에 없고 있어서도 안 됩니다. 그 둘은 여전히 사람이 있는 컴퓨터에서 재야 합니다. 얼굴 검출 **정확도**도 진짜 얼굴이 있는 영상이 필요합니다(합성 화면으로는 호출이 되는지까지만 확인).
+
+## 2026-09-21: 무음 컷이 앞뒤 침묵을 안 자르던 버그 (Claude)
+
+- CI가 `12ec3ee`부터 세 번 연속 빨간색이었습니다. 원인은 하나였고 **제 코드 버그**입니다. `trims()`가 "토막이 2개 이상"일 때만 자른다고 판단해서, 말이 가운데 한 군데만 있으면 토막이 하나라 **앞뒤 침묵을 그대로 두었습니다**(9초 영상이 9초 그대로).
+- 고침: `trims(kept, length)`가 **남는 길이가 원래보다 짧은지**로 봅니다. 토막 수로 세면 이 경우를 놓칩니다. `trim_filters`·`audio_filter_args`·`clip_path`·`render_clip`에 구간 길이를 넘깁니다. `overlap_seconds`는 이을 자리가 필요하므로 `len(kept) >= 2`를 그대로 씁니다.
+- 회귀 테스트를 더했습니다(`test_cutting_only_the_ends_still_counts_as_cutting`). 제가 FFmpeg를 설치해 보지 않고 CI에 미룬 탓에 **CI가 대신 잡았습니다.** 그 뒤 세션에서 FFmpeg를 설치해 직접 확인했습니다(아래 09-21 항목).
+- 검증: 전체 649 passed, 14 skipped. 실패 1건은 변경 전에도 이 환경에서만 실패합니다. ruff 0.8.4 통과.
+
+## 2026-09-21: 이음매 전환 (xfade) (Claude)
+
+- 사용자가 고른 넷 중 **마지막**입니다. [PR #36](https://github.com/plutoan12/recording4/pull/36) 후속 커밋. 담당: `pipeline/editing.py`(`TransitionSettings`), `pipeline/trimming.py`(겹침 반영), `worker/rendering.py`, `apps/web`(ClipEditor.tsx, WorkflowPanel.tsx), 테스트·문서.
+- `EditSpec.transition`(기본 없음=딱 붙이기): 종류 12종 + 겹침 초. 켜면 **렌더가 두 번 돕니다** — 1차 `trim`+`xfade`(소리는 `acrossfade`)로 임시 파일, 2차에서 기존 체인을 씌웁니다. 한 그래프에 합치면 꼬리표가 얽히고 검증된 경로가 흔들립니다.
+- 시간축: 겹치면 (이음매 수 × 겹침)만큼 짧아집니다. `trimming.moved`·`kept_seconds`·`moved_cues`·`moved_span`·`clip_path`가 모두 같은 `overlap`을 씁니다.
+- 겹침은 가장 짧은 토막의 절반까지(`overlap_seconds`). 0.05초 미만이면 전환을 포기하고 딱 붙입니다(렌더가 실패하지 않게).
+- 소리 없는 원본은 `ffprobe`로 먼저 확인하고 음성 그래프를 붙이지 않습니다.
+- 검증: 새 테스트 8개(그래프의 이음매 offset 누적, 겹침 상한, 소리 없는 원본, 시간축). 전체 648 passed, 14 skipped. 실패 1건은 변경 전에도 이 환경에서만 실패합니다. ruff 0.8.4·tsc·vite build 통과.
+- **그때 재지 못한 것**(이후 세션에서 FFmpeg를 설치해 직접 확인했습니다): CI의 `test_real_render_joins_the_cuts_with_a_transition`이 12초 원본에서 세 토막을 남겨 딱 붙였을 때 6.0초, 전환 0.3초로 이었을 때 5.4초가 되는지 ffprobe로 잽니다. **CI가 빨간색이면 그 테스트를 먼저 보세요.**
+- 이로써 사용자가 고른 넷(자동 리프레이밍·잡음 제거·전환·컷 편집 화면)이 모두 끝났습니다. 남은 후보: 세로(y) 추적, 말하는 사람 고르기, DeepFilterNet, 배경음악과 sidechaincompress, librosa 비트 맞춤.
+
+## 2026-09-21: 무음 컷 목록을 사람이 고치기 (Claude)
+
+- 사용자가 고른 넷 중 **무음 컷 편집 화면**입니다. [PR #36](https://github.com/plutoan12/recording4/pull/36) 후속 커밋. 담당: `pipeline/editing.py`(`EditSpec.keep`), `worker/media_tasks.py`·`rendering.py`, `adminapi/models.py`·`routers/editing.py`, `migrations/versions/0009_silence_media_task.py`, `apps/web`(ClipEditor.tsx, WorkflowPanel.tsx, styles.css), 테스트·문서.
+- 무료 분석 작업 `silence`(마이그레이션 0009): 구간과 세기를 받아 남길 토막·전후 길이를 돌려줍니다. 렌더는 하지 않습니다. 실제 자르기와 **같은 함수**(`trimming.keeps`)를 씁니다.
+- `EditSpec.keep`: 사람이 고친 토막 목록. **자동 탐지보다 우선합니다.** 차례·겹침·구간 넘침을 모델에서 검사합니다. `trimmed_spec`이 옮긴 뒤에는 비웁니다(렌더가 다시 자르지 않게).
+- 편집기: [무음 구간 미리 재기] → 결과 줄의 [컷 불러오기] → 토막 체크박스 목록(남길 개수·초가 함께 보임) → 끈 토막은 영상에서 빠집니다. [컷 목록 비우기]로 자동 탐지로 되돌립니다.
+- 검증: 새 테스트 9개. 전체 641 passed, 13 skipped. 실패 1건은 변경 전에도 이 환경에서만 실패합니다. ruff 0.8.4·tsc·vite build 통과. `alembic heads`는 0009 하나입니다.
+- 남은 것: 사용자가 고른 넷 중 **전환(xfade)**이 남았습니다. 토막을 화면에서 미리 재생해 보는 기능은 없습니다(숫자와 목록만 보입니다).
+
+## 2026-09-21: 자동 리프레이밍과 음성 잡음 제거 (Claude)
+
+- 사용자 요청: faster-whisper·stable-ts·libass·Remotion·GL Transitions·MediaPipe·SAM2·DeepFilterNet·librosa·sidechaincompress·LosslessCut 목록을 받고, 정리한 뒤 **자동 리프레이밍·잡음 제거·전환·무음 컷 편집 화면** 넷을 고름. 이 커밋은 앞의 둘입니다. [PR #36](https://github.com/plutoan12/recording4/pull/36) 후속 커밋. 담당: `pipeline/reframe.py`(신규), `pipeline/editing.py`, `worker/analysis.py`·`rendering.py`, `apps/web`(ClipEditor.tsx, WorkflowPanel.tsx), `pyproject.toml`, 테스트·문서.
+- **자동 리프레이밍**(`EditSpec.reframe`, 기본 없음=끔): 얼굴을 따라 `crop`의 가로 중심이 움직입니다. 검출 → 떨지 않게 다듬기(`follow`) → 시간의 식(`crop_x`). 무음 컷과 같은 시간축을 씁니다(`clip_path`가 `trimming.moved`로 옮깁니다). `mode="crop"`에서만 돕니다.
+- 검출기: MediaPipe 우선, 없으면 OpenCV 내장 Haar로 내려갑니다. `face_track()`이 **어느 쪽을 썼는지 함께 돌려줍니다.** `mediapipe==1.0.1`을 `analysis` 추가 의존성에 넣었습니다(빼도 기능은 돕니다).
+- **음성 잡음 제거**(`EditSpec.denoise`: `soft`/`strong`): FFmpeg 내장 `afftdn`. 새 의존성 없음. `audio_filter_args()`가 무음 컷과 한 체인으로 잇고 **자르기를 먼저** 둡니다.
+- 이미 있던 것 확인: faster-whisper·stable-ts·libass는 이미 쓰고 있었습니다. **Remotion·SAM2는 넣지 않았습니다**(각각 두 번째 렌더 스택, GPU 필요·쓸 자리 좁음). sidechaincompress는 배경음악 기능이 아직 없어 순서가 맞지 않습니다.
+- 검증: 새 테스트 17개. 전체 632 passed, 13 skipped. 실패 1건은 변경 전에도 이 환경에서만 실패합니다. ruff 0.8.4·tsc·vite build 통과.
+- **그때 재지 못한 것**(이후 세션에서 둘 다 설치해 확인했고 얼굴 검출 결함 둘을 찾았습니다): crop 식과 음성 필터는 **CI의 실제 렌더 테스트**가 봅니다(`test_real_render_follows_a_moving_centre_and_denoises`). 얼굴 검출 정확도는 실제 영상으로 재야 합니다.
+- 남은 것: 사용자가 고른 넷 중 **전환(xfade)**과 **무음 컷 편집 화면**이 남았습니다. 세로(y) 추적, 말하는 사람 고르기(지금은 가장 큰 얼굴), DeepFilterNet은 아직입니다.
+
+## 2026-09-21: 무음 자동 컷과 숏폼 구간 추천 (Claude)
+
+- 사용자 요청: FFmpeg·MoviePy·Auto-Editor·PySceneDetect 목록을 받고, 어디에 맞고 어디에 안 맞는지 정리한 뒤 **무음 자동 컷**과 **PySceneDetect 활용 넓히기**를 고름. [PR #36](https://github.com/plutoan12/recording4/pull/36) 후속 커밋. 담당: `pipeline/trimming.py`·`highlights.py`(신규), `pipeline/editing.py`, `worker/rendering.py`·`media_tasks.py`, `adminapi/models.py`·`routers/editing.py`, `migrations/versions/0008_highlights_media_task.py`, `apps/web`(ClipEditor.tsx, WorkflowPanel.tsx), 테스트·문서.
+- **무음 자동 컷**(`EditSpec.silence`, 기본값 없음=끔): 발화 구간 사이의 침묵을 빼고 이어 붙입니다. `select`/`aselect`+`setpts` 한 번의 FFmpeg 호출입니다. 자르면 시간축이 달라지므로 자막·단어 시각·스티커를 함께 옮깁니다(`trimmed_spec`). 말을 못 찾으면 자르지 않고, 0.5초 미만이 남으면 거부합니다.
+- **숏폼 구간 추천**(미디어 작업 `highlights`, 마이그레이션 0008): 장면 경계(PySceneDetect)와 발화 구간에 점수를 매겨 겹치지 않는 후보를 돌려줍니다. 편집기 **숏폼 구간 추천** 단추 → 결과가 버튼으로 나오고 누르면 구간이 잡힙니다.
+- **MoviePy는 넣지 않았습니다.** FFmpeg를 감싼 것이라 지금 구조에서 얻는 것이 없습니다. Auto-Editor도 의존성으로 넣지 않고 같은 일을 직접 구현했습니다(시간축 다시 매핑은 어차피 우리 몫입니다).
+- 검증: 새 테스트 28개. `python -m pytest -q` 618 passed, 12 skipped. 실패 1건은 변경 전에도 이 환경에서만 실패합니다. ruff 0.8.4·tsc·vite build 통과. `alembic heads`는 0008 하나입니다.
+- **그때 재지 못한 것**(이후 세션에서 FFmpeg를 설치해 직접 확인했습니다): 필터 문자열은 단위 테스트로 고정했고, **실제 렌더 검증은 CI에서 돕니다**(`test_real_render_cuts_the_silent_parts`: 9초 원본에서 3~5초만 남기고 길이를 ffprobe로 잽니다). CI가 빨간색이면 그 테스트를 먼저 보세요.
+- 남은 것: 무음 컷은 숏폼 편집(EditSpec) 경로에만 있습니다. 번역·더빙 경로에는 없습니다. 프레임률이 들쭉날쭉한 원본에서의 음성 어긋남은 재지 않았습니다. 추천의 비중은 조회수로 검증한 적이 없습니다.
+
+## 2026-09-21: 문맥 배치·LLM 재번역을 기본으로 켬 (Claude)
+
+- 사용자 요청: "네가 켜"(앞서 "작업 양식에서 켜시면 됩니다"라고 한 데 대한 답). [PR #36](https://github.com/plutoan12/recording4/pull/36) 후속 커밋. 담당: `pipeline/translation_context.py`, `pipeline/workflow.py`, `worker/workflow_tasks.py`, `apps/web/WorkflowPanel.tsx`, 테스트·문서.
+- `translate_context`·`translate_polish` 기본값을 `True`로 바꾸고 화면의 두 선택 항목도 처음부터 켜진 상태로 둡니다.
+- 켜 두어도 안전하도록 세 가지를 먼저 고쳤습니다.
+  - `punctuated()`: 자막의 **15% 미만**만 문장부호로 끝나면 묶지 않습니다. 문장 경계를 모르는 채 묶으면 서로 다른 문장을 붙여 번역하게 됩니다.
+  - 더빙은 검증 오류 대신 `translate_context`를 **끕니다**(기본값이 켜짐이므로 막으면 모든 더빙 작업이 실패합니다).
+  - LLM 키·모델이 없으면 `llm_translate_error` 없이 **조용히 건너뜁니다**. 단가만 빠진 경우는 그대로 Blocked입니다.
+- 검증: 새 테스트 4개(기본값·문장부호 없는 대본·더빙 끄기·설정 없을 때 건너뛰기), 기존 테스트 5개를 새 동작에 맞춰 고쳤습니다. 전체 `python -m pytest -q` 591 passed, 11 skipped. 실패 1건은 변경 전에도 이 환경에서만 실패합니다. ruff 0.8.4·tsc·vite build 통과.
+- 이미 만든 작업과 승인된 결과물은 바뀌지 않습니다. 작업 옵션은 작업을 만들 때 굳습니다.
+- 남은 것: 앞선 항목과 같습니다. 실제 유료 호출로 잰 수치는 여전히 없습니다.
+
+## 2026-09-21: 문맥 배치와 어색한 자막 LLM 재번역 (Claude)
+
+- 사용자 요청: "그리고 문맥 배치해줘. 어색한 부분은 LLM 번역해주고". [PR #36](https://github.com/plutoan12/recording4/pull/36) 후속 커밋. 담당: `pipeline/translation_context.py`·`translation_review.py`(신규), `pipeline/workflow.py`, `worker/providers.py`, `worker/workflow_tasks.py`, `adminapi/config.py`·`routers/workflow.py`, `apps/web/WorkflowPanel.tsx`·`styles.css`, 테스트·문서.
+- **문맥 배치**(`WorkflowOptions.translate_context`, 기본값 꺼짐): 문장부호로 끝나지 않는 자막을 이어 한 문장으로 합쳐 번역하고, 번역문을 각 자막이 떠 있던 시간에 비례해 다시 나눕니다. 글자 수가 늘지 않아 **요금은 그대로**입니다. 나눌 수 없으면 그 묶음만 자막별로 다시 번역합니다. 더빙에서는 `WorkflowOptions`가 거부합니다.
+- **LLM 재번역**(`translate_polish`, 기본값 꺼짐): 원문 그대로·비어 있음·길이 이상(묶음 중앙값의 1/2~2배 밖)·같은 말 반복·용어 누락·문장 조각을 점수로 매겨 상위 **최대 30%, 최대 20개**만 다시 씁니다. 앞뒤 자막과 용어집을 같이 넘깁니다. 실패하면 기계 번역을 그대로 두고 `llm_translate_error`를 단계 결과에 남깁니다.
+- 설정: `R4_ANTHROPIC_API_KEY`, `R4_LLM_TRANSLATE_MODEL`, `R4_LLM_TRANSLATE_USD_PER_1K_CHARS`를 모두 넣어야 켜집니다. 모델 이름에 기본값을 두지 않았습니다. `/workflow/configuration`이 `llm_translate_configured`로 알려 주고 화면의 선택 항목이 그에 따라 잠깁니다.
+- 예산: `paid_estimate`가 LLM 상한을 더합니다(가장 긴 자막 × 상한 개수 × 네 몫 + 지시문 600자). 단가를 설정하지 않고 켜면 Blocked입니다.
+- 검증: 새 테스트 33개(묶기·다시 나누기·판정·상한·워커 연결·요청 헤더와 본문·실패 시 복귀·예산). 전체 `python -m pytest -q` 589 passed, 11 skipped. 실패 1건은 변경 전에도 이 환경에서만 실패합니다. ruff 0.8.4·tsc·vite build 통과.
+- **재지 못한 것**: 실제 LLM 호출을 하지 않았습니다(키 없음). 요청·응답 모양만 대역으로 고정했습니다. 문맥 배치가 실제로 번역을 낫게 하는지도 Google 호출 없이는 수치로 말할 수 없습니다. 자격증명이 있는 곳에서 `scripts/verify_translate.py`로 재세요.
+- 남은 것: 어색함 판정은 겉모양만 봅니다(뜻이 틀렸는지는 보지 않습니다). 다시 나눈 자막은 말한 자리와 정확히 맞지 않습니다. 재번역 개수·사유를 작업 화면에 보여 주지는 않습니다(단계 결과에만 남습니다).
+
+## 2026-09-21: 용어집을 번역에 연결 (Claude)
+
+- 사용자 요청: 번역 품질을 올리는 세 가지 안(문맥 배치·용어집·LLM 번역)의 비용을 비교한 뒤 "일단 용어집부터 연결하고". [PR #36](https://github.com/plutoan12/recording4/pull/36) 후속 커밋. 담당: `pipeline/glossary.py`(신규), `worker/providers.py`, `worker/workflow_tasks.py`, `adminapi/services/glossary.py`(신규), `adminapi/routers/glossaries.py`(신규), `adminapi/config.py`·`main.py`, `apps/web/GlossaryPanel.tsx`(신규)·`App.tsx`·`styles.css`, `scripts/verify_translate.py`, 테스트·문서.
+- 이미 있던 `glossaries` 테이블(`entries` JSON)을 실제로 씁니다. 마이그레이션은 필요 없습니다.
+- 넣는 방식: 용어가 걸린 문장만 `text/html`로 보내고 용어 자리를 `<span translate="no">번역 표기</span>`로 바꿉니다. 걸리지 않은 문장은 지금까지와 똑같이 `text/plain`입니다. 번역 뒤 표시를 걷어내고, 사라진 용어를 셉니다(`GoogleTranslator.missing_terms`).
+- 쓰는 곳: 관리화면 **용어집** 패널, `GET/PUT/DELETE /glossaries/{원문}/{목표}`, 워커 `translate:` 단계. `R4_GOOGLE_TRANSLATE_GLOSSARY`를 넣으면 Google 자체 용어집을 대신 씁니다.
+- 예산: Google이 표시 글자도 청구하므로 `paid_estimate`가 **보낼 글자 그대로** 셉니다. 원문 12자 문장에 용어 하나가 걸리면 48자로 잡힙니다(테스트로 고정).
+- 검증: 새 테스트 37개(핵심 모듈·공급자 요청 모양·API CRUD·워커 연결·예산). 전체 `python -m pytest -q` 553 passed, 11 skipped. 실패 1건(`test_caption_track_is_uploaded_once_for_track_only_video`)은 변경 전에도 이 환경에서만 실패하며(stash 후 재현 확인) CI에서는 통과합니다. `ruff check .`·`ruff format --check .`(0.8.4) 통과, `tsc -b --noEmit`·`vite build` 통과. `verify_translate.py --glossary`를 무료 경로로 돌려 용어가 표본의 어디에 걸리는지 확인했습니다.
+- **재지 못한 것**: Google이 실제로 `translate="no"`를 지키는지 확인하지 못했습니다. 문서에 있는 기능이지만 이 세션에는 Google 자격증명이 없습니다. 자격증명이 있는 컴퓨터에서 `python3 scripts/verify_translate.py --pairs docs/samples/ko-en.json --glossary 용어집.json --project <프로젝트> --allow-paid`로 재세요(표본 250자, 1센트 미만). 표시가 지켜지지 않으면 "빠진 용어"로 잡힙니다.
+- 남은 것: 넣는 표기는 글자 그대로라 어미·관사에 맞춰 변형되지 않고, 용어가 많으면 주변 어순이 어색해질 수 있습니다. 전사(whisper) 쪽에 용어집을 넣는 일(`initial_prompt`/`hotwords`)은 아직입니다. 사라진 용어 수를 작업 화면에 보여 주지는 않습니다(로그와 검증 스크립트에만 남습니다).
+
+## 2026-09-21: 숏폼 자막 끊기와 품질 재기 (Claude)
+
+- 사용자 요청: "자막 부분에서 퀄리티를 어떻게 하면 다른 사이트처럼 올릴 수 있을까" → 제안 가운데 숏폼 분할과 단어 시각 활용부터 하기로 함. [PR #36](https://github.com/plutoan12/recording4/pull/36) 후속 커밋. 담당: `pipeline/subtitles.py`, `pipeline/editing.py`, `pipeline/subtitle_tool.py`, `worker/rendering.py`·`composition.py`, `adminapi/routers/editing.py`, `apps/web`(ClipEditor.tsx, SubtitlePreview.tsx, WorkflowPanel.tsx), 테스트·문서.
+- 끊는 방식 두 가지: `broadcast`(지금까지, 기본값)와 `shortform`(줄당 11폭·한 줄·0.6~2.5초). `pacing_rules()`로 고르고 `EditSpec.subtitle_pacing`·`GET /subtitle-pacings`·편집기 **자막 끊기** 선택·CLI `--pacing`으로 씁니다.
+- 숏폼은 대본의 단어 시각으로 끊습니다(`SubtitleRules.use_word_timings`). 단어 시각이 없거나 사람이 글자를 고치면 글자 수 방식으로 자동 복귀합니다. 꾸밈말이 자막 끝에 혼자 남으면 다음 자막으로 넘기고, 자막 끝은 다음 자막 시작까지 최대 0.4초 띄웁니다.
+- `quality` 명령과 `quality_report()`를 더했습니다. 자막 장수, 표시 시간·글자 폭·읽기 속도·자막 사이의 분포, 화면에 떠 있는 비율, 규칙 위반 비율을 냅니다.
+- 검증: 같은 문장을 두 방식으로 돌려 방송은 1장 5.2초, 숏폼은 4장 평균 1.3초로 나오는 것을 확인했고 워커 렌더까지 같은 결과를 확인했습니다. 기본값 경로는 기존 테스트 54개가 그대로 통과합니다.
+- 남은 것: 자막 파일만 주면 단어 시각이 없어 숏폼 효과가 절반입니다(글자 수로 나눔). 표시 시간이 모자라면 한 줄 규칙이어도 두 줄이 남을 수 있고 `quality`가 위반으로 보고합니다. 전사 모델 키우기와 용어집을 전사에 넣는 일은 다음 작업입니다.
+
+## 2026-09-21: 프리셋을 영상에 넣고 파일로 가지기 (Claude)
+
+- 사용자 요청: "프리셋 127종 중에서 본인이 프리셋을 선택해서 영상에 프리셋을 넣거나 그 프리셋 파일을 갖을 수 있게 해야지". [PR #36](https://github.com/plutoan12/recording4/pull/36) 후속 커밋. 담당: `adminapi/routers/editing.py`, `pipeline/subtitle_presets.py`(읽어보기 글귀), `pipeline/subtitle_tool.py`, `apps/web`(ClipEditor.tsx, styles.css), 테스트·문서.
+- 영상에 넣기: 편집기에서 프리셋을 고르면 그대로 구워지고, 명령줄은 `r4-subtitles burn 영상.mp4 자막.srt 결과.mp4 --preset 이름`입니다(이미 되던 길을 문서에 표로 정리).
+- 파일로 가지기: `GET /subtitle-presets/{이름}/file`(JSON 한 장), `GET /subtitle-preset-packs/{팩}`(zip, `읽어보기.txt` 포함), `POST /subtitle-presets`(올려서 내 프리셋으로 저장), `DELETE /subtitle-presets/{이름}`(내 프리셋만). 명령줄은 `presets pack`·`presets import`를 더했습니다. 편집기에는 [이 프리셋 파일 받기]·[팩 전체 받기]·[프리셋 올리기]·[내 프리셋 지우기] 단추를 붙였습니다.
+- 저장 위치는 서버의 `R4_PRESETS_DIR`입니다. 내장 이름과 겹치면 409, 디렉터리가 없으면 503, 200개를 넘으면 409로 막습니다. 워커도 같은 디렉터리를 봐야 실제 렌더에 적용됩니다.
+- 검증: API 테스트로 파일 내려받기(헤더·내용), zip 35개 항목, 올리기·지우기·거절을 확인했고, 명령줄은 zip 묶기와 들여오기를 확인했습니다.
+- 하지 않은 것: 사용자가 보내 준 "영상 편집 기능" 요청은 이 정정으로 프리셋 적용·배포로 좁혔습니다. 컷 편집·보정·배경음악 같은 일반 영상 편집은 넣지 않았습니다.
+
+## 2026-09-21: 키네틱 팩 34종 추가 (프리셋 127종) (Claude)
+
+- 사용자 요청: "다른 프리셋도 있으면 추가시켜줘". [PR #36](https://github.com/plutoan12/recording4/pull/36) 후속 커밋. 담당: `pipeline/subtitle_presets.py`, 테스트·문서.
+- 새 팩 `kinetic`(키네틱) 34종: 천천히 커짐·기울어짐·흐려짐(`hold`로 둔 크기·회전·번짐이 등장 뒤부터 천천히 변함), 글자·단어별 블러/확대/회전 등장, 탱탱볼·고무줄·착지·펀치·충격파·젤리, 위로 던지기·아래로 떨어짐·흐려지며·뒤집히며·눌리며 사라짐, 네온 깜빡임·시계추·똑딱·천천히 숨쉬기·좌우로 떠다님, 자막용 미세 동작(자막 팝·살짝 올라오기·강조 줌·기울여 쾅).
+- 엔진: 조각별 등장 방식에 `blur`·`scale`·`spin` 추가(기존 `type`·`pop`·`karaoke`·`glitch`와 같은 토큰 분해를 씁니다). `shake`와 `float`는 둘 다 `\frz`를 계속 써서 섞으면 덮어쓰므로 합쳐서 하나만 두도록 막았습니다.
+- 버그 수정: 동작의 `amount`가 비움과 `0`을 구분하지 못해(`amount or 기본값`) "크기를 0으로"가 기본값 40%로 바뀌었습니다. `amount`를 `float | None`로 바꿔 상하 등장·가운데 펼치기·눌리며 사라짐이 실제로 0(libass 줄 높이를 위해 1%)에서 시작합니다. 내보내는 JSON에서도 비운 값은 빠집니다.
+- 검증: 실제 렌더로 글자별 블러·단어별 확대(조각이 차례로 나타남), 고무줄(가로로 늘었다 제자리), 착지, 상하 등장(얇은 선에서 펼쳐짐), 눌리며 사라짐(픽셀 22784 → 12598), 위로 던지기(세로 중심 787 → 662 뒤 사라짐)를 프레임·픽셀로 확인했습니다. 미리보기 영상이 30fps라 사라짐 구간 프레임을 잘못 골라 처음에 "동작 없음"으로 보였던 것을 바로잡았습니다. `presets check` 127종 통과.
+- 남은 것: 탱탱볼 등장의 넘어감은 긴 자막이 화면 밖으로 나가지 않게 42%에서 26%로 줄였습니다. 글자별 회전은 libass가 줄 기준점으로 돌려 각도를 키우면 글자가 크게 흔들립니다(기본 14°).
+
+## 2026-09-21: 모션 프리셋 93종과 프리셋 만들기 (Claude)
+
+- 사용자 요청: 인스타그램 모션 프리셋 팩(프리미어 프로용, "90도회전·꾸물꾸물자막·파도타는·글리치·블러+줌" 등) 스크린샷과 함께 "깃허브에서 이런 프리셋을 만들 수 있도록 하는 코드들 깔아줘". [PR #36](https://github.com/plutoan12/recording4/pull/36) 후속 커밋, 같은 브랜치. 담당: `pipeline/subtitle_presets.py`(신규), `pipeline/subtitle_motion.py`(`run_slots`·`state_before` 공개), `pipeline/subtitle_templates.py`, `pipeline/editing.py`, `pipeline/subtitle_tool.py`, `worker/rendering.py`·`composition.py`, `adminapi/routers/editing.py`, `apps/web`(ClipEditor.tsx, SubtitlePreview.tsx, WorkflowPanel.tsx), `.github/workflows/ci.yml`, 테스트·문서.
+- 엔진: 프리셋 = 동작(step) 목록. 동작 15종(`fade`·`scale`·`move`·`spin`·`flip`·`blur`·`shear`·`wipe`·`flash`·`shake`·`float`·`breathe`·`glow`·`reveal`·`wave`) × 구간 3종(`in`·`out`·`hold`)을 컴파일해 libass가 그리는 ASS 명령을 만듭니다. 반복 이동은 `\org` + `\frz` 궤도로 흉내 냅니다(`\pos`는 `\t` 불가).
+- 내장 93종: 기본 팩 41, 숏폼 팩 52. 참고 팩의 이름은 일반적인 동작 설명(아래 등장·파도 타는·퀵 줌 등)이라 같은 계열의 움직임을 우리 구현으로 새로 만들었습니다(그쪽 파일을 쓰지 않았습니다).
+- 쓰는 곳: 템플릿 항목 `preset`, `EditSpec.subtitle_preset`, `GET /subtitle-presets`, `POST /subtitle-preview`의 `preset`, 편집기 **모션 프리셋** 선택(정확 미리보기에 그대로 반영), CLI `presets list|show|export|new|check`·`--preset`·`reel --preset-pack`. 프리셋은 `subtitle_animation`보다 먼저 쓰입니다.
+- 내가 만들기: `r4-subtitles presets new mine.json --name my-move`로 뼈대를 만들고 값을 고쳐 `--preset mine.json`으로 쓰거나, `R4_PRESETS_DIR` 디렉터리에 넣으면 **내 프리셋** 팩으로 목록·편집기·API에 함께 나옵니다. 워커·API 컨테이너에도 같은 디렉터리를 붙여야 실제 렌더에 적용됩니다.
+- 검증: 이 환경에서 FFmpeg(libass)로 실제 렌더해 펼치기(`fill-up`)·3D 회전(`spin-3d`)·글리치(`glitch-down`)를 프레임으로 확인하고, 떠다님(`bob`)은 세로 중심이 772~800px로 움직이는 것을, 사라짐(`soul-out`)은 끝에서 위로 뜨며 사라지는 것을 픽셀로 측정했습니다. `presets check`로 93종이 모두 명령을 만드는지 확인합니다(CI에도 추가, 프리셋 팩 영상도 artifact로 올림).
+- 남은 것: 크기가 변하는 동작과 그라데이션 띠가 겹칠 때 잠깐 어긋나는 한계는 그대로입니다. `wipe`는 `\clip` 사각형이라 원형 마스크가 안 되고(블러-원형은 크기·번짐으로 흉내), 화면 제목·시트에는 붙지 않습니다. 브라우저에서 편집기 프리셋 선택 실사용 확인은 하지 않았습니다.
+
+## 2026-09-20: 단어 시각 연결·글꼴 11종·정확 미리보기·스티커 (Claude)
+
+- 사용자 요청: "1 → 3 → 2 → 4 이 순서대로 추가해줘"(단어 타임스탬프 연결, 참고 팩 글꼴, libass WASM 미리보기, 스티커 오버레이). [PR #36](https://github.com/plutoan12/recording4/pull/36) 후속 커밋. 담당: `pipeline/editing.py`(Cue.words, EditSpec.stickers), `pipeline/alignment.py`, `pipeline/subtitles.py`, `pipeline/subtitle_motion.py`, `pipeline/subtitle_templates.py`, `pipeline/subtitle_fonts.py`, `pipeline/subtitle_metrics.py`, `pipeline/subtitle_stickers.py`(신규), `pipeline/subtitle_tool.py`, `scripts/fetch_fonts.py`, `migrations/versions/0007_transcript_words.py`, `adminapi/models.py`·`routers/editing.py`, `worker/analysis.py`·`media_tasks.py`·`rendering.py`·`composition.py`, `infra/Dockerfile.api`, `apps/web`(ClipEditor.tsx, SubtitlePreview.tsx 신규, api.ts, WorkflowPanel.tsx, vite.config.ts, styles.css, package.json jassub), 테스트·문서.
+- 1) 단어 시각: `Cue.words`가 정렬·전사 → DB(`transcript_segments.words`, 마이그레이션 0007 필요) → API → 편집기 → 렌더로 흐르고, 노래방·단어별 등장이 실제 시각에 켜집니다. 구간 자르기·규칙 분할도 단어를 나눠 따라갑니다.
+- 3) 글꼴: 에스코어 드림 6 Bold·8 Heavy, 나눔스퀘어라운드, 티몬 몬소리, 스웨거, SUIT, 배민 한나 Pro·을지로오래오래, 온글잎 무궁체, 메이플스토리, 넥슨 Lv1 고딕(총 47종, WOFF2는 brotli). 템플릿 11종 추가로 101종. 페이퍼로지는 눈누 GitHub에 없어 뺐습니다.
+- 2) 정확 미리보기: `POST /subtitle-preview`(ASS + 글꼴 이름), `GET /subtitle-fonts/{family}`, 편집기 `SubtitlePreview`(jassub). 받은 글꼴의 family 이름(nameID 1)을 템플릿 이름으로 정리(`normalize_names`). headless Chromium으로 그라데이션+컬러 이모지+슬라이드, 단어 시각 노래방 렌더를 확인했습니다.
+- 4) 스티커: 내장 도형 9종(ASS 드로잉, 움직임 지원) + PNG(FFmpeg overlay, `R4_STICKERS_DIR`). 편집기 스티커 패널, `--sticker JSON`, `stickers list`, `GET /stickers`.
+- 검증: `python -m pytest -q` 통과(기존 환경 전용 실패 1개), `ruff`, `tsc`, `vite build` 통과. 실제 렌더로 스티커 9종·바운스/맥박/팝 움직임 확인.
+- 남은 것: 기존 DB는 `alembic upgrade head`. API 이미지가 글꼴을 새로 설치하므로 재빌드 필요. 브라우저에서 편집기 전체 흐름(로그인 → 스티커 패널 → 정확 미리보기) 실사용 확인은 하지 않았고 하네스로 렌더만 확인. 이미지 스티커 업로드 화면 없음.
+
+## 2026-09-20: 그라데이션 글자·컬러 이모지 (Claude)
+
+- 사용자 요청: "그라데이션 글자, 컬러 이모지, 움직이는 자막은 지원해줘" + 핀터레스트 90년대 TV 광고 자막 스크린샷. [PR #36](https://github.com/plutoan12/recording4/pull/36) 후속 커밋. 담당: `pipeline/subtitle_emoji.py`(신규), `pipeline/subtitle_templates.py`, `pipeline/subtitle_motion.py`, `pipeline/subtitle_fonts.py`, `scripts/fetch_fonts.py`, `apps/web/src/ClipEditor.tsx`, 테스트·문서.
+- 그라데이션: 템플릿 항목 `gradient_color`·`gradient_direction`. 앞 층을 24개 `\clip` 띠로 나눠 겹치고 `\pos`로 고정(libass 충돌 회피 때문). 이동 움직임은 clip을 `\t`로 함께 움직임. 그라데이션 카테고리 7종(홈쇼핑 금색·TV 하늘색·심야 쇼 핑크·노을 잘난체·가로 금색·오로라 네온·얼음 흰색)과 상자 `as-seen-on-red` 추가(총 90종).
+- 컬러 이모지: Twemoji Mozilla(COLRv0)를 `scripts/fetch_fonts.py`가 받아 층 글리프에 사용자 영역 코드·폭 0을 준 `R4 Color Emoji` 글꼴과 표 JSON으로 변환. 자막에서 이모지를 `{\1c}층…자리표`로 겹쳐 libass가 그림. 표가 없으면 흑백 Noto Emoji. 조합 이모지(국기 등)는 GSUB 합자에서 표로 옮김. 움직임 토크나이저는 겹침 한 묶음을 글자 하나로 취급.
+- 검증: 이 환경에서 그라데이션 7종·컬러 이모지(🍓🍵🇰🇷📞🔥)·타자기/노래방/슬라이드와의 조합을 실제 렌더해 확인. `python -m pytest -q` 통과(기존 환경 전용 실패 1개), `ruff`, `tsc`, `vite build` 통과.
+- 남은 것: 워커 이미지에서 Twemoji 릴리스 다운로드·변환이 도는지 CI 확인. 크기가 변하는 움직임 중 그라데이션 띠가 잠깐 어긋남(문서화). 편집기 미리보기의 속 빈 그라데이션은 시작 색 단색.
+
+## 2026-09-20: 움직이는 자막 (Claude)
+
+- 사용자 요청: "움직이는 자막도 만들어줘". [PR #36](https://github.com/plutoan12/recording4/pull/36) 후속 커밋, 같은 브랜치. 담당: `pipeline/subtitle_motion.py`(신규), `pipeline/subtitle_templates.py`, `pipeline/subtitle_tool.py`, `pipeline/editing.py`, `worker/rendering.py`, `worker/composition.py`, `adminapi/routers/editing.py`, `apps/web`(ClipEditor.tsx, WorkflowPanel.tsx, styles.css), `.github/workflows/ci.yml`, 테스트·문서.
+- 템플릿 항목 `animation`(12종: fade·pop·bounce·slide-up·slide-down·zoom·wiggle·pulse·typewriter·word-pop·karaoke)과 `animation_ms`. 움직임 카테고리 템플릿 13종 추가(총 82종). `EditSpec.subtitle_animation`과 `GET /subtitle-animations`로 어떤 템플릿에든 움직임을 덮어씀. 편집기에 **자막 움직임** 선택과 CSS 키프레임 미리보기. CLI `--animation`/`--animation-ms`, `preview`의 .mp4/.gif 출력, `reel`(템플릿을 차례로 보여 주는 영상). CI가 `subtitle-motion.mp4`를 시트 artifact에 함께 올림. 둥근 상자는 글자와 같은 정렬점(`\an`)으로 바꿔 움직임·회전이 글자와 같은 중심.
+- 검증: 이 환경에서 13종 영상을 렌더해 프레임을 뽑아 확인(팝·바운스·슬라이드·카드 이동·페이드·줌·흔들림·맥박·타자기·단어별·노래방 모두 의도대로). 크기가 변할 때 libass가 줄을 다시 나누던 것을 `\q2`로 막음. `python -m pytest -q` 474개 통과(기존 환경 전용 실패 1개), `ruff`, `tsc`, `vite build` 통과.
+- 남은 것: 노래방·단어별 등장은 자막 길이를 고르게 나눈 어림 시각이라 whisper 단어 타임스탬프 연결이 다음 작업. 브라우저에서 편집기 움직임 미리보기 확인. 워커 이미지의 libx264로 `reel`이 도는지는 CI에서 확인.
+
+## 2026-09-20: 트렌디 자막 템플릿 팩·글꼴·미리보기 시트 (Claude)
+
+- 사용자 요청: 인스타그램 자막 템플릿 팩(파스텔 상자·네온·픽셀·통통 외곽선·손글씨) 같은 것. [PR #36](https://github.com/plutoan12/recording4/pull/36) 후속 커밋, 같은 브랜치. 담당: `pipeline/subtitle_templates.py`, `pipeline/subtitle_fonts.py`(신규), `pipeline/subtitle_tool.py`, `scripts/fetch_fonts.py`(신규), `worker/rendering.py`, `worker/composition.py`, `adminapi/routers/editing.py`, `infra/Dockerfile.worker`, `.github/workflows/ci.yml`, `apps/web`(index.html, ClipEditor.tsx, styles.css), 관련 테스트·문서.
+- 템플릿 69종(카테고리 8개). 새 효과: 속 빈 네온(`hollow`), 입체 돌출(`extrude`), 단어별 강조(`accent_color` + 자막 글자의 `[[...]]` 표기, `pipeline/subtitle_markup.py`), 둥근 상자(`box_radius`, 글꼴 메트릭으로 폭을 재는 `pipeline/subtitle_metrics.py`), 이모지 구간에 흑백 Noto Emoji 자동 지정, 시트 흐름 배치(`--layout flow` 기본). 잘난체·카페24 써라운드·심플해·지마켓 산스·Pretendard·Wanted Sans 6종은 Google Fonts 밖 글꼴로, 눈누 저장소 WOFF를 커밋 고정으로 받아 fontTools로 변환하고 name 테이블이 빈 잘난체·지마켓 산스에는 이름을 써 넣습니다(`[fonts]` 추가 의존성). 새 항목: `category`, `sample`, `box_color`, `glow`(`\blur`), `border_style=box-outline`, `prefix`/`suffix` 장식, `outline2`/`outline2_color`(스티커 바깥 테두리, 이벤트 두 겹), `angle`(기울임). 기존 `box` 템플릿이 실제로는 불투명 검정 상자였던 것을 고침(libass BorderStyle 3은 외곽선 색으로 채움).
+- 글꼴 35개(OFL 29 + 회사 무료 라이선스 6)를 `scripts/fetch_fonts.py`가 커밋 고정 URL·SHA-256으로 받아 워커 이미지에 설치. `R4_FONTS_DIR`로 로컬 글꼴 디렉터리를 FFmpeg에 넘김. Nanum Pen·Galmuri는 파일 family 이름이 달라 그 이름을 씀.
+- CLI `sheet`(전체 시트 PNG), `preview`(한 장), `templates check`(글꼴 확인) 추가. CI `워커 이미지 빌드`가 시트를 artifact `subtitle-template-sheet`로 올리고 글꼴 확인을 실행. 편집기에 카테고리별 선택과 CSS 근사 미리보기 갤러리.
+- 검증: 이 환경에서 pip 정적 FFmpeg(libass 포함)와 받은 글꼴로 38종 시트를 실제 렌더해 눈으로 확인(상자·글로우·픽셀·장식 기호 모두 그려짐). `python -m pytest -q` 446개 통과, 5개 조건부 skip, 실패 1개는 이 환경에서만 실패하는 기존 `test_caption_track_is_uploaded_once_for_track_only_video`. `ruff`, `tsc`, `vite build` 통과. 하지 못한 것: 워커 Docker 이미지 빌드(글꼴 설치 단계)는 CI에서 처음 돌아감, 브라우저에서 편집기 미리보기 확인, 템플릿별 화면 안 배치 실측.
+- 다음 작업: CI artifact 시트를 보고 글꼴 대체가 없는지 확인, 큰 글꼴 템플릿(`vlog-lime`, `round-white`)의 줄당 글자 수 실측 후 필요하면 템플릿별 규칙 조정, 사용자 JSON 템플릿 업로드 화면 여부 결정.
+
+## 2026-09-19: 자막 파일·템플릿 도구 (Claude)
+
+- 사용자 요청: 자막 파일과 자막 템플릿 관련 프로그램. [PR #36](https://github.com/plutoan12/recording4/pull/36), 브랜치 `claude/subtitle-file-template-program-i9rzfx`. 담당: `packages/pipeline/pipeline/subtitle_templates.py`(신규), `packages/pipeline/pipeline/subtitle_tool.py`(신규), `pipeline/editing.py`, `worker/rendering.py`, `worker/composition.py`, `adminapi/routers/editing.py`, `apps/web/src/ClipEditor.tsx`, `apps/web/src/WorkflowPanel.tsx`, `pyproject.toml`, 관련 테스트·문서.
+- 자막 템플릿: 내장 6종(`default`, `shorts-bold`, `yellow`, `box`, `top`, `minimal`)과 JSON 파일 템플릿. 렌더(`write_subtitles`)가 `EditSpec.subtitle_template`로 모양을 정하고, 워크플로 숏폼 구간에도 전달됩니다. `default`는 이전 고정값과 같습니다. 편집기에 **자막 템플릿** 선택과 `GET /subtitle-templates` 추가. 모르는 이름은 422.
+- 명령줄 `r4-subtitles`(`python -m pipeline.subtitle_tool`): info·check·convert·shape·shift·cut·templates·style·burn. 서버와 같은 읽기(인코딩 판별)·규칙·템플릿 코드를 씁니다. 사용법은 [자막 파일·템플릿 도구](SUBTITLE_TOOL.md).
+- 검증: 이 환경(SQLite, FFmpeg·numpy 없음)에서 `python -m pytest -q` 전체 425개 통과, 8개 조건부 skip, 실패 1개·오류 4개는 아래의 기존 문제입니다. 새 테스트는 `test_subtitle_templates.py`·`test_subtitle_tool.py` 49개(매개변수 포함)와 `test_editing_api.py` 1개. `ruff check .` 통과, 변경한 파일 `ruff format --check` 통과. TypeScript `tsc -b --noEmit`·`vite build` 통과. `burn`의 실제 FFmpeg 합성, 템플릿별 글꼴 표시·화면 안 배치 실측, 브라우저 화면 확인은 하지 못했습니다.
+- 이 환경에서 `tests/test_connected_workflow.py::test_caption_track_is_uploaded_once_for_track_only_video` 실패는 변경 전 main에서도 같아 이번 변경과 무관합니다. CI(main 포함)에서 `tests/test_verify_sync_matrix.py`가 numpy 미설치로 오류 4개를 내던 것은 PR #33과 같은 `numpy==2.2.6`을 `dev` 추가 의존성에 넣어 고쳤습니다. 또 `워커 이미지 빌드`의 pyannote 단계가 토큰만 있으면 실행되어 샘플(`expected.json`) 없이 실패하던 것(main도 동일)은 PR #20과 같은 verify-align 조건을 붙여 고쳤습니다. `ruff format --check`는 손대지 않은 `style_review.py`·`composition.py`의 f-string 공백을 지적하는데 이 환경의 Ruff 판정이며 기존 코드입니다.
+- 다음 작업: 워커 이미지에서 템플릿별 `scripts/measure_subtitles.py` 실측(특히 `shorts-bold` 72·`box` 상자 여백), 브라우저에서 템플릿 선택→렌더→미리보기 확인, 필요하면 사용자 템플릿 저장 화면.
 ## 2026-09-21: 숏폼 편집 확장 — 멀티 컷·무음 빼기·배속/페이드/배경음악·미리보기 (Claude)
 
 브랜치 `claude/claude-md-design-review-v8qdz4`, PR #17 위. 담당: `packages/pipeline/pipeline/{cuts,editing}.py`, `services/worker/worker/{rendering,media_tasks}.py`, `services/api/adminapi/{models}.py`·`routers/editing.py`, `migrations/versions/0010_silence_preview_media_task.py`, `apps/web/src/ClipEditor.tsx`, `tests/{test_video_editing,test_render_integration}.py`.

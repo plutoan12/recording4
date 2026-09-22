@@ -8,8 +8,10 @@ ENV PYTHONUNBUFFERED=1 \
     PYTHONPATH=/app/packages/pipeline:/app/services/api:/app/services/worker
 
 # 워커만 FFmpeg가 필요합니다. API 이미지에는 넣지 않습니다.
+# libegl1·libgles2는 MediaPipe 얼굴 검출(자동 리프레이밍)이 공유 라이브러리를
+# 열 때 필요합니다. 없으면 검출기가 OpenCV로 내려가거나 아예 없다고 보고합니다.
 RUN apt-get update \
-    && apt-get install --no-install-recommends -y ffmpeg fonts-noto-cjk \
+    && apt-get install --no-install-recommends -y ffmpeg fonts-noto-cjk libegl1 libgles2 \
     && rm -rf /var/lib/apt/lists/*
 
 # 자막 정렬(stable-ts)과 화자 분리(WhisperX)는 PyTorch를 씁니다. 기본 인덱스는
@@ -29,9 +31,14 @@ COPY packages ./packages
 # 끝나면 같은 층에서 지워 최종 이미지에 남기지 않습니다.
 RUN apt-get update \
     && apt-get install --no-install-recommends -y build-essential \
-    && pip install --no-cache-dir ".[analysis,providers,imports,subtitles]" \
+    && pip install --no-cache-dir ".[analysis,providers,imports,subtitles,fonts]" \
     && apt-get purge -y --auto-remove build-essential \
     && rm -rf /var/lib/apt/lists/*
+
+# 자막 템플릿 글꼴(모두 OFL). 목록과 체크섬은 packages/pipeline/pipeline/subtitle_fonts.py에
+# 있고, 출처는 커밋 해시로 고정돼 있습니다. 시스템 글꼴 자리에 넣어 libass가 이름으로 찾습니다.
+COPY scripts/fetch_fonts.py ./scripts/fetch_fonts.py
+RUN python scripts/fetch_fonts.py --out /usr/share/fonts/truetype/r4 && fc-cache -f
 
 COPY services ./services
 

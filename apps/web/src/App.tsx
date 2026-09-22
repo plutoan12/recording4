@@ -207,6 +207,7 @@ function Dashboard({ onSignOut }: { onSignOut: () => void }) {
       <ClipEditor assets={assets} onWorkflow={setWorkflowDraft} />
       <WorkflowPanel assets={assets} jobs={jobs} draft={workflowDraft} onCreated={refresh} />
 
+
       <h2>작업</h2>
       <table>
         <thead>

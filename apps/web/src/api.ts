@@ -55,6 +55,14 @@ export function setToken(token: string | null): void {
   else sessionStorage.setItem(TOKEN_KEY, token)
 }
 
+// 글꼴 파일처럼 JSON이 아닌 응답. 토큰은 같은 방식으로 붙입니다.
+export async function fetchBinary(path: string): Promise<Uint8Array> {
+  const token = getToken()
+  const response = await fetch(`${BASE}${path}`, { headers: token ? { Authorization: `Bearer ${token}` } : {} })
+  if (!response.ok) throw new ApiError(response.status, `파일을 받지 못했습니다 (${response.status})`)
+  return new Uint8Array(await response.arrayBuffer())
+}
+
 export async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const token = getToken()
   const response = await fetch(`${BASE}${path}`, {

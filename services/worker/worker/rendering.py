@@ -6,22 +6,38 @@ import os
 import shutil
 import subprocess
 import tempfile
+from collections.abc import Sequence
 from pathlib import Path
 
-import pysubs2
-
 from pipeline.editing import Cue, EditSpec, clip_cues, concat_cues
+from pipeline.reframe import Point, crop_x, follow
 from pipeline.subtitle_files import plain_ass
-from pipeline.subtitles import DEFAULT_RULES, SubtitleRules, apply_rules
+from pipeline.subtitle_stickers import (
+    add_sticker_events,
+    clip_stickers,
+    image_overlays,
+    overlay_filter_graph,
+)
+from pipeline.subtitle_templates import SubtitleTemplate, resolve_template, styled_document
+from pipeline.subtitles import DEFAULT_RULES, SubtitleRules, apply_rules, pacing_rules
 
 __all__ = [
     "RenderError",
     "ffmpeg_binary",
+    "has_audio",
     "plain_ass",
     "render_clip",
     "render_preview",
+    "stickers_dir",
+    "subtitles_filter",
+    "transition_graph",
+    "video_filter_args",
     "write_subtitles",
 ]
+
+# 잡음 제거 세기. FFmpeg 내장 `afftdn`의 잡음 바닥(dB)입니다. 낮출수록 많이
+# 깎이고 목소리도 같이 깎입니다. 잰 값이 아니라 정한 값입니다.
+DENOISE = {"soft": "afftdn=nf=-20", "strong": "afftdn=nf=-35"}
 
 # 배경음악을 깔 때 말소리 기준으로 음량을 낮추는 값. 잰 값이 아니라 정한 값입니다.
 DUCK = "sidechaincompress=threshold=0.03:ratio=8:attack=20:release=400"
@@ -38,63 +54,188 @@ def ffmpeg_binary() -> str:
     return binary
 
 
-def write_subtitles(path: Path, spec: EditSpec, rules: SubtitleRules = DEFAULT_RULES) -> None:
-    subs = pysubs2.SSAFile()
-    subs.info.update(PlayResX=str(spec.width), PlayResY=str(spec.height), WrapStyle="0")
-    style = pysubs2.SSAStyle(
-        fontname="Noto Sans CJK KR",
-        fontsize=spec.font_size,
-        outline=3,
-        shadow=1,
-        marginl=50,
-        marginr=50,
-        marginv=int(spec.height * 0.13),
+def stickers_dir() -> Path | None:
+    """이미지 스티커(PNG)를 두는 디렉터리. `R4_STICKERS_DIR`로 알려 줍니다."""
+    value = os.environ.get("R4_STICKERS_DIR", "").strip()
+    return Path(value) if value else None
+
+
+def sticker_overlays(spec: EditSpec) -> list:
+    """이미지 스티커 오버레이 목록. **두 렌더 경로가 같은 것을 씁니다.**
+
+    한쪽에서만 부르면 그 경로의 결과에서 스티커가 조용히 사라집니다(실제로
+    그런 적이 있습니다). 디렉터리가 없으면 `image_overlays`가 ValueError 를
+    내고 `render_clip` 이 RenderError 로 바꿔 알립니다.
+    """
+    return image_overlays(
+        clip_stickers(getattr(spec, "stickers", None) or [], spec.start, spec.end),
+        stickers_dir(),
+        width=spec.width,
+        height=spec.height,
+        duration=getattr(spec, "output_seconds", spec.end - spec.start),
     )
-    subs.styles["Default"] = style
-    # 줄바꿈과 분할을 여기서 확정합니다. libass 자동 줄바꿈에 맡기지 않습니다.
+
+
+def overlay_chain(
+    base_label: str, overlays: list, first_input: int
+) -> tuple[list[str], list[str], str]:
+    """이미 만들어진 영상 라벨 뒤에 스티커를 얹습니다.
+
+    `overlay_filter_graph`는 `[0:v]`에서 시작하는 단순 경로용입니다. 구간을
+    이어 붙이는 그래프 경로에서는 시작 라벨이 `[vout]`이라 그대로 쓸 수 없어
+    여기서 조각만 만듭니다. (추가 `-i` 인자, 그래프 조각, 마지막 라벨)입니다.
+    """
+    inputs: list[str] = []
+    parts: list[str] = []
+    current = base_label
+    for index, item in enumerate(overlays):
+        inputs += ["-i", str(item.path)]
+        stream = first_input + index
+        scaled = f"ss{index}"
+        out = f"sticker{index}"
+        parts.append(f"[{stream}:v]scale={item.width}:-1[{scaled}]")
+        parts.append(
+            f"[{current}][{scaled}]overlay=x={item.center_x:.0f}-w/2:y={item.center_y:.0f}-h/2"
+            f":enable='between(t,{item.start:.3f},{item.end:.3f})'[{out}]"
+        )
+        current = out
+    return inputs, parts, current
+
+
+def video_filter_args(spec: EditSpec, *, base_chain: str) -> list[str]:
+    """`-vf` 또는 (이미지 스티커가 있으면) `-i … -filter_complex … -map` 인자.
+
+    영상 스트림 매핑까지 돌려주므로 부르는 쪽은 `-map 0:v:0`을 넣지 않습니다.
+    """
+    overlays = sticker_overlays(spec)
+    if not overlays:
+        return ["-map", "0:v:0", "-vf", base_chain]
+    inputs, graph, out = overlay_filter_graph(base_chain, overlays)
+    return [*inputs, "-filter_complex", graph, "-map", f"[{out}]"]
+
+
+def fonts_dir() -> str | None:
+    """템플릿 글꼴이 든 디렉터리. 워커 이미지는 시스템 글꼴로 설치하므로 비어 있습니다.
+
+    로컬에서 `scripts/fetch_fonts.py --out .fonts`로 받았다면 `R4_FONTS_DIR`로 알려 줍니다.
+    """
+    value = os.environ.get("R4_FONTS_DIR", "").strip()
+    return value or None
+
+
+def subtitles_filter(filename: str = "captions.ass") -> str:
+    """FFmpeg subtitles 필터 문자열. 글꼴 디렉터리가 있으면 libass에 함께 넘깁니다."""
+    directory = fonts_dir()
+    if not directory:
+        return f"subtitles={filename}"
+    # 필터 인자에서 콜론·역슬래시·따옴표는 구분자라 이스케이프합니다.
+    escaped = directory.replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'")
+    return f"subtitles={filename}:fontsdir='{escaped}'"
+
+
+def has_audio(source: Path) -> bool:
+    """소리가 들어 있는지. 없는 영상에 음성 그래프를 붙이면 FFmpeg가 멈춥니다."""
+    probe = shutil.which("ffprobe") or ffmpeg_binary().replace("ffmpeg", "ffprobe")
+    try:
+        found = subprocess.run(
+            [
+                probe,
+                "-v",
+                "error",
+                "-select_streams",
+                "a",
+                "-show_entries",
+                "stream=index",
+                "-of",
+                "csv=p=0",
+                str(source),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return bool(found.stdout.strip())
+
+
+def write_subtitles(
+    path: Path,
+    spec: EditSpec,
+    rules: SubtitleRules = DEFAULT_RULES,
+    template: SubtitleTemplate | str | None = None,
+) -> None:
+    """굽는 자막 ASS 파일을 씁니다.
+
+    모양은 템플릿이 정합니다. 주지 않으면 `spec.subtitle_template`(없으면 default)을
+    쓰고, `spec.subtitle_preset`·`spec.subtitle_animation`이 있으면 그 값으로 바꿉니다.
+    줄바꿈과
+    분할은 여기서 확정합니다. libass 자동 줄바꿈에 맡기지 않습니다.
+    """
+    if template is None:
+        template = getattr(spec, "subtitle_template", None)
+    animation = getattr(spec, "subtitle_animation", None)
+    preset = getattr(spec, "subtitle_preset", None)
+    try:
+        chosen = resolve_template(template)
+        if preset is not None:
+            chosen = chosen.with_preset(preset)
+        if animation:
+            chosen = chosen.with_animation(animation)
+    except ValueError as exc:
+        raise RenderError(str(exc)) from None
+    # 끊는 방식을 고르면 그 규칙을 씁니다. 비우면 부르는 쪽이 준 규칙 그대로입니다.
+    pacing = getattr(spec, "subtitle_pacing", None)
+    if pacing:
+        try:
+            rules = pacing_rules(pacing, getattr(spec, "caption_language", None), rules)
+        except ValueError as exc:
+            raise RenderError(str(exc)) from None
     segments = getattr(spec, "segments", None)
     if not getattr(spec, "burn_subtitles", True):
-        shown = []
+        cues = []
     elif segments:
         # 이어 붙인 시간축으로 옮깁니다. 빠진 구간의 자막은 함께 빠집니다.
-        shown = concat_cues(spec.cues, segments)
+        cues = concat_cues(spec.cues, segments)
     else:
-        shown = clip_cues(spec.cues, spec.start, spec.end)
-    for cue in apply_rules(shown, rules):
-        subs.append(
-            pysubs2.SSAEvent(
-                start=round(cue.start * 1000), end=round(cue.end * 1000), text=plain_ass(cue.text)
-            )
-        )
-    if spec.title:
-        title_style = style.copy()
-        title_style.alignment = pysubs2.Alignment.TOP_CENTER
-        title_style.marginv = int(spec.height * 0.08)
-        subs.styles["Title"] = title_style
-        subs.append(
-            pysubs2.SSAEvent(
-                start=0,
-                end=round(getattr(spec, "output_seconds", spec.end - spec.start) * 1000),
-                text=plain_ass(spec.title),
-                style="Title",
-            )
-        )
-    subs.save(str(path), encoding="utf-8")
+        cues = clip_cues(spec.cues, spec.start, spec.end)
+    length = getattr(spec, "output_seconds", spec.end - spec.start)
+    document = styled_document(
+        apply_rules(cues, rules),
+        chosen,
+        width=spec.width,
+        height=spec.height,
+        duration=length,
+        title=spec.title,
+        font_size=getattr(spec, "font_size", None),
+    )
+    # 벡터 스티커는 자막과 같은 문서에 들어갑니다. 이미지 스티커는 합성 단계(overlay)입니다.
+    add_sticker_events(
+        document,
+        clip_stickers(getattr(spec, "stickers", None) or [], spec.start, spec.end),
+        width=spec.width,
+        height=spec.height,
+        duration=length,
+    )
+    document.save(str(path), encoding="utf-8")
 
 
-def video_filter(spec: EditSpec) -> str:
+def video_filter(spec: EditSpec, path: Sequence[Point] = ()) -> str:
+    """영상 필터 체인. `path`가 있으면 가로 중심이 그 경로를 따라갑니다."""
     w, h = spec.width, spec.height
     if spec.mode == "crop":
+        # 식에 쉼표가 있어 작은따옴표로 묶습니다(묶지 않으면 필터 구분자입니다).
+        x = f"'{crop_x(path, spec.focus_x)}'" if path else f"(iw-ow)*{spec.focus_x}"
         frame = (
             f"scale={w}:{h}:force_original_aspect_ratio=increase,"
-            f"crop={w}:{h}:(iw-ow)*{spec.focus_x}:(ih-oh)*{spec.focus_y}"
+            f"crop={w}:{h}:{x}:(ih-oh)*{spec.focus_y}"
         )
     else:
         frame = (
             f"scale={w}:{h}:force_original_aspect_ratio=decrease:force_divisible_by=2,"
             f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:color=black"
         )
-    return f"{frame},setsar=1,subtitles=captions.ass,format=yuv420p"
+    return f"{frame},setsar=1,{subtitles_filter()},format=yuv420p"
 
 
 def source_time(spec: EditSpec, at: float) -> float:
@@ -184,15 +325,84 @@ def tempo_chain(speed: float) -> str:
 
 
 def simple(spec: EditSpec) -> bool:
-    """예전과 똑같이 한 번에 잘라 내면 되는가. 그러면 필터 그래프를 쓰지 않습니다."""
-    return not spec.segments and not spec.fade_in and not spec.fade_out
+    """예전의 단순한 한 구간 경로로 충분한지.
+
+    구간 고르기·페이드·전환·잡음 제거·리프레이밍 가운데 하나라도 있으면
+    그래프 경로로 갑니다.
+    """
+    return not (
+        spec.segments
+        or spec.fade_in
+        or spec.fade_out
+        or getattr(spec, "denoise", None)
+        or getattr(spec, "transition", None)
+    )
 
 
-def complex_filter(spec: EditSpec, *, audio: str, music: str | None) -> tuple[str, str]:
+# 겹쳐 잇기가 눈에 띄지도 않으면서 계산만 복잡해지는 아래쪽 한계.
+MIN_OVERLAP = 0.05
+
+
+def transition_seconds(spec: EditSpec) -> float:
+    """실제로 쓸 전환 길이. 토막보다 길게 겹칠 수는 없습니다.
+
+    xfade는 두 토막을 `duration`만큼 겹치므로 **가장 짧은 토막의 절반**까지로
+    줄입니다. 그래도 너무 짧으면 0이고, 부르는 쪽은 전환 없이 딱 붙입니다.
+    탐지 결과 때문에 렌더가 실패하면 사람이 고칠 방법이 없습니다.
+    """
+    settings = getattr(spec, "transition", None)
+    spans = spec.spans
+    if settings is None or len(spans) < 2:
+        return 0.0
+    shortest = min(span.output_seconds for span in spans)
+    usable = min(settings.seconds, shortest / 2)
+    return round(usable, 3) if usable >= MIN_OVERLAP else 0.0
+
+
+def output_seconds(spec: EditSpec) -> float:
+    """결과 길이. 전환을 넣으면 이음매마다 겹친 만큼 짧아집니다."""
+    overlap = transition_seconds(spec)
+    return spec.output_seconds - max(0, len(spec.spans) - 1) * overlap
+
+
+def transition_graph(spec: EditSpec, count: int, overlap: float) -> list[str]:
+    """토막을 xfade/acrossfade로 겹쳐 잇는 그래프 조각. 출력은 [vx]·[ax]입니다.
+
+    xfade의 `offset`은 **지금까지 이어 붙인 길이**에서 겹칠 만큼 당긴 자리입니다.
+    한 번 겹칠 때마다 결과가 그만큼 짧아지므로 다음 offset도 함께 당겨집니다.
+    """
+    kind = spec.transition.kind
+    spans = spec.spans
+    parts: list[str] = []
+    video, sound = "[v0]", "[a0]"
+    elapsed = spans[0].output_seconds
+    for index in range(1, count):
+        offset = round(elapsed - overlap, 3)
+        last = index == count - 1
+        video_out = "[vx]" if last else f"[vt{index}]"
+        sound_out = "[ax]" if last else f"[at{index}]"
+        parts.append(
+            f"{video}[v{index}]xfade=transition={kind}:duration={overlap}:"
+            f"offset={offset}{video_out}"
+        )
+        parts.append(f"{sound}[a{index}]acrossfade=d={overlap}{sound_out}")
+        video, sound = video_out, sound_out
+        elapsed = offset + spans[index].output_seconds
+    return parts
+
+
+def complex_filter(
+    spec: EditSpec, *, audio: str, music: str | None, path: Sequence[Point] = ()
+) -> tuple[str, str]:
     """(filter_complex, 소리 출력 이름). 영상 출력은 늘 [vout]입니다.
 
-    구간마다 잘라 배속을 걸고 이어 붙인 뒤(concat), 화면을 맞추고 자막을 굽습니다.
-    같은 입력을 여러 번 쓰려면 먼저 split해야 해서 구간이 둘 이상이면 나눕니다.
+    구간마다 잘라 배속을 걸고 이어 붙인 뒤(concat 또는 xfade), 화면을 맞추고
+    자막을 굽습니다. 같은 입력을 여러 번 쓰려면 먼저 split해야 해서 구간이
+    둘 이상이면 나눕니다.
+
+    `spec.transition`이 있으면 딱 붙이는 대신 겹쳐 잇습니다. 겹친 만큼
+    짧아지므로 길이는 `transition_seconds`를 빼고 셉니다. `spec.denoise`는
+    소리에만 겁니다.
     """
     spans, parts = spec.spans, []
     count = len(spans)
@@ -212,20 +422,27 @@ def complex_filter(spec: EditSpec, *, audio: str, music: str | None) -> tuple[st
             f"{audio_in}atrim=start={span.start}:end={span.end},"
             f"asetpts=PTS-STARTPTS{tempo_chain(span.speed)}[a{index}]"
         )
-    if count > 1:
+    overlap = transition_seconds(spec)
+    if count > 1 and overlap:
+        parts += transition_graph(spec, count, overlap)
+        video_label, audio_label = "[vx]", "[ax]"
+    elif count > 1:
         joined = "".join(f"[v{i}][a{i}]" for i in range(count))
         parts.append(f"{joined}concat=n={count}:v=1:a=1[vc][ac]")
         video_label, audio_label = "[vc]", "[ac]"
     else:
         video_label, audio_label = "[v0]", "[a0]"
 
-    total = spec.output_seconds
+    total = output_seconds(spec)
+    if spec.denoise:
+        parts.append(f"{audio_label}{DENOISE[spec.denoise]}[adn]")
+        audio_label = "[adn]"
     fades = []
     if spec.fade_in:
         fades.append(f"fade=t=in:st=0:d={spec.fade_in}")
     if spec.fade_out:
         fades.append(f"fade=t=out:st={round(total - spec.fade_out, 3)}:d={spec.fade_out}")
-    parts.append(video_label + ",".join([video_filter(spec), *fades]) + "[vout]")
+    parts.append(video_label + ",".join([video_filter(spec, path), *fades]) + "[vout]")
 
     sound = [f.replace("fade=", "afade=") for f in fades]
     if sound:
@@ -247,6 +464,34 @@ def complex_filter(spec: EditSpec, *, audio: str, music: str | None) -> tuple[st
     return ";".join(parts), audio_label
 
 
+def moved_face_time(at: float, spec: EditSpec) -> float | None:
+    """원본 시각을 이어 붙인 뒤의 시각으로. 빠진 구간이면 `None`입니다.
+
+    `crop`은 자르고 이어 붙인 **뒤에** 오므로 얼굴 시각도 그 시간축이어야
+    합니다. 배속을 걸면 그만큼 당겨집니다.
+    """
+    offset = 0.0
+    for span in spec.spans:
+        if span.start <= at <= span.end:
+            return offset + (at - span.start) / span.speed
+        offset += span.output_seconds
+    return None
+
+
+def clip_path(spec: EditSpec, faces: Sequence[Point] | None) -> list[Point]:
+    """가로 중심이 따라갈 경로. 쓰지 않으면 빈 목록입니다.
+
+    `mode="crop"`이고 `reframe`을 켰을 때만 씁니다(`pad`는 화면 전체를 남기므로
+    따라갈 것이 없습니다). 검출기가 얼굴을 못 찾았으면 빈 목록이고, 그때 crop은
+    지금까지대로 `focus_x` 고정입니다.
+    """
+    settings = getattr(spec, "reframe", None)
+    if settings is None or spec.mode != "crop" or not faces:
+        return []
+    moved = [(moved_face_time(at, spec), value) for at, value in faces]
+    return follow([(at, value) for at, value in moved if at is not None], settings=settings)
+
+
 def render_clip(
     source: Path,
     output: Path,
@@ -255,6 +500,7 @@ def render_clip(
     rules: SubtitleRules = DEFAULT_RULES,
     music: Path | None = None,
     has_audio: bool | None = None,
+    faces: Sequence[Point] | None = None,
 ) -> None:
     source, output = source.resolve(), output.resolve()
     if not source.is_file() or source == output:
@@ -265,11 +511,17 @@ def render_clip(
     with tempfile.TemporaryDirectory(prefix="r4-render-") as directory:
         temp = Path(directory)
         write_subtitles(temp / "captions.ass", spec, rules)
-        command = (
-            simple_command(source, temp, spec)
-            if simple(spec) and music is None
-            else graph_command(source, temp, spec, music, has_audio)
-        )
+        path = clip_path(spec, faces)
+        try:
+            command = (
+                simple_command(source, temp, spec, path)
+                if simple(spec) and music is None and not path
+                else graph_command(source, temp, spec, music, has_audio, path)
+            )
+        except ValueError as exc:
+            # 스티커 디렉터리처럼 **설정** 때문에 못 만드는 경우입니다. 작업
+            # 오류로 보여 줄 수 있게 렌더 오류로 바꿉니다.
+            raise RenderError(str(exc)) from None
         run_ffmpeg(command, temp, output)
 
 
@@ -289,7 +541,9 @@ ENCODE = [
 ]
 
 
-def simple_command(source: Path, temp: Path, spec: EditSpec) -> list[str]:
+def simple_command(
+    source: Path, temp: Path, spec: EditSpec, path: Sequence[Point] = ()
+) -> list[str]:
     """한 구간을 그대로 잘라 내는 예전 경로. 결과가 달라지지 않게 그대로 둡니다."""
     return [
         ffmpeg_binary(),
@@ -304,19 +558,21 @@ def simple_command(source: Path, temp: Path, spec: EditSpec) -> list[str]:
         str(source),
         "-t",
         str(spec.end - spec.start),
-        "-map",
-        "0:v:0",
+        *video_filter_args(spec, base_chain=video_filter(spec, path)),
         "-map",
         "0:a:0?",
-        "-vf",
-        video_filter(spec),
         *ENCODE,
         str(temp / "result.mp4"),
     ]
 
 
 def graph_command(
-    source: Path, temp: Path, spec: EditSpec, music: Path | None, has_audio: bool | None
+    source: Path,
+    temp: Path,
+    spec: EditSpec,
+    music: Path | None,
+    has_audio: bool | None,
+    path: Sequence[Point] = (),
 ) -> list[str]:
     """구간 이어 붙이기·배속·페이드·배경음악을 쓰는 경로."""
     if has_audio is None:
@@ -334,12 +590,21 @@ def graph_command(
         # 음악이 짧으면 되풀이합니다. 길면 아래 -t가 잘라 냅니다.
         command += ["-stream_loop", "-1", "-i", str(music)]
         music_label = f"[{len(command_inputs(command)) - 1}:a]"
-    graph, audio_out = complex_filter(spec, audio=audio, music=music_label)
-    command += ["-filter_complex", graph, "-map", "[vout]", "-map", audio_out]
+    graph, audio_out = complex_filter(spec, audio=audio, music=music_label, path=path)
+    # 이미지 스티커는 이어 붙이기·페이드가 끝난 [vout] 위에 얹습니다. 단순 경로만
+    # 얹으면 구간·전환·잡음 제거를 쓸 때 스티커가 조용히 사라집니다.
+    overlays = sticker_overlays(spec)
+    video_out = "[vout]"
+    if overlays:
+        inputs, parts, last = overlay_chain("vout", overlays, len(command_inputs(command)))
+        command += inputs
+        graph = ";".join([graph, *parts])
+        video_out = f"[{last}]"
+    command += ["-filter_complex", graph, "-map", video_out, "-map", audio_out]
     command += [
         *ENCODE,
         "-t",
-        str(round(spec.output_seconds, 3)),
+        str(round(output_seconds(spec), 3)),
         str(temp / "result.mp4"),
     ]
     return command

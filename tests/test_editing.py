@@ -9,7 +9,7 @@ from worker.rendering import plain_ass, write_subtitles
 
 def test_timeline_is_intersected_and_rebased():
     cues = [Cue(start=5, end=12, text="before"), Cue(start=18, end=25, text="after")]
-    assert [c.model_dump() for c in clip_cues(cues, 10, 20)] == [
+    assert [c.model_dump(exclude_none=True) for c in clip_cues(cues, 10, 20)] == [
         {"start": 0, "end": 2, "text": "before"},
         {"start": 8, "end": 10, "text": "after"},
     ]
@@ -58,3 +58,17 @@ def test_track_only_keeps_title_but_does_not_burn_dialogue(tmp_path):
     write_subtitles(path, spec)
     assert [e.plaintext for e in pysubs2.load(str(path))] == ["제목"]
     assert "대사" in clip_subtitle_file(spec, "srt", DEFAULT_RULES)
+
+
+def test_word_times_follow_the_clip_and_are_dropped_when_cut():
+    from pipeline.editing import Word
+
+    words = [Word(start=12, end=13, text="안녕"), Word(start=13.5, end=14, text="반가워")]
+    cue = Cue(start=12, end=14, text="안녕 반가워", words=words)
+    clipped = clip_cues([cue], 10, 20)[0]
+    assert [(w.start, w.end) for w in clipped.words] == [(2, 3), (3.5, 4)]
+    # 단어가 구간 밖으로 잘리면 글자와 맞지 않으므로 비웁니다.
+    assert clip_cues([cue], 10, 13.2)[0].words is None
+    assert clip_cues([Cue(start=12, end=14, text="가")], 10, 20)[0].words is None
+    with pytest.raises(ValueError):
+        Word(start=2, end=1, text="가")

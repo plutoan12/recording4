@@ -7,7 +7,7 @@ import uuid
 
 import pytest
 
-from pipeline.editing import Cue, EditSpec
+from pipeline.editing import Cue, EditSpec, ReframeSettings, TransitionSettings
 from worker.rendering import RenderError, render_clip, render_preview
 
 
@@ -163,3 +163,54 @@ def test_real_preview_makes_one_frame_at_the_output_size(tmp_path):
     assert probe_value(output, "v:0", "stream=height") == "1920"
     with pytest.raises(RenderError):
         render_preview(source, tmp_path / "bad.png", spec, 99.0)
+
+
+def test_real_render_joins_the_segments_with_a_transition(tmp_path):
+    """전환은 필터 문자열이 맞아야 돌아갑니다. 실제로 렌더해서 길이를 잽니다.
+
+    두 구간(각 3초)을 딱 붙이면 6.0초, 0.3초씩 겹치면 5.7초입니다. 겹친 만큼
+    짧아지는 것을 `output_seconds`와 실제 파일 양쪽에서 봅니다.
+    """
+    binary = ffmpeg_or_skip()
+    source = tmp_path / "source.mp4"
+    make_source(binary, source, 12)
+    segments = [{"start": 0, "end": 3}, {"start": 6, "end": 9}]
+
+    hard = tmp_path / "hard.mp4"
+    render_clip(source, hard, EditSpec(start=0, end=12, segments=segments))
+    assert abs(float(probe_value(hard, "v:0", "format=duration")) - 6.0) < 0.4
+
+    faded = tmp_path / "faded.mp4"
+    spec = EditSpec(
+        start=0,
+        end=12,
+        segments=segments,
+        transition=TransitionSettings(kind="fade", seconds=0.3),
+    )
+    render_clip(source, faded, spec)
+    assert abs(float(probe_value(faded, "v:0", "format=duration")) - 5.7) < 0.4
+
+
+def test_real_render_follows_a_moving_centre_and_denoises(tmp_path):
+    """crop 식과 잡음 제거가 FFmpeg를 통과하는지. 모양이 아니라 **도는지**를 봅니다.
+
+    얼굴 경로는 직접 넣습니다. 여기서 보는 것은 따라가는 쪽이지 찾는 쪽이
+    아닙니다(찾는 쪽은 worker.analysis에 따로 있습니다).
+    """
+    binary = ffmpeg_or_skip()
+    source = tmp_path / "source.mp4"
+    make_source(binary, source, 6)
+    output = tmp_path / "out.mp4"
+    spec = EditSpec(
+        start=0,
+        end=6,
+        mode="crop",
+        width=360,
+        height=640,
+        reframe=ReframeSettings(deadzone=0.0, max_speed=2.0),
+        denoise="soft",
+    )
+    render_clip(source, output, spec, faces=[(0.0, 0.2), (3.0, 0.8), (6.0, 0.5)])
+    assert probe_value(output, "v:0", "stream=width") == "360"
+    assert probe_value(output, "v:0", "stream=height") == "640"
+    assert abs(float(probe_value(output, "v:0", "format=duration")) - 6.0) < 0.4

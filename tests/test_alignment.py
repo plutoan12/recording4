@@ -225,3 +225,21 @@ def test_supported_options_gives_up_when_the_signature_is_unreadable():
     from pipeline.alignment import supported_options
 
     assert supported_options(print, {"speech_pad_ms": 0}) == {}
+
+
+def test_line_cues_carry_their_word_times() -> None:
+    cues = cues_for_lines(
+        ["안녕하세요 반갑습니다", "두 번째"],
+        words(
+            (1.0, 1.8, " 안녕하세요"),
+            (1.9, 2.6, " 반갑습니다"),
+            (6.4, 6.9, " 두"),
+            (7.0, 7.5, " 번째"),
+        ),
+    )
+    assert cues is not None
+    assert [(w.start, w.end, w.text) for w in cues[0].words] == [
+        (1.0, 1.8, "안녕하세요"),
+        (1.9, 2.6, "반갑습니다"),
+    ]
+    assert [w.text for w in cues[1].words] == ["두", "번째"]

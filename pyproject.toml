@@ -36,6 +36,10 @@ analysis = [
     "faster-whisper==1.2.1",
     "scenedetect[opencv-headless]==0.6.7.1",
     "opencv-python-headless==4.14.0.94",
+    # 얼굴 검출을 더 정확하게. **모델은 따로 받아야 합니다**(scripts/fetch_face_model.py,
+    # 230KB). 없으면 위의 OpenCV 검출기로 내려갑니다. 워커 이미지에는 libegl1·libgles2 도
+    # 필요합니다.
+    "mediapipe==1.0.1",
 ]
 # 자막 정밀화. torch를 끌어오므로 설치량이 큽니다. CPU 전용 설치는 docs/OPEN_SOURCE_INTEGRATIONS.md를 봅니다.
 # speechbrain은 토큰 없이 도는 화자 분리(목소리 특징)용입니다. pyannote 모델은
@@ -57,8 +61,12 @@ providers = [
     # 하이라이트 추천. 대역으로 시험하므로 없어도 시험은 돕니다.
     "anthropic==1.7.0",
 ]
+# 자막 템플릿 글꼴 설치(scripts/fetch_fonts.py). 눈누 저장소의 WOFF를 TTF/OTF로 바꾸는 데 씁니다.
+fonts = ["fonttools==4.65.0", "brotli==1.1.0"]
 dev = [
     "pytest==8.3.4",
+    "fonttools==4.65.0",
+    "brotli==1.1.0",
     "httpx==0.28.1",
     "ruff==0.8.4",
     # scripts/verify_sync_matrix.py가 numpy로 음성을 만듭니다. 그 시험이 스크립트를
@@ -66,6 +74,10 @@ dev = [
     # 이미지는 torch·opencv가 각자 끌어오므로 여기 고정과 섞이지 않습니다.
     "numpy==2.4.6",
 ]
+
+[project.scripts]
+# 자막 파일·템플릿 도구. `python -m pipeline.subtitle_tool`과 같습니다.
+r4-subtitles = "pipeline.subtitle_tool:main"
 
 [tool.setuptools]
 # 공유 도메인 패키지만 설치합니다. API·워커는 PYTHONPATH로 불러옵니다.
