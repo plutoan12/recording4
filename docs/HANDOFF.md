@@ -1,3 +1,20 @@
+## 2026-09-22: 마이그레이션 머리가 PR 둘에 걸쳐 갈라질 예정 (Claude)
+
+**아직 안 터졌지만 예정된 것입니다.** PR #36(이 브랜치)과 PR #39(`claude/claude-md-design-review-v8qdz4`)가 둘 다 `0010_silence_preview` 뒤에 `0011`을 답니다.
+
+| PR | 리비전 | 부모 |
+|---|---|---|
+| #36 | `0011_transcript_words` | `0010_silence_preview` |
+| #39 | `0011_transcript_overlap` | `0010_silence_preview` |
+
+각 PR 안에서는 머리가 하나라 **양쪽 CI 모두 통과합니다.** 둘 다 머지되면 main 에 머리가 둘이 되어 `alembic upgrade head` 가 "Multiple head revisions are present" 로 막힙니다. 나중에 머지하는 쪽이 밟습니다.
+
+**정한 것: #36 이 비킵니다.** #39 가 먼저 들어가면 이 브랜치가 main 을 당겨 온 뒤 `0011_transcript_words` 를 `0012_transcript_words` 로 옮기고 부모를 `0011_transcript_overlap` 으로 바꿉니다.
+
+**지금 미리 바꿀 수는 없습니다.** 부모 리비전 파일이 같은 `migrations/versions/` 안에 있어야 합니다. 없는 이름을 부모로 적으면 `KeyError: '0011_transcript_overlap'` 로 alembic 이 바로 깨지고 CI(ci.yml 의 `alembic upgrade head`)도 같이 깨집니다. 실제로 해 보고 확인했습니다.
+
+반대로 #36 이 먼저 머지되면 #39 가 같은 방식으로 비키면 됩니다. 어느 쪽이든 **나중에 머지하는 쪽이 부모를 앞엣것으로 바꾸는 것**이 규칙입니다.
+
 ## 2026-09-21: main(PR #17)과 합치면서 겹친 기능을 정리함 (Claude)
 
 PR #36을 밀고 있는 동안 main에 PR #17이 들어왔고, **같은 기능을 양쪽이 따로 만들어 둔 것**이 드러났습니다. 22개 파일이 충돌했습니다. 규칙을 하나로 두고 풀었습니다 — **트렁크(main)에 이미 들어간 쪽을 쓰고, 내 쪽에만 있는 것을 그 위에 올린다.** 두 벌을 나란히 두면 어느 시간축인지 아무도 모르게 됩니다.
