@@ -16,6 +16,7 @@ from adminapi.models import Artifact, MediaTask, SourceAsset, TranscriptSegment,
 from adminapi.storage import get_storage
 from pipeline.cuts import keep_spans, kept_seconds, within
 from pipeline.editing import Cue, EditSpec
+from pipeline.overlap import flag_overlaps, overlap_regions
 from pipeline.speakers import SpeakerTurn, assign_speakers, speaker_totals
 from worker.analysis import (
     MissingDependency,
@@ -255,20 +256,27 @@ def run_media(task_id: str) -> dict:
                         if version
                         else []
                     )
-                    result = {"speakers": speaker_totals(turns), "count": len(rows)}
+                    # 겹말 구간은 화자 구간에서 바로 나옵니다. 여기서 같이 찍어 두면
+                    # 사람이 "이 자막은 겹쳐 말해 못 믿는다"를 편집 화면에서 봅니다.
+                    regions = overlap_regions(turns)
+                    result = {
+                        "speakers": speaker_totals(turns),
+                        "count": len(rows),
+                        "overlap_regions": len(regions),
+                        "overlap_seconds": round(sum(e - s for s, e in regions), 3),
+                    }
                     if rows:
-                        labels = assign_speakers(
-                            [
-                                Cue(
-                                    start=float(r.start_seconds),
-                                    end=float(r.end_seconds),
-                                    text=r.text,
-                                )
-                                for r in rows
-                            ],
-                            turns,
-                        )
-                        for row, label in zip(rows, labels, strict=True):
+                        cues = [
+                            Cue(
+                                start=float(r.start_seconds),
+                                end=float(r.end_seconds),
+                                text=r.text,
+                            )
+                            for r in rows
+                        ]
+                        labels = assign_speakers(cues, turns)
+                        flags = flag_overlaps(cues, regions)
+                        for row, label, flag in zip(rows, labels, flags, strict=True):
                             session.add(
                                 TranscriptSegment(
                                     source_asset_id=task.source_asset_id,
@@ -277,10 +285,12 @@ def run_media(task_id: str) -> dict:
                                     end_seconds=row.end_seconds,
                                     text=row.text,
                                     speaker=label,
+                                    overlap=flag,
                                 )
                             )
                         result["transcript_version"] = version + 1
                         result["labeled"] = sum(1 for label in labels if label)
+                        result["overlapped"] = sum(1 for flag in flags if flag)
                 elif kind in ("transcribe", "align", "sync"):
                     # Serialize transcript imports and STT completion on the source row.
                     session.scalar(
