@@ -158,3 +158,28 @@ def test_worker_writes_vector_stickers_and_switches_to_filter_complex_for_images
     with pytest.raises(RenderError, match="R4_STICKERS_DIR"):
         rendering.render_clip(source, tmp_path / "out.mp4", spec)
     assert Path(tmp_path / "out.mp4").exists() is False
+
+
+def test_image_stickers_survive_the_graph_render_path(tmp_path, monkeypatch):
+    """구간·전환·잡음 제거를 쓰면 렌더가 그래프 경로로 갑니다. 거기서도 스티커가 붙어야 합니다.
+
+    `video_filter_args`(단순 경로)에서만 오버레이를 붙이던 때에는 그래프 경로에서
+    **아무 말 없이 스티커가 사라졌습니다.** 오류도 나지 않아 사람이 알 수 없습니다.
+    """
+    from pathlib import Path
+
+    from pipeline.editing import EditSpec, Sticker
+    from worker.rendering import graph_command, simple
+
+    monkeypatch.setenv("R4_STICKERS_DIR", str(tmp_path))
+    (tmp_path / "wow.png").write_bytes(b"\x89PNG")
+    stickers = [Sticker(kind="image", image="wow.png", start=1.0, end=3.0)]
+    spec = EditSpec(start=0, end=10, stickers=stickers, denoise="soft")
+
+    assert not simple(spec), "잡음 제거가 있으면 그래프 경로여야 합니다"
+    command = graph_command(Path("/tmp/a.mp4"), tmp_path, spec, None, True)
+    assert "-i" in command and str((tmp_path / "wow.png").resolve()) in command
+    graph = command[command.index("-filter_complex") + 1]
+    assert "overlay=" in graph and "[sticker0]" in graph
+    # 영상 출력이 스티커를 얹은 마지막 라벨이어야 합니다(안 그러면 그려도 버려집니다).
+    assert command[command.index("-map") + 1] == "[sticker0]"

@@ -60,18 +60,54 @@ def stickers_dir() -> Path | None:
     return Path(value) if value else None
 
 
+def sticker_overlays(spec: EditSpec) -> list:
+    """이미지 스티커 오버레이 목록. **두 렌더 경로가 같은 것을 씁니다.**
+
+    한쪽에서만 부르면 그 경로의 결과에서 스티커가 조용히 사라집니다(실제로
+    그런 적이 있습니다). 디렉터리가 없으면 `image_overlays`가 ValueError 를
+    내고 `render_clip` 이 RenderError 로 바꿔 알립니다.
+    """
+    return image_overlays(
+        clip_stickers(getattr(spec, "stickers", None) or [], spec.start, spec.end),
+        stickers_dir(),
+        width=spec.width,
+        height=spec.height,
+        duration=getattr(spec, "output_seconds", spec.end - spec.start),
+    )
+
+
+def overlay_chain(
+    base_label: str, overlays: list, first_input: int
+) -> tuple[list[str], list[str], str]:
+    """이미 만들어진 영상 라벨 뒤에 스티커를 얹습니다.
+
+    `overlay_filter_graph`는 `[0:v]`에서 시작하는 단순 경로용입니다. 구간을
+    이어 붙이는 그래프 경로에서는 시작 라벨이 `[vout]`이라 그대로 쓸 수 없어
+    여기서 조각만 만듭니다. (추가 `-i` 인자, 그래프 조각, 마지막 라벨)입니다.
+    """
+    inputs: list[str] = []
+    parts: list[str] = []
+    current = base_label
+    for index, item in enumerate(overlays):
+        inputs += ["-i", str(item.path)]
+        stream = first_input + index
+        scaled = f"ss{index}"
+        out = f"sticker{index}"
+        parts.append(f"[{stream}:v]scale={item.width}:-1[{scaled}]")
+        parts.append(
+            f"[{current}][{scaled}]overlay=x={item.center_x:.0f}-w/2:y={item.center_y:.0f}-h/2"
+            f":enable='between(t,{item.start:.3f},{item.end:.3f})'[{out}]"
+        )
+        current = out
+    return inputs, parts, current
+
+
 def video_filter_args(spec: EditSpec, *, base_chain: str) -> list[str]:
     """`-vf` 또는 (이미지 스티커가 있으면) `-i … -filter_complex … -map` 인자.
 
     영상 스트림 매핑까지 돌려주므로 부르는 쪽은 `-map 0:v:0`을 넣지 않습니다.
     """
-    overlays = image_overlays(
-        clip_stickers(getattr(spec, "stickers", None) or [], spec.start, spec.end),
-        stickers_dir(),
-        width=spec.width,
-        height=spec.height,
-        duration=spec.end - spec.start,
-    )
+    overlays = sticker_overlays(spec)
     if not overlays:
         return ["-map", "0:v:0", "-vf", base_chain]
     inputs, graph, out = overlay_filter_graph(base_chain, overlays)
@@ -555,7 +591,16 @@ def graph_command(
         command += ["-stream_loop", "-1", "-i", str(music)]
         music_label = f"[{len(command_inputs(command)) - 1}:a]"
     graph, audio_out = complex_filter(spec, audio=audio, music=music_label, path=path)
-    command += ["-filter_complex", graph, "-map", "[vout]", "-map", audio_out]
+    # 이미지 스티커는 이어 붙이기·페이드가 끝난 [vout] 위에 얹습니다. 단순 경로만
+    # 얹으면 구간·전환·잡음 제거를 쓸 때 스티커가 조용히 사라집니다.
+    overlays = sticker_overlays(spec)
+    video_out = "[vout]"
+    if overlays:
+        inputs, parts, last = overlay_chain("vout", overlays, len(command_inputs(command)))
+        command += inputs
+        graph = ";".join([graph, *parts])
+        video_out = f"[{last}]"
+    command += ["-filter_complex", graph, "-map", video_out, "-map", audio_out]
     command += [
         *ENCODE,
         "-t",

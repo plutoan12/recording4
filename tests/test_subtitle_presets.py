@@ -275,3 +275,20 @@ def test_letters_can_appear_with_blur_zoom_or_spin():
         assert "\\3a&HFF&" in body and "\\t(55,56," in body
     # 단어 단위는 단어마다 한 번입니다.
     assert preset_runs(get_preset("word-zoom"), "가나 다라", duration_ms=1500).count("{\\r") == 2
+
+
+def test_shear_without_an_amount_does_not_crash():
+    """`amount`는 비워 둘 수 있습니다. 비웠을 때 터지면 프리셋 하나가 도구 전체를 멈춥니다.
+
+    `shear`만 `step.amount`를 바로 읽어 `None`이면 TypeError 였습니다. 다른 동작처럼
+    `step.size(기본값)`을 거칩니다. `_broken_presets`는 ValueError 만 잡으므로
+    TypeError 는 `presets check` 자체를 죽입니다.
+    """
+    from pipeline.subtitle_presets import MotionPreset, preset_tags
+
+    preset = MotionPreset.model_validate(
+        {"name": "shear-bare", "label": "기울이기", "steps": [{"kind": "shear", "phase": "in"}]}
+    )
+    assert preset.steps[0].amount is None
+    tags = preset_tags(preset, duration_ms=1000, anchor=(540.0, 960.0))
+    assert "\\fax" in tags

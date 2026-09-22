@@ -461,11 +461,14 @@ def preset_tags(
                 add(start, _change(start, end, f"\\blur{step.size(0.0):g}", ease))
         elif kind == "shear":
             axis = "fay" if step.direction in ("up", "down", "vertical") else "fax"
+            # amount 는 비워 둘 수 있습니다. 다른 동작처럼 종류별 기본값을 거쳐 읽습니다
+            # (바로 쓰면 비었을 때 TypeError 로 터집니다).
+            amount = step.size(0.2)
             if step.phase == "in":
-                statics.append(f"\\{axis}{step.amount:g}")
+                statics.append(f"\\{axis}{amount:g}")
                 add(start, _change(start, end, f"\\{axis}0", ease))
             else:
-                add(start, _change(start, end, f"\\{axis}{step.amount:g}", ease))
+                add(start, _change(start, end, f"\\{axis}{amount:g}", ease))
         elif kind == "flash":
             if base_tag:
                 statics.append("\\1c&HFFFFFF&")

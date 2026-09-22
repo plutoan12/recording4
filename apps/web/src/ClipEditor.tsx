@@ -51,7 +51,6 @@ function templatePreviewStyle(t: Template): React.CSSProperties {
   const size = Math.max(14, Math.round(t.font_size / 3))
   const stroke = Math.max(0, Math.round(t.outline / 2.5))
   const shadows: string[] = []
-  if (t.border_style === 'outline' && stroke > 0) shadows.push(`0 0 0 ${stroke}px ${cssColor(t.outline_color)}`)
   if (t.border_style === 'outline' && t.outline2 > 0) {
     // text-shadow에는 번짐 폭이 없어 여덟 방향으로 같은 그림자를 두어 바깥 테두리를 흉내 냅니다.
     const ring = stroke + Math.max(1, Math.round(t.outline2 / 2.5))
@@ -284,7 +283,7 @@ export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWo
     cues: captions, segments, fade_in: fadeIn, fade_out: fadeOut,
     subtitle_template: template, subtitle_animation: animation || null,
     subtitle_preset: preset || null, subtitle_pacing: pacing || null,
-    stickers, transition: transition || null,
+    stickers, transition: transition ? {kind: transition} : null,
     reframe: autoFrame && mode === 'crop' ? {} : null, denoise: denoise || null,
     music_asset_id: musicId || null, music_gain_db: musicGain, music_duck: musicDuck,
   })
@@ -433,7 +432,7 @@ export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWo
         <option value="">서버 기본값</option>
         {pacings.map(p => <option key={p.name} value={p.name}>{p.label}</option>)}
       </select></label>
-      <label>모션 프리셋<select value={preset} disabled={!burn} onChange={e=>setPreset(e.target.value)}>
+      <label>모션 프리셋<select value={preset} disabled={!burn} onChange={e=>{setAnimation('');setPreset(e.target.value)}}>
         <option value="">쓰지 않음(템플릿 값)</option>
         {[...new Map(presets.map(p => [p.pack, p.pack_label])).entries()].map(([pack, packLabel]) => (
           <optgroup key={pack} label={packLabel}>

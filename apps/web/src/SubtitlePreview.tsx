@@ -54,6 +54,12 @@ export function SubtitlePreview({ template, animation, preset, pacing, text, sec
         setStatus('ready')
         setNote(missing.length ? `글꼴을 받지 못해 다른 글꼴로 그립니다: ${missing.join(', ')}` : '')
         const started = performance.now()
+        // 움직임을 줄여 달라고 한 사람에게는 한 장만 그립니다. styles.css 의 규칙은
+        // .template-preview span 에만 걸려 이 캔버스에는 닿지 않습니다.
+        if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+          void instance.manualRender({ expectedDisplayTime: started, width: preview.width / 2, height: preview.height / 2, mediaTime: preview.seconds / 2 })
+          return
+        }
         const tick = () => {
           const now = performance.now()
           const mediaTime = ((now - started) / 1000) % preview.seconds

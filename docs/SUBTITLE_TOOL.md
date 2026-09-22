@@ -91,14 +91,14 @@ r4-subtitles quality in.srt --pacing shortform --shape           # 숏폼으로 
 | 카테고리 | 이름 | 모양 |
 |---|---|---|
 | 기본 | `default` | 흰 글자에 검은 외곽선. 템플릿 도입 전 렌더와 같은 값이라 기존 편집본의 모양이 바뀌지 않습니다 |
-| 기본 | `shorts-bold`, `yellow`, `top`, `minimal`, `clean-white`, `gmarket-yellow`, `pretendard-clean`, `scoredream-clean`, `nexon-info` | 굵은 강조, 예능 노랑, 상단 배치, 얇은 외곽선, 선플라워·지마켓·프리텐다드 |·에스코어드림·넥슨 고딕
-| 브이로그 제목 | `vlog-lime`, `vlog-pink`, `fire-red`, `spring-glow`, `title-sticker`, `pink-sticker`, `solid-shadow`, `jalnan-sticker`, `jalnan-yellow`, `ssurround-lime`, `pop-yellow-3d`, `scoredream-heavy-yellow`, `tmon-shout`, `hanna-orange` | Black Han Sans·Gasoek One·잘난체·써라운드 굵은 제목, 스티커 이중 외곽선, 입체 그림자, 봄 느낌 글로우 |·에스코어드림 노랑·몬소리 외침·배민 한나 주황
-| 귀여운 외곽선 | `bubble-white`, `bubble-sky`, `bubble-pink`, `round-white`, `mint-pastel`, `playful-tilt`, `lilac-sticker`, `cute-lemon`, `tilt-sticker`, `jalnan-pink-sticker`, `ssurround-sky-sticker`, `ssurround-peach`, `simplehae-lilac`, `nanum-round-mint` | Bagel Fat One·Dongle·Yeon Sung·잘난체·카페24 써라운드·심플해 통통 글자에 스티커 외곽선, 살짝 기울임, ★☆♡ 장식 |·나눔스퀘어라운드
+| 기본 | `shorts-bold`, `yellow`, `top`, `minimal`, `clean-white`, `gmarket-yellow`, `pretendard-clean`, `scoredream-clean`, `nexon-info` | 굵은 강조, 예능 노랑, 상단 배치, 얇은 외곽선, 선플라워·지마켓·프리텐다드·에스코어드림·넥슨 고딕 |
+| 브이로그 제목 | `vlog-lime`, `vlog-pink`, `fire-red`, `spring-glow`, `title-sticker`, `pink-sticker`, `solid-shadow`, `jalnan-sticker`, `jalnan-yellow`, `ssurround-lime`, `pop-yellow-3d`, `scoredream-heavy-yellow`, `tmon-shout`, `hanna-orange` | Black Han Sans·Gasoek One·잘난체·써라운드 굵은 제목, 스티커 이중 외곽선, 입체 그림자, 봄 느낌 글로우·에스코어드림 노랑·몬소리 외침·배민 한나 주황 |
+| 귀여운 외곽선 | `bubble-white`, `bubble-sky`, `bubble-pink`, `round-white`, `mint-pastel`, `playful-tilt`, `lilac-sticker`, `cute-lemon`, `tilt-sticker`, `jalnan-pink-sticker`, `ssurround-sky-sticker`, `ssurround-peach`, `simplehae-lilac`, `nanum-round-mint` | Bagel Fat One·Dongle·Yeon Sung·잘난체·카페24 써라운드·심플해 통통 글자에 스티커 외곽선, 살짝 기울임, ★☆♡ 장식·나눔스퀘어라운드 |
 | 네온·글로우 | `neon-pink`, `neon-blue`, `neon-purple`, `lavender-glow`, `cyber-cyan`, `neon-hollow-pink`, `neon-hollow-round`, `neon-hollow-lime` | 밝은 글자 주변에 색이 번지는 네온사인, 속 빈 네온(선만 빛남), 오르빗 사이버 |
-| 픽셀 | `pixel-heart`, `pixel-mint`, `pixel-box`, `maple-game` | Galmuri 도트 글꼴, 하트 장식, 연노랑 상자 |·메이플스토리 게임 대사
-| 상자·카드 | `box`, `pink-cabinet`, `note-yellow`, `note-pink`, `note-blue`, `tmi-blue`, `white-card`, `black-tag`, `cyan-strip`, `news-bar`, `wanted-mint-card`, `suit-dark-card` | 파스텔 상자·테두리 카드·검은 태그·빨간 뉴스 바·민트 카드. 소제목, 짧은 한마디, 제품 정보에 |·SUIT 반투명 검은 카드
-| 손글씨 | `pen-white`, `melody-pink`, `gamja-yellow`, `brush-white`, `brush-shadow`, `diary`, `brush-red`, `moogung-handwriting` | 나눔손글씨 펜·붓, 하이멜로디, 감자꽃, 서툰이야기, 독도 붓글씨 |·온글잎 무궁체
-| 레트로·세리프 | `movie-serif`, `luxury-serif`, `retro-orange`, `retro-blue-pixel`, `retro-blue-3d`, `songmyung-cream`, `elegant-serif`, `grandiflora-pink`, `swagger-street`, `euljiro-sign` | 고운바탕 영화 자막, 모이라이 레트로, 송명·디필레이아·그랜디플로라 세리프, 파란 도트 |·스웨거 스트리트·을지로 간판
+| 픽셀 | `pixel-heart`, `pixel-mint`, `pixel-box`, `maple-game` | Galmuri 도트 글꼴, 하트 장식, 연노랑 상자·메이플스토리 게임 대사 |
+| 상자·카드 | `box`, `pink-cabinet`, `note-yellow`, `note-pink`, `note-blue`, `tmi-blue`, `white-card`, `black-tag`, `cyan-strip`, `news-bar`, `wanted-mint-card`, `suit-dark-card` | 파스텔 상자·테두리 카드·검은 태그·빨간 뉴스 바·민트 카드. 소제목, 짧은 한마디, 제품 정보에·SUIT 반투명 검은 카드 |
+| 손글씨 | `pen-white`, `melody-pink`, `gamja-yellow`, `brush-white`, `brush-shadow`, `diary`, `brush-red`, `moogung-handwriting` | 나눔손글씨 펜·붓, 하이멜로디, 감자꽃, 서툰이야기, 독도 붓글씨·온글잎 무궁체 |
+| 레트로·세리프 | `movie-serif`, `luxury-serif`, `retro-orange`, `retro-blue-pixel`, `retro-blue-3d`, `songmyung-cream`, `elegant-serif`, `grandiflora-pink`, `swagger-street`, `euljiro-sign` | 고운바탕 영화 자막, 모이라이 레트로, 송명·디필레이아·그랜디플로라 세리프, 파란 도트·스웨거 스트리트·을지로 간판 |
 | 그라데이션 | `infomercial-gold`, `tv-blue-caps`, `night-show-pink`, `sunset-jalnan`, `gold-across`, `aurora-hollow`, `ice-live` | 90년대 TV 홈쇼핑·광고 느낌. 금색(노랑→주황)에 입체 그림자, 흰→하늘 대문자, 흰 테두리 핑크 쇼 로고, 가로 금색 전화번호, 선이 흐르는 네온, LIVE 자막. 상자 카테고리의 `as-seen-on-red`(빨간 배지)와 짝 |
 | 움직임 | `pop-jalnan`, `bounce-sticker`, `slide-vlog`, `drop-card`, `fade-film`, `zoom-title`, `wiggle-cute`, `neon-pulse`, `typewriter-pixel`, `typewriter-serif`, `word-pop-clean`, `karaoke-yellow`, `karaoke-card` | 위 모양에 움직임을 붙인 것. 팝·바운스·슬라이드·페이드·줌·흔들림·맥박·타자기·단어별 등장·노래방 강조. 아래 [움직임](#움직임) 참고 |
 
@@ -117,7 +117,7 @@ r4-subtitles burn source.mp4 captions.srt result.mp4 --template mine.json
 |---|---|---|
 | `name` | 소문자·숫자·하이픈, 40자 이하 | 필수 |
 | `label`, `description` | 화면 표시 이름·설명 | 필수 / 빈 값 |
-| `category` | `basic` `vlog` `cute` `neon` `pixel` `box` `handwriting` `retro` | `basic` |
+| `category` | `basic` `vlog` `cute` `neon` `pixel` `box` `handwriting` `retro` `gradient` `motion` | `basic` |
 | `sample` | 미리보기 예문. 비우면 `label` | 빈 값 |
 | `font_name` | 글꼴 이름. 아래 글꼴 목록에 있는 이름만 실제로 그려집니다. 쉼표·중괄호·역슬래시 불가 | `Noto Sans CJK KR` |
 | `font_size` | 20~120 (1080x1920 기준) | 64 |

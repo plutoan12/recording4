@@ -344,6 +344,16 @@ def test_presets_list_show_export_and_make_a_new_one(tmp_path, capsys, monkeypat
     assert "my-move" in capsys.readouterr().out
     assert main(["presets", "check"]) == EXIT_OK
     assert "문제가 있습니다" in capsys.readouterr().out
+    # 깨진 프리셋이 있으면 종료 코드가 달라져야 합니다. 위의 줄만으로는
+    # `check`가 늘 EXIT_OK 를 돌려주도록 되돌아가도 시험이 통과합니다.
+    # (지금 내장·사용자 프리셋 가운데 실제로 깨지는 것이 없어 찾은 결과를 넣어 둡니다.)
+    monkeypatch.setattr(
+        "pipeline.subtitle_tool._broken_presets", lambda presets: [("my-move", "일부러 깨뜨림")]
+    )
+    assert main(["presets", "check"]) == EXIT_ERROR
+    assert "일부러 깨뜨림" in capsys.readouterr().out
+    monkeypatch.undo()
+    monkeypatch.setenv("R4_PRESETS_DIR", str(tmp_path))
     monkeypatch.delenv("R4_PRESETS_DIR")
 
     assert main(["presets", "show", "없는프리셋"]) == EXIT_ERROR

@@ -599,14 +599,17 @@ def cmd_cut(args: argparse.Namespace) -> int:
 
 def _fontconfig_for(fonts: Path) -> str:
     """fc-match가 --fonts-dir도 보게 하는 임시 fontconfig 설정 파일 경로."""
-    config = Path(tempfile.gettempdir()) / "r4-fontconfig.xml"
-    config.write_text(
-        "<?xml version='1.0'?><!DOCTYPE fontconfig SYSTEM 'fonts.dtd'><fontconfig>"
-        "<include ignore_missing='yes'>/etc/fonts/fonts.conf</include>"
-        f"<dir>{fonts.resolve()}</dir></fontconfig>",
-        encoding="utf-8",
-    )
-    return str(config)
+    # 고정 이름을 쓰면 같은 호스트의 다른 사용자가 그 이름을 심볼릭 링크로 미리
+    # 만들어 둘 수 있고, 그때 write_text 가 링크가 가리키는 파일을 덮어씁니다.
+    # 동시에 두 번 돌 때 서로 덮어쓰는 것도 막아 줍니다.
+    handle, name = tempfile.mkstemp(prefix="r4-fontconfig-", suffix=".xml")
+    with os.fdopen(handle, "w", encoding="utf-8") as file:
+        file.write(
+            "<?xml version='1.0'?><!DOCTYPE fontconfig SYSTEM 'fonts.dtd'><fontconfig>"
+            "<include ignore_missing='yes'>/etc/fonts/fonts.conf</include>"
+            f"<dir>{fonts.resolve()}</dir></fontconfig>"
+        )
+    return name
 
 
 def font_matches(family: str) -> str | None:
@@ -1280,7 +1283,7 @@ def build_parser() -> argparse.ArgumentParser:
     reel.add_argument("--no-captions", action="store_true", help="화면 위 템플릿 이름을 뺍니다.")
     reel.add_argument(
         "--preset-pack",
-        choices=("basic", "short", "user", "all"),
+        choices=("basic", "short", "kinetic", "user", "all"),
         help="템플릿 대신 모션 프리셋 팩을 차례로 보여 줍니다(--templates의 첫 템플릿에 붙임).",
     )
     reel.add_argument("--ass", type=Path, help="영상 ASS 파일도 함께 저장")
