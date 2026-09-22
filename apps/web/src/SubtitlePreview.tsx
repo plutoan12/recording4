@@ -25,6 +25,12 @@ function loadFont(family: string): Promise<Uint8Array | null> {
 
 export function SubtitlePreview({ template, animation, preset, pacing, text, seconds = 3, stickers = [] }: { template: string; animation?: string; preset?: string; pacing?: string; text?: string; seconds?: number; stickers?: unknown[] }) {
   const stickersKey = JSON.stringify(stickers)
+  // 아래 useEffect 와 **같은 값들**로 만듭니다. JASSUB 은 생성자에서 캔버스를
+  // transferControlToOffscreen() 으로 넘기고 destroy() 에서 DOM 에서 떼어 냅니다.
+  // 한 캔버스는 한 번만 넘길 수 있어(실측: InvalidStateError), 같은 <canvas> 를
+  // 다시 쓰면 설정을 한 번 바꾼 뒤부터 미리보기가 영영 "쓸 수 없음"이 됩니다.
+  // key 를 바꿔 React 가 새 캔버스를 만들게 합니다.
+  const canvasKey = JSON.stringify([template, animation, preset, pacing, text, seconds, stickersKey])
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const [status, setStatus] = useState<'loading' | 'ready' | 'unavailable'>('loading')
   const [note, setNote] = useState('')
@@ -82,7 +88,7 @@ export function SubtitlePreview({ template, animation, preset, pacing, text, sec
   }, [template, animation, preset, pacing, text, seconds, stickersKey])
 
   return <div className="subtitle-preview">
-    {status !== 'unavailable' && <canvas ref={canvasRef} aria-label="자막 정확 미리보기" />}
+    {status !== 'unavailable' && <canvas key={canvasKey} ref={canvasRef} aria-label="자막 정확 미리보기" />}
     <small>{status === 'loading' ? '정확 미리보기(libass)를 준비하는 중…' : status === 'ready' ? `정확 미리보기(libass). ${seconds}초 반복 재생. ${note}` : `정확 미리보기를 쓸 수 없습니다: ${note}`}</small>
   </div>
 }
