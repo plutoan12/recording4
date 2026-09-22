@@ -48,7 +48,10 @@ def test_transcript_snapshots_and_suggestions(client, auth_headers, asset):
     path = f"/source-assets/{asset.id}/transcript"
     cues = [{"start": 2, "end": 10, "text": "hello"}]
     assert client.put(path, headers=auth_headers, json={"cues": cues}).json()["version"] == 1
-    assert client.get(path, headers=auth_headers).json() == cues
+    # 읽기에는 화자·겹침 표시가 함께 붙습니다. 아직 안 재 봤으니 둘 다 None입니다.
+    assert client.get(path, headers=auth_headers).json() == [
+        {"start": 2.0, "end": 10.0, "text": "hello", "speaker": None, "overlap": None}
+    ]
     assert (
         client.get(f"/source-assets/{asset.id}/suggestions", headers=auth_headers).json()[0][
             "start"
@@ -303,7 +306,7 @@ def test_imported_subtitles_become_a_new_transcript_version(client, auth_headers
     body = response.json()
     assert body["version"] == 2 and body["count"] == 1 and body["skipped"] == []
     assert client.get(path, headers=auth_headers).json() == [
-        {"start": 3.0, "end": 5.0, "text": "들여온 자막 둘째 줄"}
+        {"start": 3.0, "end": 5.0, "text": "들여온 자막 둘째 줄", "speaker": None, "overlap": None}
     ]
 
 
@@ -339,7 +342,13 @@ def test_a_cp949_file_is_read_by_the_detector_and_says_it_guessed(client, auth_h
     # 판별은 추측이라 밝힙니다. 화면이 이 표시를 보고 사람에게 확인을 청합니다.
     assert body["encoding_detected"] is True
     assert client.get(f"/source-assets/{asset.id}/transcript", headers=auth_headers).json() == [
-        {"start": 1.0, "end": 2.0, "text": "안녕하세요 자막입니다"}
+        {
+            "start": 1.0,
+            "end": 2.0,
+            "text": "안녕하세요 자막입니다",
+            "speaker": None,
+            "overlap": None,
+        }
     ]
 
 
@@ -378,7 +387,13 @@ def test_a_file_the_detector_cannot_place_asks_instead_of_saving_broken_text(
     assert saved.status_code == 200 and saved.json()["count"] == 1
     assert saved.json()["encoding_detected"] is False
     assert client.get(f"/source-assets/{asset.id}/transcript", headers=auth_headers).json() == [
-        {"start": 1.0, "end": 2.0, "text": "안녕하세요 자막입니다"}
+        {
+            "start": 1.0,
+            "end": 2.0,
+            "text": "안녕하세요 자막입니다",
+            "speaker": None,
+            "overlap": None,
+        }
     ]
 
 
@@ -439,5 +454,5 @@ def test_sync_saves_a_new_version_and_keeps_the_old_one(client, auth_headers, as
     assert result["sync"] == {"offset_seconds": 2.0, "framerate_scale": 1.0, "clamped": 0}
     assert result["transcript_version"] == 2
     assert client.get(f"/source-assets/{asset.id}/transcript", headers=auth_headers).json() == [
-        {"start": 5.0, "end": 7.0, "text": "어긋난 자막"}
+        {"start": 5.0, "end": 7.0, "text": "어긋난 자막", "speaker": None, "overlap": None}
     ]
