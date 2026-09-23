@@ -40,6 +40,8 @@ YouTube 자동 자막 트랙이 없어, 패딩한 분석용 음원 사본에 캐
 
 각 후보에 앞뒤 1초 문맥을 붙인 16 kHz mono WAV 15개와 `labels.template.json`을 비공개 `review-pack-20260921` 폴더에 만들었다. 사람 검수자는 `human_speakers`, `human_overlap`, `human_confidence`, `reviewer`만 채우면 된다. 현재 값은 전부 비어 있어 사람 정답이 작성된 것으로 세지 않는다.
 
+사람 검수를 돕는 `review.html`을 같은 비공개 폴더에 추가했다. 브라우저에서 오디오를 듣고 라벨을 편집해 `labels.reviewed.json`으로 내려받는다. 화면은 자동 전사와 모델 출력을 표시하지 않으며, 검수 라벨은 아직 작성·검증되지 않았다.
+
 ## 코드에 반영한 방어
 
 기계 활성 화자 근거가 대상 화자 재검사 자격에 쓰이려면 `score_kind=calibrated_probability`와 보정 revision을 선언하고, 호출자가 별도로 전달한 신뢰 목록에 `(model_revision, calibration_revision)` 조합이 있어야 한다. 선언만으로는 통과하지 않는다. 현재 신뢰 목록은 비어 있어 Light-ASD 원시 로그잇이나 임의의 sigmoid 값은 `untrusted_visual_calibration`으로 남는다. 사람 정답으로 보정한 뒤 코드 검토를 거친 revision을 등록하기 전까지 이번 결과는 불일치 탐지와 검수 우선순위에만 쓴다. 음성 임베딩의 0.6/0.15 기준은 기존 계약을 유지하며, 별도의 확률 보정값은 아니라는 한계가 남는다.
