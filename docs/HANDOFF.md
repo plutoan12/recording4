@@ -1,3 +1,11 @@
+## 2026-09-29 실제 영상 제작 경로 우선
+
+- 사용자가 화자 정확도 실험을 보류하고 실제 영상 제작을 우선하기로 했다. 운영 main `2e50815` 기반 `codex/video-delivery`에서 현재 멀티 컷·배속·페이드·음악을 보존하며 기존 모자이크 기능을 연결했다. 다른 작업 checkout과 비공개 평가 원본은 수정하지 않았다. 연구 전체가 들어 있는 #37은 별도 초안으로 남긴다.
+- `EditSpec`과 관리화면에 얼굴 모자이크를 연결하고 기본 deface를 worker 이미지에 설치한다. 편집/제작 경로 모두 모자이크 성공 후에만 결과물을 복사한다. 도구 오류·빈 결과는 실패다. 편집 중 한 장 미리보기와 최종 모자이크 검수는 구분해 안내한다.
+- 관련 72검사, Ruff0.8.4, TypeScript/웹 빌드 통과. API/worker/web 이미지 빌드 완료. 최신 이미지의 관련 재검사와 운영 반영·실제 완성본 확인을 이어간다.
+- 제공 영상 `6LVyV8ueYc8`는 기존 다운로드의 SHA를 확인하고 운영 저장소에 등록·검증했다. 한국어 원본이므로 무료 로컬 STT로9개 자막 초안을 생성했다. 원음 유지·한국어 자막·얼굴 모자이크가 있는9:16 검수본을 만든다. 사람 확인이 안 된 자동 자막이며 게시/승인/새 유료호출은 하지 않는다.
+- 실행/한계는 [실제 제작 경로](VIDEO_DELIVERY.md). 비공개 제작 기록은 별도 recording4-deliveries/20260929-6LVyV8ueYc8에 두며 원시 결과물을 Git에 올리지 않는다.
+
 ## 2026-09-21: 숏폼 편집 확장 — 멀티 컷·무음 빼기·배속/페이드/배경음악·미리보기 (Claude)
 
 브랜치 `claude/claude-md-design-review-v8qdz4`, PR #17 위. 담당: `packages/pipeline/pipeline/{cuts,editing}.py`, `services/worker/worker/{rendering,media_tasks}.py`, `services/api/adminapi/{models}.py`·`routers/editing.py`, `migrations/versions/0010_silence_preview_media_task.py`, `apps/web/src/ClipEditor.tsx`, `tests/{test_video_editing,test_render_integration}.py`.

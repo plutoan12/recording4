@@ -13,6 +13,7 @@ import pysubs2
 from pipeline.editing import Cue, EditSpec, clip_cues, concat_cues
 from pipeline.subtitle_files import plain_ass
 from pipeline.subtitles import DEFAULT_RULES, SubtitleRules, apply_rules
+from worker.privacy import PrivacyBackend, PrivacyError, redact_faces
 
 __all__ = [
     "RenderError",
@@ -29,6 +30,15 @@ DUCK = "sidechaincompress=threshold=0.03:ratio=8:attack=20:release=400"
 
 class RenderError(RuntimeError):
     pass
+
+
+def _mosaic_faces(
+    source: Path, output: Path, mosaic_size: int, backend: PrivacyBackend = "deface"
+) -> None:
+    try:
+        redact_faces(source, output, mosaic_size, backend)
+    except PrivacyError as exc:
+        raise RenderError(str(exc)) from exc
 
 
 def ffmpeg_binary() -> str:
@@ -270,7 +280,12 @@ def render_clip(
             if simple(spec) and music is None
             else graph_command(source, temp, spec, music, has_audio)
         )
-        run_ffmpeg(command, temp, output)
+        rendered = temp / "unredacted.mp4" if spec.mosaic_faces else output
+        run_ffmpeg(command, temp, rendered)
+        if spec.mosaic_faces:
+            redacted = temp / "redacted.mp4"
+            _mosaic_faces(rendered, redacted, spec.mosaic_size, spec.privacy_backend)
+            shutil.copyfile(redacted, output)
 
 
 ENCODE = [

@@ -29,6 +29,7 @@ dependencies = [
 
 [project.optional-dependencies]
 imports = ["yt-dlp[default]==2026.8.19"]
+privacy = ["deface==1.5.0"]
 # OpenCV는 scenedetect가 끌어오지만 버전을 여기서 못 박습니다. 5.0.0 휠에는
 # 얼굴 검출(cv2.CascadeClassifier)이 없습니다(CI 실측: "이 cv2에는
 # CascadeClassifier가 없습니다... 버전 5.0.0"). 4.x에는 있습니다.
