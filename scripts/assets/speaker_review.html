@@ -89,14 +89,14 @@ for(const item of received.items){
     finally{play.disabled=false;}
   };
   audio.onplay=()=>{if(playing){playing.stop();playing=null;}document.querySelectorAll('audio').forEach(a=>{if(a!==audio)a.pause();});};
-  const voices=element('div',undefined,card);
-  for(const [value,title] of [['speaker_0','화자 0'],['speaker_1','화자 1'],['unknown','모르겠음']]){
-    const label=element('label',undefined,voices),input=element('input',undefined,label);input.type='checkbox';input.value=value;input.checked=(state[id].human_speakers||[]).includes(value);input.setAttribute('aria-label',`${id} ${title}`);label.append(document.createTextNode(title));
-    input.onchange=()=>{
-      if(input.checked) voices.querySelectorAll('input').forEach(x=>{if(x!==input && (value==='unknown'||x.value==='unknown'))x.checked=false;});
-      const chosen=[...voices.querySelectorAll('input:checked')].map(x=>x.value);change(id,'human_speakers',chosen.length?chosen:null);
-    };
+  const voices=element('fieldset',undefined,card);element('legend','말하는 사람',voices);
+  const selected=state[id].human_speakers||[];
+  const selectedValue=selected.length===2?'both':selected[0]||'';
+  for(const [value,title] of [['','미판단'],['speaker_0','화자 0만'],['speaker_1','화자 1만'],['both','화자 2명 (0과 1)'],['unknown','모르겠음']]){
+    const label=element('label',undefined,voices),input=element('input',undefined,label);input.type='radio';input.name=`speakers-${id}`;input.value=value;input.checked=selectedValue===value;input.setAttribute('aria-label',`${id} ${title}`);label.append(document.createTextNode(title));
+    input.onchange=()=>{if(input.checked)change(id,'human_speakers',value==='both'?['speaker_0','speaker_1']:value?[value]:null);};
   }
+  element('small','두 사람의 목소리가 있으면 ‘화자 2명’을 선택하세요. 동시에 말했는지는 아래 겹말에서 따로 표시합니다.',card);
   selection(card,'겹말','human_overlap',id,[[null,'미판단'],[false,'없음'],[true,'있음']]);
   selection(card,'판단 범위','annotation_scope',id,[[null,'선택 필요'],['candidate','후보 구간만'],['context','문맥 포함 전체'],['uncertain','판단 범위 불확실']]);
   const label=element('label','확신도 (0~1)',card),confidence=element('input',undefined,label);confidence.type='number';confidence.min=0;confidence.max=1;confidence.step='any';confidence.placeholder='미판단';confidence.value=state[id].human_confidence??'';confidence.setAttribute('aria-label',`${id} 확신도`);
