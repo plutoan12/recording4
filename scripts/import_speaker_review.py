@@ -58,6 +58,8 @@ def audit(template, parent_review, submission, source_video):
             reasons.append("missing_speaker")
         elif "unknown" in item["human_speakers"]:
             reasons.append("unknown_speaker")
+        elif "multiple" in item["human_speakers"]:
+            reasons.append("multiple_speaker_identities_unconfirmed")
         if item["human_overlap"] is None:
             reasons.append("missing_overlap")
         if item["human_confidence"] is None:

@@ -27,9 +27,9 @@ let state=Object.fromEntries(received.items.map(x=>[x.review_id,{
 const notice=document.getElementById('notice');
 function valid(s){
   return s && (s.human_speakers===null || (Array.isArray(s.human_speakers) &&
-    s.human_speakers.every(x=>['speaker_0','speaker_1','unknown'].includes(x)) &&
+    s.human_speakers.every(x=>['speaker_0','speaker_1','unknown','multiple'].includes(x)) &&
     new Set(s.human_speakers).size===s.human_speakers.length &&
-    (!s.human_speakers.includes('unknown') || s.human_speakers.length===1))) &&
+    (!(s.human_speakers.includes('unknown') || s.human_speakers.includes('multiple')) || s.human_speakers.length===1))) &&
     (s.human_overlap===null || typeof s.human_overlap==='boolean') &&
     (s.human_confidence===null || (typeof s.human_confidence==='number' && Number.isFinite(s.human_confidence) && s.human_confidence>=0 && s.human_confidence<=1)) &&
     (s.reviewer===null || typeof s.reviewer==='string') &&
@@ -92,11 +92,11 @@ for(const item of received.items){
   const voices=element('fieldset',undefined,card);element('legend','말하는 사람',voices);
   const selected=state[id].human_speakers||[];
   const selectedValue=selected.length===2?'both':selected[0]||'';
-  for(const [value,title] of [['','미판단'],['speaker_0','화자 0만'],['speaker_1','화자 1만'],['both','화자 2명 (0과 1)'],['unknown','모르겠음']]){
+  for(const [value,title] of [['','미판단'],['speaker_0','화자 0만'],['speaker_1','화자 1만'],['both','화자 2명 (0과 1)'],['multiple','복수 화자 (신원 미확인)'],['unknown','모르겠음']]){
     const label=element('label',undefined,voices),input=element('input',undefined,label);input.type='radio';input.name=`speakers-${id}`;input.value=value;input.checked=selectedValue===value;input.setAttribute('aria-label',`${id} ${title}`);label.append(document.createTextNode(title));
     input.onchange=()=>{if(input.checked)change(id,'human_speakers',value==='both'?['speaker_0','speaker_1']:value?[value]:null);};
   }
-  element('small','두 사람의 목소리가 있으면 ‘화자 2명’을 선택하세요. 동시에 말했는지는 아래 겹말에서 따로 표시합니다.',card);
+  element('small','화자 0과 1이 모두 확인되면 ‘화자 2명’, 여러 목소리는 들리지만 누구인지 불명확하면 ‘복수 화자’를 선택하세요. 동시에 말했는지는 겹말에 표시합니다.',card);
   selection(card,'겹말','human_overlap',id,[[null,'미판단'],[false,'없음'],[true,'있음']]);
   selection(card,'판단 범위','annotation_scope',id,[[null,'선택 필요'],['candidate','후보 구간만'],['context','문맥 포함 전체'],['uncertain','판단 범위 불확실']]);
   const label=element('label','확신도 (0~1)',card),confidence=element('input',undefined,label);confidence.type='number';confidence.min=0;confidence.max=1;confidence.step='any';confidence.placeholder='미판단';confidence.value=state[id].human_confidence??'';confidence.setAttribute('aria-label',`${id} 확신도`);

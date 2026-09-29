@@ -182,6 +182,20 @@ class SpeakerReviewTest(unittest.TestCase):
             with self.subTest(key=key), self.assertRaises(ValueError):
                 audit(self.template, self.reviewed, self.submission, self.video)
 
+    def test_multiple_speakers_do_not_confirm_identities(self):
+        submitted = self.v2_submission()
+        submitted["items"][0].update(human_speakers=["multiple"], human_overlap=True)
+        self.submission.write_text(json.dumps(submitted))
+        _, report = audit(self.template, self.reviewed, self.submission, self.video)
+        self.assertIn("multiple_speaker_identities_unconfirmed", report["items"][0]["reasons"])
+        self.assertFalse(report["deploy_allowed"])
+        self.assertEqual(report["candidate_count"], 1)
+        for mixed in (["multiple", "speaker_0"], ["multiple", "unknown"]):
+            submitted["items"][0]["human_speakers"] = mixed
+            self.submission.write_text(json.dumps(submitted))
+            with self.subTest(mixed=mixed), self.assertRaises(ValueError):
+                audit(self.template, self.reviewed, self.submission, self.video)
+
 
 if __name__ == "__main__":
     unittest.main()

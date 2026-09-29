@@ -86,8 +86,8 @@ def inspect_review(template_path, reviewed):
             not isinstance(speakers, list)
             or not all(isinstance(s, str) for s in speakers)
             or len(set(speakers)) != len(speakers)
-            or not set(speakers) <= {"speaker_0", "speaker_1", "unknown"}
-            or ("unknown" in speakers and len(speakers) != 1)
+            or not set(speakers) <= {"speaker_0", "speaker_1", "unknown", "multiple"}
+            or (bool(set(speakers) & {"unknown", "multiple"}) and len(speakers) != 1)
         ):
             raise ValueError("Invalid speaker annotation")
         overlap, confidence = item.get("human_overlap"), item.get("human_confidence")
