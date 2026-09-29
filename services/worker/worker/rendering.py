@@ -329,7 +329,9 @@ def apply_mosaic_regions(
     if not regions:
         shutil.copyfile(source, output)
         return
-    graph = ["[0:v:0]setpts=PTS-STARTPTS[mask0]"]
+    # Editing/composition already starts the video at zero. Applying setpts here
+    # clears the frame-rate metadata and can give the final MP4 frame zero duration.
+    graph = ["[0:v:0]null[mask0]"]
     for i, region in enumerate(regions):
         x = 2 * math.floor(region.x * spec.width / 2)
         y = 2 * math.floor(region.y * spec.height / 2)

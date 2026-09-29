@@ -9,7 +9,7 @@ import pytest
 from pydantic import ValidationError
 
 from pipeline.editing import EditSpec
-from worker.rendering import RenderError, render_clip, render_preview
+from worker.rendering import RenderError, apply_mosaic_regions, render_clip, render_preview
 
 REGION = {"start": 1, "end": 2, "x": 0.25, "y": 0.25, "width": 0.5, "height": 0.5, "block_size": 30}
 
@@ -116,6 +116,82 @@ def variance(frame, x1, y1, x2, y2):
     return statistics.pvariance(frame[y * 180 + x] for y in range(y1, y2) for x in range(x1, x2))
 
 
+def frame_timing(path):
+    return json.loads(
+        subprocess.run(
+            [
+                shutil.which("ffprobe"),
+                "-v",
+                "error",
+                "-count_frames",
+                "-select_streams",
+                "v:0",
+                "-show_entries",
+                "stream=nb_read_frames,nb_frames,avg_frame_rate,r_frame_rate,duration",
+                "-of",
+                "json",
+                str(path),
+            ],
+            capture_output=True,
+            check=True,
+        ).stdout
+    )["streams"][0]
+
+
+def display_timeline(path):
+    frames = json.loads(
+        subprocess.run(
+            [
+                shutil.which("ffprobe"),
+                "-v",
+                "error",
+                "-select_streams",
+                "v:0",
+                "-show_frames",
+                "-show_entries",
+                "frame=best_effort_timestamp_time",
+                "-of",
+                "json",
+                str(path),
+            ],
+            capture_output=True,
+            check=True,
+        ).stdout
+    )["frames"]
+    return [frame["best_effort_timestamp_time"] for frame in frames]
+
+
+@pytest.mark.parametrize("rate", ["30", "30000/1001"])
+def test_manual_mosaic_keeps_final_frame_duration_and_fractional_rate(ffmpeg, tmp_path, rate):
+    source, output = tmp_path / "in.mp4", tmp_path / "out.mp4"
+    subprocess.run(
+        [
+            ffmpeg,
+            "-v",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            f"testsrc2=size=180x320:rate={rate}",
+            "-t",
+            "3",
+            "-c:v",
+            "libx264",
+            "-pix_fmt",
+            "yuv420p",
+            str(source),
+        ],
+        check=True,
+        capture_output=True,
+    )
+    apply_mosaic_regions(
+        source, output, EditSpec(start=0, end=3.1, width=180, height=320, mosaic_regions=[REGION])
+    )
+    expected = frame_timing(source)
+    assert expected["nb_read_frames"] == expected["nb_frames"]
+    assert frame_timing(output) == expected
+
+
 @pytest.mark.parametrize("kind", ["single_cut", "joined_speed", "no_audio"])
 def test_real_masks_use_output_time_preserve_other_areas_and_audio(ffmpeg, tmp_path, kind):
     source, baseline, masked = (tmp_path / name for name in ("in.mp4", "base.mp4", "out.mp4"))
@@ -129,6 +205,13 @@ def test_real_masks_use_output_time_preserve_other_areas_and_audio(ffmpeg, tmp_p
     render_clip(
         source, masked, EditSpec(**values, mosaic_regions=[REGION]), has_audio=kind != "no_audio"
     )
+    before, after = frame_timing(baseline), frame_timing(masked)
+    # A joined/speed baseline can contain a packet its MP4 edit list discards.
+    # Preserve every decodable frame and its presentation time, not that packet.
+    assert {k: after[k] for k in ("nb_read_frames", "duration", "r_frame_rate")} == {
+        k: before[k] for k in ("nb_read_frames", "duration", "r_frame_rate")
+    }
+    assert display_timeline(masked) == display_timeline(baseline)
     for at, hidden in [(0.5, False), (1, True), (1.9, True), (2, False), (2.5, False)]:
         frame = gray_frame(ffmpeg, masked, at)
         inside = variance(frame, 60, 100, 120, 220)
