@@ -1,3 +1,10 @@
+## 2026-09-29 사람 검수 파일 수신·입력 감사
+
+- Downloads에서 두 검수 파일을 찾았다. 최신 `labels.reviewed (1).json`의 SHA-256은 `b6142430206337c8550f689dd29598f3abd2c536998cf3deeb50b3f29e9906a0`이다. 원본 영상 SHA를 실제 파일에서 재계산했고 템플릿의 후보 15개 ID·시각·모델 메타데이터가 제출 파일과 일치했다. 원시 제출 파일은 비공개 `active-speaker-youtube-20260920/human-review-import-b61424302063/labels.received.json`에 보존했다.
+- 화자 입력 15/15개: 특정 화자 8개, unknown 7개. 겹말 true 7개·false 2개·null 6개다. 기존 화면은 체크박스 초기 미체크 상태를 표시하면서 변경 이벤트가 없으면 null을 내보냈다. 후보 00·03·04·05·06·09의 null을 false로 자동 보정하지 않고 사용자에게 의미를 확인 중이다. 후보 구간만 판단했는지 앞뒤 문맥까지 판단했는지도 확인 중이다.
+- WAV 15개의 PCM payload는 헤더와 일치하지만 후보 13·14의 오디오는 선언된 문맥보다 각각 627샘플(16kHz에서 0.0391875초) 짧다. 후보 13의 끝부분도 실제 오디오 밖이다. 앞선 헤더만 본 검사는 이 시간축 문제를 잡지 못했다. 표본을 제외하거나 무음을 추가해 통과 처리하지 않는다.
+- 후보별 거친 화자/겹말 라벨만으로 전체 영상 DER/CER를 산출할 수 없다. 전체 화자 시각과 정답 대사가 별도로 필요하다. 현재는 입력 감사 결과만 저장했으며 정확도·DER·CER는 미산출이다. 모델 익명 화자 ID와 사람 ID의 대응도 아직 확인되지 않았다. [상세](quality/human-review-import-2026-09-29/REPORT.md).
+
 ## 2026-09-21 privacy-tool 후보 3종 확보
 
 - 세 저장소를 비공개 평가 폴더에 shallow clone했다: `ORB-HD/deface` `09b670db307b970cff6fad1848cf04d5f0810ec4`(MIT, 현재 워커 기본 모자이크), `austinmabry/OpenScrub` `cbe4ad4e14b92618ad497095b75259a789703ac6`(Apache-2.0, 얼굴·사람·번호판·OCR 검수 후보), `facebookresearch/EgoBlur` `75144e14916223313beb6593b631e32ca149d840`(Apache-2.0, 얼굴·번호판 블러 후보).
