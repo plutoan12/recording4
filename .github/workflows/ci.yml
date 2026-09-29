@@ -231,6 +231,14 @@ jobs:
           # 휠에 없던 것처럼, 있는 줄 알았던 것이 없을 수 있습니다.
           import cv2
           print('cv2', cv2.__version__, cv2.__file__)
+          from worker.faces import _cascade
+          _cascade()
+          import importlib.metadata as metadata
+          opencv = sorted(
+              dist.metadata['Name'] for dist in metadata.distributions()
+              if dist.metadata['Name'].startswith('opencv-')
+          )
+          assert opencv == ['opencv-python'], opencv
           print('CascadeClassifier 있음', hasattr(cv2, 'CascadeClassifier'))
           print('FaceDetectorYN 있음', hasattr(cv2, 'FaceDetectorYN'))
           print('얼굴 관련 이름', sorted(n for n in dir(cv2) if 'ascade' in n or 'FaceDetector' in n))
@@ -360,9 +368,13 @@ jobs:
           "
 
       # pyannote는 게이트 모델이라 토큰이 있어야 돌아갑니다. 저장소 시크릿에
-      # HF_TOKEN을 넣으면 이 단계가 켜집니다. 없으면 건너뜁니다.
+      # HF_TOKEN과 verify-align 요청이 모두 있어야 켭니다. 표본 생성 단계와
+      # 같은 조건이어야 /tmp/two-speaker/expected.json이 준비되어 있습니다.
       - name: 화자 분리 검증 (pyannote)
-        if: ${{ env.HF_TOKEN != '' }}
+        if: |
+          env.HF_TOKEN != '' && (
+          contains(github.event.pull_request.labels.*.name, 'verify-align') ||
+          contains(github.event.head_commit.message, '[verify-align]'))
         env:
           R4_HF_TOKEN: ${{ env.HF_TOKEN }}
         run: |

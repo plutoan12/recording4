@@ -1,0 +1,28 @@
+# syntax=docker/dockerfile:1
+# Keep the currently deployed MinIO source and Go version. The upstream
+# prebuilt image is no longer anonymously downloadable from its registries.
+FROM golang:1.23.3-bookworm@sha256:59b8183301af6dc358c9258d7b2ab0ee1a9363618552334fb3b160d454cbda72 AS build
+
+WORKDIR /src
+ADD --checksum=sha256:19eac4eba99f28056e81e2338edac523a1068a59266bbd700267f55122205e14 \
+    https://codeload.github.com/minio/minio/tar.gz/cefc43e4daa4cbb490ef6726ea374e26a93eb85e /tmp/minio-source.tar.gz
+RUN tar -xzf /tmp/minio-source.tar.gz --strip-components=1
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 go build -mod=readonly -tags kqueue -trimpath \
+    -ldflags '-s -w -X github.com/minio/minio/cmd.Version=2024-11-07T00:52:20Z -X github.com/minio/minio/cmd.ReleaseTag=RELEASE.2024-11-07T00-52-20Z -X github.com/minio/minio/cmd.CommitID=cefc43e4daa4cbb490ef6726ea374e26a93eb85e -X github.com/minio/minio/cmd.ShortCommitID=cefc43e4daa4 -X github.com/minio/minio/cmd.CopyrightYear=2024' \
+    -o /out/minio .
+
+FROM debian:bookworm-slim
+RUN apt-get update \
+    && apt-get install --no-install-recommends -y ca-certificates curl \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=build /out/minio /usr/local/bin/minio
+COPY --from=build /src/LICENSE /usr/share/minio/LICENSE
+COPY --from=build /tmp/minio-source.tar.gz /usr/share/minio/source.tar.gz
+LABEL org.opencontainers.image.source="https://github.com/minio/minio" \
+    org.opencontainers.image.revision="cefc43e4daa4cbb490ef6726ea374e26a93eb85e" \
+    org.opencontainers.image.version="RELEASE.2024-11-07T00-52-20Z-recording4-source" \
+    org.opencontainers.image.licenses="AGPL-3.0-or-later"
+ENTRYPOINT ["/usr/local/bin/minio"]
+CMD ["server", "/data", "--console-address", ":9001"]

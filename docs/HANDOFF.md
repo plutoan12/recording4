@@ -1,3 +1,13 @@
+## 2026-09-29 배포 CI 실패 원인 수정·격리 검증
+
+- [PR #40](https://github.com/plutoan12/recording4/pull/40)의 기존 HEAD `5490fc4`에서 Python/웹은 통과했으나 스택/워커 CI가 실패했다. 원인은 MinIO 이미지 다운로드 인증 오류, pyannote 검증과 샘플 생성의 조건 불일치, deface가 끌어온 일반 OpenCV5와 기존 headless4의 `cv2` 덮어쓰기였다.
+- `infra/Dockerfile.minio`는 기존 릴리스의 공식 commit `cefc43e4daa4cbb490ef6726ea374e26a93eb85e`를 원래 Go1.23.3으로 빌드한다. 소스 SHA-256 `19eac4eba99f28056e81e2338edac523a1068a59266bbd700267f55122205e14`와 빌더 digest를 고정하고 라이선스/소스를 이미지에 포함했다. Compose의 서비스·인증·`objects:/data`는 유지하고 상태 검사만 내장 curl로 바꿨다.
+- **격리 S3 실측 통과**: 기존 캐시 이미지로 만든 시험 데이터의 새 이미지 읽기, 서명 PUT/GET, HEAD, SDK 다운로드 무결성, **9MiB multipart 업로드·다운로드**, 무인증 GET403. ARM64 소스 빌드도 통과했다. 운영 데이터/비밀 설정은 사용하지 않았고 시험 컨테이너는 정지했다. 원래 운영 MinIO는 그대로다.
+- analysis/privacy는 `opencv-python==4.14.0.94` 하나를 공유한다. 새 워커 이미지 빌드·`pip check`·캐스케이드 실제 로드·관련 **87검사**·Ruff0.8.4/포맷 통과. 두 얼굴 없는 영상의 14표본은 오검출0, 실제 원본 32표본 중24개에서 얼굴 후보를 찾았다. 후보 개수는 정답 검출률이 아니다.
+- 같은 실제 영상의 29.5~31.5초 입력을 기존 OpenCV5/수정4로 각각 민감도 모자이크했다. 전체 디코딩 성공, 두 결과의 디코딩 RGB 프레임 SHA-256이 `f28a43f06af5d4a3684655e89e77ff4be0557d570470f2e713c7ad09488d6e47`로 같았다. 비공개 결과는 기존 delivery 폴더의 `opencv-check/`다. 기존32.6초 검수본/대본/승인은 변경하지 않았다.
+- pyannote CI는 토큰과 `verify-align` 요청이 모두 있어야 실행한다. 샘플 생성과 같은 조건이며, 이번 제작 PR에서 화자 모델 재추론을 요청하지 않았다. 미실행을 품질 통과로 보고하지 않는다.
+- 수정 HEAD의 Linux/AMD64 워커·전체 스택 CI는 push 후 확인한다. 필요한 검사와 검토 전 **main 병합/운영 저장소 교체는 미완료**다. 개발용 `infra/docker-compose.yml`은 별도 기존 구성으로 이번 운영 스택 변경에 포함하지 않았다. 새 유료 호출·승인·게시 없음.
+
 ## 2026-09-29 실제 검수본 생성·선택형 민감도 반영
 
 - 우선순위는 화자 연구가 아니라 실제 영상 제작이다. 현재 작업 checkout은 `recording4-video-delivery`, 브랜치 `codex/video-delivery`, [PR #40](https://github.com/plutoan12/recording4/pull/40)이다. 연구 통합 #37은 별도 초안으로 유지한다.
