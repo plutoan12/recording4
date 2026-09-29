@@ -33,10 +33,14 @@ class RenderError(RuntimeError):
 
 
 def _mosaic_faces(
-    source: Path, output: Path, mosaic_size: int, backend: PrivacyBackend = "deface"
+    source: Path,
+    output: Path,
+    mosaic_size: int,
+    backend: PrivacyBackend = "deface",
+    deface_sensitive: bool = False,
 ) -> None:
     try:
-        redact_faces(source, output, mosaic_size, backend)
+        redact_faces(source, output, mosaic_size, backend, deface_sensitive)
     except PrivacyError as exc:
         raise RenderError(str(exc)) from exc
 
@@ -284,7 +288,9 @@ def render_clip(
         run_ffmpeg(command, temp, rendered)
         if spec.mosaic_faces:
             redacted = temp / "redacted.mp4"
-            _mosaic_faces(rendered, redacted, spec.mosaic_size, spec.privacy_backend)
+            _mosaic_faces(
+                rendered, redacted, spec.mosaic_size, spec.privacy_backend, spec.deface_sensitive
+            )
             shutil.copyfile(redacted, output)
 
 

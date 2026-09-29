@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 
 from pipeline.editing import EditSpec
@@ -16,6 +18,7 @@ def test_mosaic_keeps_multicut_and_music_settings(monkeypatch, tmp_path):
         end=4,
         mosaic_faces=True,
         mosaic_size=24,
+        deface_sensitive=True,
         segments=[{"start": 0, "end": 1}, {"start": 2, "end": 4, "speed": 2}],
         fade_in=0.2,
         music_gain_db=-20,
@@ -27,9 +30,10 @@ def test_mosaic_keeps_multicut_and_music_settings(monkeypatch, tmp_path):
         target.write_bytes(b"edited-with-music")
         assert target != output
 
-    def redact(source, target, size, backend):
+    def redact(source, target, size, backend, sensitive):
         assert source.read_bytes() == b"edited-with-music"
         assert (size, backend) == (24, "deface")
+        assert sensitive is True
         target.write_bytes(b"redacted")
 
     monkeypatch.setattr(rendering, "run_ffmpeg", encode)
@@ -68,3 +72,33 @@ def test_empty_redaction_is_rejected(monkeypatch, tmp_path):
     )
     with pytest.raises(PrivacyError):
         privacy._run(["unused"], output, 1, "모자이크 실패")
+
+
+@pytest.mark.parametrize("fail", [False, True])
+def test_workflow_preserves_privacy_options_and_never_copies_failed_output(
+    monkeypatch, tmp_path, fail
+):
+    from worker import composition
+
+    source, output = tmp_path / "source.mp4", tmp_path / "final.mp4"
+    source.write_bytes(b"source")
+    spec = EditSpec(start=0, end=1, mosaic_faces=True, deface_sensitive=True)
+    monkeypatch.setattr(
+        composition, "ffmpeg", lambda args, **kwargs: Path(args[-1]).write_bytes(b"unredacted")
+    )
+
+    def redact(rendered, redacted, size, backend, sensitive):
+        assert rendered.read_bytes() == b"unredacted"
+        assert sensitive is True and backend == "deface"
+        if fail:
+            raise rendering.RenderError("모자이크 실패")
+        redacted.write_bytes(b"redacted")
+
+    monkeypatch.setattr(composition, "_mosaic_faces", redact)
+    if fail:
+        with pytest.raises(rendering.RenderError, match="모자이크 실패"):
+            composition.render_final(source, output, cues=[], duration=1, clip=spec)
+        assert not output.exists()
+    else:
+        composition.render_final(source, output, cues=[], duration=1, clip=spec)
+        assert output.read_bytes() == b"redacted"

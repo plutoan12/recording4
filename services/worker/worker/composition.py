@@ -225,6 +225,8 @@ def render_final(
         rendered = temp / "final.mp4"
         if clip and clip.mosaic_faces:
             redacted = temp / "redacted.mp4"
-            _mosaic_faces(rendered, redacted, clip.mosaic_size, clip.privacy_backend)
+            _mosaic_faces(
+                rendered, redacted, clip.mosaic_size, clip.privacy_backend, clip.deface_sensitive
+            )
             rendered = redacted
         shutil.copyfile(rendered, output)

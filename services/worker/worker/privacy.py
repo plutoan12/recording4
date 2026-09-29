@@ -36,7 +36,7 @@ def _run(command: list[str], output: Path, timeout: int, message: str) -> None:
         raise PrivacyError(message)
 
 
-def _deface(source: Path, output: Path, mosaic_size: int) -> None:
+def _deface(source: Path, output: Path, mosaic_size: int, sensitive: bool) -> None:
     binary = _executable(
         "R4_DEFACE_BINARY", "deface", "얼굴 모자이크 도구가 없습니다. 워커에 deface를 설치하세요."
     )
@@ -48,6 +48,7 @@ def _deface(source: Path, output: Path, mosaic_size: int) -> None:
             "mosaic",
             "--mosaicsize",
             str(mosaic_size),
+            *(["--thresh", "0.05", "--mask-scale", "1.5"] if sensitive else []),
             "--keep-audio",
             "--output",
             str(output),
@@ -120,10 +121,11 @@ def redact_faces(
     output: Path,
     mosaic_size: int,
     backend: PrivacyBackend = "deface",
+    deface_sensitive: bool = False,
 ) -> None:
     """Apply a configured face-redaction backend to a rendered video."""
     if backend == "deface":
-        _deface(source, output, mosaic_size)
+        _deface(source, output, mosaic_size, deface_sensitive)
     elif backend == "openscrub":
         _openscrub(source, output, mosaic_size)
     elif backend == "egoblur":

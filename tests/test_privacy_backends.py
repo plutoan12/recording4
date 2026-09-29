@@ -5,7 +5,8 @@ import pytest
 from worker import privacy
 
 
-def test_deface_command_is_fail_closed(monkeypatch, tmp_path: Path):
+@pytest.mark.parametrize("sensitive", [False, True])
+def test_deface_command_is_fail_closed(monkeypatch, tmp_path: Path, sensitive: bool):
     output = tmp_path / "out.mp4"
     seen = {}
 
@@ -15,7 +16,7 @@ def test_deface_command_is_fail_closed(monkeypatch, tmp_path: Path):
 
     monkeypatch.setattr(privacy, "_run", fake_run)
     monkeypatch.setenv("R4_DEFACE_BINARY", "/srv/bin/deface")
-    privacy.redact_faces(tmp_path / "in.mp4", output, 24)
+    privacy.redact_faces(tmp_path / "in.mp4", output, 24, deface_sensitive=sensitive)
     assert seen["command"] == [
         "/srv/bin/deface",
         str(tmp_path / "in.mp4"),
@@ -23,6 +24,7 @@ def test_deface_command_is_fail_closed(monkeypatch, tmp_path: Path):
         "mosaic",
         "--mosaicsize",
         "24",
+        *(["--thresh", "0.05", "--mask-scale", "1.5"] if sensitive else []),
         "--keep-audio",
         "--output",
         str(output),
