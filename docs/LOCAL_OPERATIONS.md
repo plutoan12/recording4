@@ -16,6 +16,8 @@
 
 MinIO는 기존 `RELEASE.2024-11-07T00-52-20Z`, 소스 commit `cefc43e4daa4cbb490ef6726ea374e26a93eb85e`, Go1.23.3을 유지합니다. 소스 아카이브의 SHA-256과 Go 이미지 digest를 고정했고 원문 라이선스와 소스는 이미지에 포함합니다([제3자 고지](../THIRD_PARTY_NOTICES.md)). `minio` 서비스와 `objects:/data` 볼륨·인증 설정은 그대로입니다. 이미지 변경 때문에 볼륨을 지우거나 다시 만들지 않습니다. 새 환경은 `docker compose ... build minio`가 필요하며, 상태 확인은 저장소의 `/minio/health/ready`를 사용합니다.
 
+Debian 실행 기반도 시험한 digest로 고정합니다. 이 고정은 소스·빌더·기반 이미지 범위이며 apt 보안 패키지는 빌드 시점 저장소를 따릅니다. 실행 사용자는 기존 이미지와 같은 UID0을 유지합니다. 비root 전환은 기존 객체 소유권 이전과 복구를 별도 검증한 뒤 진행할 운영 과제입니다.
+
 ## 실행 명령
 
 저장소 루트에서 Python 3.11 이상과 Docker Desktop을 사용합니다.

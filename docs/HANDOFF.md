@@ -1,3 +1,11 @@
+## 2026-09-29 최종 검토 설정 정리
+
+- `b3f5464`의 [CI36573119591](https://github.com/plutoan12/recording4/actions/runs/36573119591)는 Python **611통과/1skip**, 웹·Linux 워커·전체 스택 모두 통과했다. EgoBlur 수정은 최종 로컬 이미지에서도17검사를 통과했다. 현재 운영 OpenCV4 워커는 정상이며 기존 검수 결과의 승인 수는0이다.
+- 추가 검토에서 Debian 기반 이미지가 떠 있는 것을 확인해, 이미 시험한 digest `sha256:3783cc01769c7b2b1b83a5c5ad96c815348e28ed7da68e2e3687004faa906251`로 고정했다. ARM64/AMD64 manifest 확인, 다시 빌드한 로컬 이미지의 파일시스템 레이어와 실행 설정이 이전 S3 시험 이미지와 같음을 확인했다. 같은 객체 호환성 검사를 반복하지 않았다.
+- `verify-align` 라벨 추가 이벤트를 CI에 포함하고, `[verify-align]` 커밋 문구는 main push에서만 읽도록 문서와9개 조건을 맞췄다. PR은 라벨로 요청한다. 이번 제작 검증에서 음성 모델 검증을 새로 요청하지 않았다. YAML·Ruff/포맷 통과, 후속 HEAD CI 확인 후 병합한다.
+- MinIO의 비root 전환 제안은 별도 작업으로 남긴다. 기존 실제 MinIO도 UID0이며 현재 권한을 유지한다. 기존 `objects`의 소유권을 이 다운로드 복구 변경에 섞어 바꾸지 않는다. 이 항목을 수정 완료나 인터넷 공개 보안 점검 완료로 보고하지 않는다.
+- 전환 준비: 비공개 DB `manual-20260929T131111Z.dump`(아카이브 목록119개 읽기 성공), 객체79개의 `media-20260929T131113Z.json` 백업 완료. 여섯 서비스의 `before-main-20260929` 이미지 태그와 원래 LaunchAgent 사본을 보관했다. 운영 main 경로를 가리키는 LaunchAgent 후보는 만들었으나 아직 설치하지 않았다. 비공개 `recording4-local-tools/experiments`의 `delivery-before-main-20260929.json`, `startup-*-20260929.plist`, 소스 해시 기록을 재사용한다.
+
 ## 2026-09-29 배포 CI 통과·EgoBlur 검토 반영
 
 - `ef93722`의 [GitHub 실행36572147454](https://github.com/plutoan12/recording4/actions/runs/36572147454)는 Python/웹/Linux 워커/전체 스택 **모두 통과**했다. MinIO 공식 소스의 Linux/AMD64 빌드와 실제 S3→제작→다운로드→디코딩 경로가 검증됐다. 수정 OpenCV4 워커도 로컬에 적용하여 healthy·캐스케이드 로드를 확인했다. 기존 검수본을 저장소에서 다시 받아 비공개 사본과 동일 SHA-256임을 확인했고 해당 결과의 승인 수는0이다.

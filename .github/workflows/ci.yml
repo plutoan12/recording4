@@ -4,6 +4,7 @@ on:
   push:
     branches: ['**']
   pull_request:
+    types: [opened, synchronize, reopened, labeled]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -260,12 +261,12 @@ jobs:
         run: docker build -f infra/Dockerfile.api -t recording4-api:ci .
 
       # 실제 모델을 내려받아 정렬 품질을 재는 검사입니다. 느리고 네트워크를 타므로
-      # PR에 verify-align 라벨을 붙이거나 커밋 메시지에 [verify-align]을 넣을 때만
+      # PR에 verify-align 라벨을 붙이거나 main push 커밋 메시지에 [verify-align]을 넣을 때만
       # 돌립니다. 합성 음성이라 사람 목소리보다 불리한 조건입니다.
       - name: 정렬 품질 검증
         if: |
           contains(github.event.pull_request.labels.*.name, 'verify-align') ||
-          contains(github.event.head_commit.message, '[verify-align]')
+          (github.event_name == 'push' && contains(github.event.head_commit.message, '[verify-align]'))
         run: |
           sudo apt-get update && sudo apt-get install -y espeak-ng ffmpeg
           python3 scripts/make_speech_sample.py --out /tmp/align-sample
@@ -281,7 +282,7 @@ jobs:
       - name: 자막 싱크 보정 검증
         if: |
           contains(github.event.pull_request.labels.*.name, 'verify-align') ||
-          contains(github.event.head_commit.message, '[verify-align]')
+          (github.event_name == 'push' && contains(github.event.head_commit.message, '[verify-align]'))
         run: |
           docker run --rm -v /tmp/align-sample:/audio -v "$PWD/scripts:/work:ro" \
             --entrypoint python recording4-worker:ci /work/verify_sync.py \
@@ -293,7 +294,7 @@ jobs:
       - name: 정렬 품질 검증 (사람 목소리)
         if: |
           contains(github.event.pull_request.labels.*.name, 'verify-align') ||
-          contains(github.event.head_commit.message, '[verify-align]')
+          (github.event_name == 'push' && contains(github.event.head_commit.message, '[verify-align]'))
         run: |
           # --interference는 표본에 **들어가지 않는 뒤쪽 문장**을 더 받습니다.
           # 겹말 검증에서 끼어드는 목소리로 씁니다. 같은 문장을 겹치면
@@ -312,7 +313,7 @@ jobs:
       - name: 전사 품질 검증 (사람 목소리)
         if: |
           contains(github.event.pull_request.labels.*.name, 'verify-align') ||
-          contains(github.event.head_commit.message, '[verify-align]')
+          (github.event_name == 'push' && contains(github.event.head_commit.message, '[verify-align]'))
         run: |
           docker run --rm -v /tmp/human-sample:/audio -v "$PWD/scripts:/work:ro" \
             --entrypoint python recording4-worker:ci /work/verify_transcribe.py \
@@ -325,7 +326,7 @@ jobs:
       - name: 화자 분리 검증 (토큰 없는 공급자)
         if: |
           contains(github.event.pull_request.labels.*.name, 'verify-align') ||
-          contains(github.event.head_commit.message, '[verify-align]')
+          (github.event_name == 'push' && contains(github.event.head_commit.message, '[verify-align]'))
         run: |
           sudo apt-get update && sudo apt-get install -y espeak-ng ffmpeg
           python3 scripts/make_two_speaker_sample.py --out /tmp/two-speaker \
@@ -341,7 +342,7 @@ jobs:
         if: |
           env.HF_TOKEN == '' && (
           contains(github.event.pull_request.labels.*.name, 'verify-align') ||
-          contains(github.event.head_commit.message, '[verify-align]'))
+          (github.event_name == 'push' && contains(github.event.head_commit.message, '[verify-align]')))
         run: |
           docker run --rm -v /tmp/two-speaker:/audio --entrypoint python \
             recording4-worker:ci -c "
@@ -374,7 +375,7 @@ jobs:
         if: |
           env.HF_TOKEN != '' && (
           contains(github.event.pull_request.labels.*.name, 'verify-align') ||
-          contains(github.event.head_commit.message, '[verify-align]'))
+          (github.event_name == 'push' && contains(github.event.head_commit.message, '[verify-align]')))
         env:
           R4_HF_TOKEN: ${{ env.HF_TOKEN }}
         run: |
@@ -404,7 +405,7 @@ jobs:
         if: |
           !cancelled() && (
           contains(github.event.pull_request.labels.*.name, 'verify-align') ||
-          contains(github.event.head_commit.message, '[verify-align]'))
+          (github.event_name == 'push' && contains(github.event.head_commit.message, '[verify-align]')))
         env:
           R4_HF_TOKEN: ${{ env.HF_TOKEN }}
         run: |
@@ -421,7 +422,7 @@ jobs:
         if: |
           !cancelled() && (
           contains(github.event.pull_request.labels.*.name, 'verify-align') ||
-          contains(github.event.head_commit.message, '[verify-align]'))
+          (github.event_name == 'push' && contains(github.event.head_commit.message, '[verify-align]')))
         run: |
           set -eo pipefail
           mkdir -p "$RUNNER_TEMP/verify"

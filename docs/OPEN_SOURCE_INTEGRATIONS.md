@@ -64,7 +64,7 @@ ffsubsync는 **chardet(LGPL)** 과 **webrtcvad**를 의존성으로 끌어옵니
 ### 실측 (CI, 워커 이미지 안)
 
 - **자막 화면 측정** (`scripts/measure_subtitles.py`): 1080x1920 세로 화면에 libass로 한 프레임을 그리고 FFmpeg cropdetect로 글자 픽셀 상자를 잽니다. 기본 줄 길이 16자가 좌우 여백(각 50px, 쓸 수 있는 폭 980px) 안에 **한 줄로** 들어가야 통과합니다. 넘치면 libass가 제멋대로 다시 줄바꿈해 우리 줄 규칙이 화면에서 깨집니다. 실측값은 CI 로그의 `자막 화면 측정` 단계에 남습니다.
-- **정렬 품질 검증** (`scripts/make_speech_sample.py` + `scripts/verify_align.py`): espeak-ng로 문장 사이에 1초 무음을 넣은 한국어 음성을 만들어 문장 시작 시각을 미리 확정한 뒤, 같은 대본을 타이밍 없이 넣고 stable-ts로 정렬해 오차를 잽니다. 글자가 바뀌거나 자막이 겹치거나 시작 오차가 1초를 넘으면 실패합니다. 모델을 실제로 내려받으므로 PR에 `verify-align` 라벨을 붙이거나 커밋 메시지에 `[verify-align]`을 넣을 때만 돌립니다. 합성 음성이라 사람 목소리보다 불리한 조건이며, 사람 목소리 품질을 대신하지는 않습니다.
+- **정렬 품질 검증** (`scripts/make_speech_sample.py` + `scripts/verify_align.py`): espeak-ng로 문장 사이에 1초 무음을 넣은 한국어 음성을 만들어 문장 시작 시각을 미리 확정한 뒤, 같은 대본을 타이밍 없이 넣고 stable-ts로 정렬해 오차를 잽니다. 글자가 바뀌거나 자막이 겹치거나 시작 오차가 1초를 넘으면 실패합니다. 모델을 실제로 내려받으므로 PR에 `verify-align` 라벨을 붙이거나 main push 커밋 메시지에 `[verify-align]`을 넣을 때만 돌립니다. 합성 음성이라 사람 목소리보다 불리한 조건이며, 사람 목소리 품질을 대신하지는 않습니다.
 
 #### 실측값 (2026-09-18, 워커 이미지, whisper tiny, espeak-ng 합성 음성)
 
