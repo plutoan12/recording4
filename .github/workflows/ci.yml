@@ -4,6 +4,7 @@ on:
   push:
     branches: ['**']
   pull_request:
+    types: [opened, synchronize, reopened, labeled]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -231,6 +232,14 @@ jobs:
           # 휠에 없던 것처럼, 있는 줄 알았던 것이 없을 수 있습니다.
           import cv2
           print('cv2', cv2.__version__, cv2.__file__)
+          from worker.faces import _cascade
+          _cascade()
+          import importlib.metadata as metadata
+          opencv = sorted(
+              dist.metadata['Name'] for dist in metadata.distributions()
+              if dist.metadata['Name'].startswith('opencv-')
+          )
+          assert opencv == ['opencv-python'], opencv
           print('CascadeClassifier 있음', hasattr(cv2, 'CascadeClassifier'))
           print('FaceDetectorYN 있음', hasattr(cv2, 'FaceDetectorYN'))
           print('얼굴 관련 이름', sorted(n for n in dir(cv2) if 'ascade' in n or 'FaceDetector' in n))
@@ -252,12 +261,12 @@ jobs:
         run: docker build -f infra/Dockerfile.api -t recording4-api:ci .
 
       # 실제 모델을 내려받아 정렬 품질을 재는 검사입니다. 느리고 네트워크를 타므로
-      # PR에 verify-align 라벨을 붙이거나 커밋 메시지에 [verify-align]을 넣을 때만
+      # PR에 verify-align 라벨을 붙이거나 main push 커밋 메시지에 [verify-align]을 넣을 때만
       # 돌립니다. 합성 음성이라 사람 목소리보다 불리한 조건입니다.
       - name: 정렬 품질 검증
         if: |
           contains(github.event.pull_request.labels.*.name, 'verify-align') ||
-          contains(github.event.head_commit.message, '[verify-align]')
+          (github.event_name == 'push' && contains(github.event.head_commit.message, '[verify-align]'))
         run: |
           sudo apt-get update && sudo apt-get install -y espeak-ng ffmpeg
           python3 scripts/make_speech_sample.py --out /tmp/align-sample
@@ -273,7 +282,7 @@ jobs:
       - name: 자막 싱크 보정 검증
         if: |
           contains(github.event.pull_request.labels.*.name, 'verify-align') ||
-          contains(github.event.head_commit.message, '[verify-align]')
+          (github.event_name == 'push' && contains(github.event.head_commit.message, '[verify-align]'))
         run: |
           docker run --rm -v /tmp/align-sample:/audio -v "$PWD/scripts:/work:ro" \
             --entrypoint python recording4-worker:ci /work/verify_sync.py \
@@ -285,7 +294,7 @@ jobs:
       - name: 정렬 품질 검증 (사람 목소리)
         if: |
           contains(github.event.pull_request.labels.*.name, 'verify-align') ||
-          contains(github.event.head_commit.message, '[verify-align]')
+          (github.event_name == 'push' && contains(github.event.head_commit.message, '[verify-align]'))
         run: |
           # --interference는 표본에 **들어가지 않는 뒤쪽 문장**을 더 받습니다.
           # 겹말 검증에서 끼어드는 목소리로 씁니다. 같은 문장을 겹치면
@@ -304,7 +313,7 @@ jobs:
       - name: 전사 품질 검증 (사람 목소리)
         if: |
           contains(github.event.pull_request.labels.*.name, 'verify-align') ||
-          contains(github.event.head_commit.message, '[verify-align]')
+          (github.event_name == 'push' && contains(github.event.head_commit.message, '[verify-align]'))
         run: |
           docker run --rm -v /tmp/human-sample:/audio -v "$PWD/scripts:/work:ro" \
             --entrypoint python recording4-worker:ci /work/verify_transcribe.py \
@@ -317,7 +326,7 @@ jobs:
       - name: 화자 분리 검증 (토큰 없는 공급자)
         if: |
           contains(github.event.pull_request.labels.*.name, 'verify-align') ||
-          contains(github.event.head_commit.message, '[verify-align]')
+          (github.event_name == 'push' && contains(github.event.head_commit.message, '[verify-align]'))
         run: |
           sudo apt-get update && sudo apt-get install -y espeak-ng ffmpeg
           python3 scripts/make_two_speaker_sample.py --out /tmp/two-speaker \
@@ -333,7 +342,7 @@ jobs:
         if: |
           env.HF_TOKEN == '' && (
           contains(github.event.pull_request.labels.*.name, 'verify-align') ||
-          contains(github.event.head_commit.message, '[verify-align]'))
+          (github.event_name == 'push' && contains(github.event.head_commit.message, '[verify-align]')))
         run: |
           docker run --rm -v /tmp/two-speaker:/audio --entrypoint python \
             recording4-worker:ci -c "
@@ -360,9 +369,13 @@ jobs:
           "
 
       # pyannote는 게이트 모델이라 토큰이 있어야 돌아갑니다. 저장소 시크릿에
-      # HF_TOKEN을 넣으면 이 단계가 켜집니다. 없으면 건너뜁니다.
+      # HF_TOKEN과 verify-align 요청이 모두 있어야 켭니다. 표본 생성 단계와
+      # 같은 조건이어야 /tmp/two-speaker/expected.json이 준비되어 있습니다.
       - name: 화자 분리 검증 (pyannote)
-        if: ${{ env.HF_TOKEN != '' }}
+        if: |
+          env.HF_TOKEN != '' && (
+          contains(github.event.pull_request.labels.*.name, 'verify-align') ||
+          (github.event_name == 'push' && contains(github.event.head_commit.message, '[verify-align]')))
         env:
           R4_HF_TOKEN: ${{ env.HF_TOKEN }}
         run: |
@@ -392,7 +405,7 @@ jobs:
         if: |
           !cancelled() && (
           contains(github.event.pull_request.labels.*.name, 'verify-align') ||
-          contains(github.event.head_commit.message, '[verify-align]'))
+          (github.event_name == 'push' && contains(github.event.head_commit.message, '[verify-align]')))
         env:
           R4_HF_TOKEN: ${{ env.HF_TOKEN }}
         run: |
@@ -409,7 +422,7 @@ jobs:
         if: |
           !cancelled() && (
           contains(github.event.pull_request.labels.*.name, 'verify-align') ||
-          contains(github.event.head_commit.message, '[verify-align]'))
+          (github.event_name == 'push' && contains(github.event.head_commit.message, '[verify-align]')))
         run: |
           set -eo pipefail
           mkdir -p "$RUNNER_TEMP/verify"

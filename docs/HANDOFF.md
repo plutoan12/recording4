@@ -1,3 +1,47 @@
+## 2026-09-29 최종 검토 설정 정리
+
+- `b3f5464`의 [CI36573119591](https://github.com/plutoan12/recording4/actions/runs/36573119591)는 Python **611통과/1skip**, 웹·Linux 워커·전체 스택 모두 통과했다. EgoBlur 수정은 최종 로컬 이미지에서도17검사를 통과했다. 현재 운영 OpenCV4 워커는 정상이며 기존 검수 결과의 승인 수는0이다.
+- 추가 검토에서 Debian 기반 이미지가 떠 있는 것을 확인해, 이미 시험한 digest `sha256:3783cc01769c7b2b1b83a5c5ad96c815348e28ed7da68e2e3687004faa906251`로 고정했다. ARM64/AMD64 manifest 확인, 다시 빌드한 로컬 이미지의 파일시스템 레이어와 실행 설정이 이전 S3 시험 이미지와 같음을 확인했다. 같은 객체 호환성 검사를 반복하지 않았다.
+- `verify-align` 라벨 추가 이벤트를 CI에 포함하고, `[verify-align]` 커밋 문구는 main push에서만 읽도록 문서와9개 조건을 맞췄다. PR은 라벨로 요청한다. 이번 제작 검증에서 음성 모델 검증을 새로 요청하지 않았다. YAML·Ruff/포맷 통과, 후속 HEAD CI 확인 후 병합한다.
+- MinIO의 비root 전환 제안은 별도 작업으로 남긴다. 기존 실제 MinIO도 UID0이며 현재 권한을 유지한다. 기존 `objects`의 소유권을 이 다운로드 복구 변경에 섞어 바꾸지 않는다. 이 항목을 수정 완료나 인터넷 공개 보안 점검 완료로 보고하지 않는다.
+- 전환 준비: 비공개 DB `manual-20260929T131111Z.dump`(아카이브 목록119개 읽기 성공), 객체79개의 `media-20260929T131113Z.json` 백업 완료. 여섯 서비스의 `before-main-20260929` 이미지 태그와 원래 LaunchAgent 사본을 보관했다. 운영 main 경로를 가리키는 LaunchAgent 후보는 만들었으나 아직 설치하지 않았다. 비공개 `recording4-local-tools/experiments`의 `delivery-before-main-20260929.json`, `startup-*-20260929.plist`, 소스 해시 기록을 재사용한다.
+
+## 2026-09-29 배포 CI 통과·EgoBlur 검토 반영
+
+- `ef93722`의 [GitHub 실행36572147454](https://github.com/plutoan12/recording4/actions/runs/36572147454)는 Python/웹/Linux 워커/전체 스택 **모두 통과**했다. MinIO 공식 소스의 Linux/AMD64 빌드와 실제 S3→제작→다운로드→디코딩 경로가 검증됐다. 수정 OpenCV4 워커도 로컬에 적용하여 healthy·캐스케이드 로드를 확인했다. 기존 검수본을 저장소에서 다시 받아 비공개 사본과 동일 SHA-256임을 확인했고 해당 결과의 승인 수는0이다.
+- CodeRabbit의 EgoBlur 프레임률 지적을 [공식 Gen1 소스](https://github.com/facebookresearch/EgoBlur/blob/75144e14916223313beb6593b631e32ca149d840/gen1/script/demo_ego_blur_gen1.py)로 확인했다. CLI는 기본30fps·정수 FPS만 지원하며 오디오 없이 프레임을 다시 쓴다. 입력의 정수 FPS를 명시하고, 출력 FPS/프레임 수가 달라지면 적용을 거부한다. 소수 FPS·불명확한 메타데이터는 반올림하지 않고 deface 사용을 안내한다. 검증된 가림 영상에 편집 완료 원음을 무손실 스트림 복사로 결합한다.
+- 추가 회귀8개 중 수정 전7개 실패/1개 통과, 수정 후 기존 privacy 검사와 함께 **17개 통과**, Ruff/포맷 통과. 실제 FFmpeg로 24/30fps·유음/무음·프레임 손실·잘못된 FPS를 확인하고 원음 디코딩 바이트가 동일하며 모델 대역의 가린 프레임만 최종 파일에 남음을 검사했다. 모델 추론만 대역이므로 **EgoBlur 실제 모델/전체 영상 가림 품질 통과가 아니다**.
+- 후속 코드 HEAD는 CI와 검토 후 병합한다. 운영 MinIO는 기존 이미지이며 main/LaunchAgent 경로 정리는 병합 후 진행한다. 다른 작업자의 checkout·원본·비밀 설정은 보존한다. 새 유료 호출·승인·게시 없음.
+
+## 2026-09-29 배포 CI 실패 원인 수정·격리 검증
+
+- [PR #40](https://github.com/plutoan12/recording4/pull/40)의 기존 HEAD `5490fc4`에서 Python/웹은 통과했으나 스택/워커 CI가 실패했다. 원인은 MinIO 이미지 다운로드 인증 오류, pyannote 검증과 샘플 생성의 조건 불일치, deface가 끌어온 일반 OpenCV5와 기존 headless4의 `cv2` 덮어쓰기였다.
+- `infra/Dockerfile.minio`는 기존 릴리스의 공식 commit `cefc43e4daa4cbb490ef6726ea374e26a93eb85e`를 원래 Go1.23.3으로 빌드한다. 소스 SHA-256 `19eac4eba99f28056e81e2338edac523a1068a59266bbd700267f55122205e14`와 빌더 digest를 고정하고 라이선스/소스를 이미지에 포함했다. Compose의 서비스·인증·`objects:/data`는 유지하고 상태 검사만 내장 curl로 바꿨다.
+- **격리 S3 실측 통과**: 기존 캐시 이미지로 만든 시험 데이터의 새 이미지 읽기, 서명 PUT/GET, HEAD, SDK 다운로드 무결성, **9MiB multipart 업로드·다운로드**, 무인증 GET403. ARM64 소스 빌드도 통과했다. 운영 데이터/비밀 설정은 사용하지 않았고 시험 컨테이너는 정지했다. 원래 운영 MinIO는 그대로다.
+- analysis/privacy는 `opencv-python==4.14.0.94` 하나를 공유한다. 새 워커 이미지 빌드·`pip check`·캐스케이드 실제 로드·관련 **87검사**·Ruff0.8.4/포맷 통과. 두 얼굴 없는 영상의 14표본은 오검출0, 실제 원본 32표본 중24개에서 얼굴 후보를 찾았다. 후보 개수는 정답 검출률이 아니다.
+- 같은 실제 영상의 29.5~31.5초 입력을 기존 OpenCV5/수정4로 각각 민감도 모자이크했다. 전체 디코딩 성공, 두 결과의 디코딩 RGB 프레임 SHA-256이 `f28a43f06af5d4a3684655e89e77ff4be0557d570470f2e713c7ad09488d6e47`로 같았다. 비공개 결과는 기존 delivery 폴더의 `opencv-check/`다. 기존32.6초 검수본/대본/승인은 변경하지 않았다.
+- pyannote CI는 토큰과 `verify-align` 요청이 모두 있어야 실행한다. 샘플 생성과 같은 조건이며, 이번 제작 PR에서 화자 모델 재추론을 요청하지 않았다. 미실행을 품질 통과로 보고하지 않는다.
+- 수정 HEAD의 Linux/AMD64 워커·전체 스택 CI는 push 후 확인한다. 필요한 검사와 검토 전 **main 병합/운영 저장소 교체는 미완료**다. 개발용 `infra/docker-compose.yml`은 별도 기존 구성으로 이번 운영 스택 변경에 포함하지 않았다. 새 유료 호출·승인·게시 없음.
+
+## 2026-09-29 실제 검수본 생성·선택형 민감도 반영
+
+- 우선순위는 화자 연구가 아니라 실제 영상 제작이다. 현재 작업 checkout은 `recording4-video-delivery`, 브랜치 `codex/video-delivery`, [PR #40](https://github.com/plutoan12/recording4/pull/40)이다. 연구 통합 #37은 별도 초안으로 유지한다.
+- 코드 `fbc846f`의 API·worker·web 이미지를 로컬 스택에 반영했고 모두 healthy다. 새 이미지에서 관련 **75검사 통과**, Ruff0.8.4·TypeScript·Vite 빌드 통과. 기존 멀티 컷/음악 경로와 모자이크 실패 시 결과 미노출도 검사했다.
+- 제공한 한국어 원본의 **32.6초, 720×1280, 한국어 자동 자막·원음 유지·얼굴 모자이크** 검수본 2개를 실제 운영 API로 생성했다. 최신 민감도 옵션 결과는 비공개 `recording4-deliveries/20260929-6LVyV8ueYc8/final-review-sensitive.mp4`, 동명 접미사 SRT/VTT와 `검수안내.md`다. render task `25713e14-9b49-414b-a836-8b8005a1d09f`, artifact `b0adaf9e-f65d-45ca-9099-8f52acf678b2`. 원본/작업을 중복 등록하지 말고 이 기록을 재사용한다.
+- 영상·오디오 전체 디코딩 통과. 원본과 출력의 모노16kHz 파형 상관 **0.999783**, ±0.1초 범위에서 측정한 시간 차이 **0초**. 자막 파일은 이전 렌더와 동일하다. 음질 청취·자막 정확도·네 언어 정확도 입증은 아니다.
+- 기본 검출에서 30초 지점 가장자리 얼굴이 빠졌다. 선택형 `deface_sensitive`(임계값 0.05·마스크 배율 1.5)로 다시 렌더한 해당 프레임에서는 가림을 확인했다. 8장 표본도 확인했으나 모든 프레임의 누락/오검출은 사람 검수 전까지 미확인이다. 일부 손 등 비얼굴 영역까지 가려질 수 있으며 기본 옵션은 바꾸지 않았다. 자동 자막에 어색한 인식이 남아 있다.
+- 관리화면의 설정 주소 `http://localhost:18444/`는 브라우저 로그인 화면까지 확인했다. 로그인 후 편집기 조작은 이번에 확인하지 않았다. API로 실제 제작 경로와 결과 파일은 확인했다. 기존 자동 시작은 보존했으며 `login-start`에 `--build`가 없고 기존 설정 경로가 같은 비공개 파일을 가리키는 것을 확인했다.
+- PR #40의 코드 HEAD Python/웹 CI는 통과했다. 스택 CI는 `quay.io/minio/minio:RELEASE.2024-11-07T00-52-20Z` 다운로드의 unauthorized로 실패했다. 공식 Docker Hub 동일 태그와 공식 보관 바이너리도 접근 실패했다. 로컬은 기존 캐시로 정상이다. 워커 이미지 CI/CodeRabbit은 기록 시점 진행 중이며 **main 미병합**이다. 동일 다운로드를 반복 재시도하지 않는다. 다음 자동화에서는 공식 동일 릴리스 소스로 CI 이미지를 재현하는 무료 대안 등 구체적인 해결책만 검증한다.
+- 새 유료 호출·더빙·승인·게시 없음. 다음 사람 검수는 대사/자막 시각/모자이크 누락·과도 가림 확인이다. 수정하면 새 버전으로 렌더하고 해당 버전만 승인한다. 한 시간 자동화는 이 제작 checkout을 기준으로 변경했다.
+
+## 2026-09-29 실제 영상 제작 경로 우선
+
+- 사용자가 화자 정확도 실험을 보류하고 실제 영상 제작을 우선하기로 했다. 운영 main `2e50815` 기반 `codex/video-delivery`에서 현재 멀티 컷·배속·페이드·음악을 보존하며 기존 모자이크 기능을 연결했다. 다른 작업 checkout과 비공개 평가 원본은 수정하지 않았다. 연구 전체가 들어 있는 #37은 별도 초안으로 남긴다.
+- `EditSpec`과 관리화면에 얼굴 모자이크를 연결하고 기본 deface를 worker 이미지에 설치한다. 편집/제작 경로 모두 모자이크 성공 후에만 결과물을 복사한다. 도구 오류·빈 결과는 실패다. 편집 중 한 장 미리보기와 최종 모자이크 검수는 구분해 안내한다.
+- 관련 72검사, Ruff0.8.4, TypeScript/웹 빌드 통과. API/worker/web 이미지 빌드 완료. 최신 이미지의 관련 재검사와 운영 반영·실제 완성본 확인을 이어간다.
+- 제공 영상 `6LVyV8ueYc8`는 기존 다운로드의 SHA를 확인하고 운영 저장소에 등록·검증했다. 한국어 원본이므로 무료 로컬 STT로9개 자막 초안을 생성했다. 원음 유지·한국어 자막·얼굴 모자이크가 있는9:16 검수본을 만든다. 사람 확인이 안 된 자동 자막이며 게시/승인/새 유료호출은 하지 않는다.
+- 실행/한계는 [실제 제작 경로](VIDEO_DELIVERY.md). 비공개 제작 기록은 별도 recording4-deliveries/20260929-6LVyV8ueYc8에 두며 원시 결과물을 Git에 올리지 않는다.
+
 ## 2026-09-21: 숏폼 편집 확장 — 멀티 컷·무음 빼기·배속/페이드/배경음악·미리보기 (Claude)
 
 브랜치 `claude/claude-md-design-review-v8qdz4`, PR #17 위. 담당: `packages/pipeline/pipeline/{cuts,editing}.py`, `services/worker/worker/{rendering,media_tasks}.py`, `services/api/adminapi/{models}.py`·`routers/editing.py`, `migrations/versions/0010_silence_preview_media_task.py`, `apps/web/src/ClipEditor.tsx`, `tests/{test_video_editing,test_render_integration}.py`.
