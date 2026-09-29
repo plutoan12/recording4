@@ -1,3 +1,10 @@
+## 2026-09-29 배포 CI 통과·EgoBlur 검토 반영
+
+- `ef93722`의 [GitHub 실행36572147454](https://github.com/plutoan12/recording4/actions/runs/36572147454)는 Python/웹/Linux 워커/전체 스택 **모두 통과**했다. MinIO 공식 소스의 Linux/AMD64 빌드와 실제 S3→제작→다운로드→디코딩 경로가 검증됐다. 수정 OpenCV4 워커도 로컬에 적용하여 healthy·캐스케이드 로드를 확인했다. 기존 검수본을 저장소에서 다시 받아 비공개 사본과 동일 SHA-256임을 확인했고 해당 결과의 승인 수는0이다.
+- CodeRabbit의 EgoBlur 프레임률 지적을 [공식 Gen1 소스](https://github.com/facebookresearch/EgoBlur/blob/75144e14916223313beb6593b631e32ca149d840/gen1/script/demo_ego_blur_gen1.py)로 확인했다. CLI는 기본30fps·정수 FPS만 지원하며 오디오 없이 프레임을 다시 쓴다. 입력의 정수 FPS를 명시하고, 출력 FPS/프레임 수가 달라지면 적용을 거부한다. 소수 FPS·불명확한 메타데이터는 반올림하지 않고 deface 사용을 안내한다. 검증된 가림 영상에 편집 완료 원음을 무손실 스트림 복사로 결합한다.
+- 추가 회귀8개 중 수정 전7개 실패/1개 통과, 수정 후 기존 privacy 검사와 함께 **17개 통과**, Ruff/포맷 통과. 실제 FFmpeg로 24/30fps·유음/무음·프레임 손실·잘못된 FPS를 확인하고 원음 디코딩 바이트가 동일하며 모델 대역의 가린 프레임만 최종 파일에 남음을 검사했다. 모델 추론만 대역이므로 **EgoBlur 실제 모델/전체 영상 가림 품질 통과가 아니다**.
+- 후속 코드 HEAD는 CI와 검토 후 병합한다. 운영 MinIO는 기존 이미지이며 main/LaunchAgent 경로 정리는 병합 후 진행한다. 다른 작업자의 checkout·원본·비밀 설정은 보존한다. 새 유료 호출·승인·게시 없음.
+
 ## 2026-09-29 배포 CI 실패 원인 수정·격리 검증
 
 - [PR #40](https://github.com/plutoan12/recording4/pull/40)의 기존 HEAD `5490fc4`에서 Python/웹은 통과했으나 스택/워커 CI가 실패했다. 원인은 MinIO 이미지 다운로드 인증 오류, pyannote 검증과 샘플 생성의 조건 불일치, deface가 끌어온 일반 OpenCV5와 기존 headless4의 `cv2` 덮어쓰기였다.

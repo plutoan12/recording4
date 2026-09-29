@@ -7,9 +7,12 @@ the worker receives their paths through deployment configuration.
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
+import tempfile
+from fractions import Fraction
 from pathlib import Path
 from typing import Literal
 
@@ -90,7 +93,43 @@ def _openscrub(source: Path, output: Path, mosaic_size: int) -> None:
     )
 
 
+def _egoblur_timing(source: Path) -> tuple[int, int]:
+    """Require the integer frame rate and frame count Gen1 can preserve."""
+    message = "EgoBlur 영상 시각을 확인할 수 없습니다. 정수 고정 FPS 영상이나 deface를 사용하세요."
+    binary = _executable("R4_FFPROBE_BINARY", "ffprobe", message)
+    try:
+        result = subprocess.run(
+            [
+                binary, "-v", "error", "-select_streams", "v:0",
+                "-show_entries", "stream=avg_frame_rate,r_frame_rate,nb_frames",
+                "-of", "json", str(source),
+            ],
+            check=True,
+            capture_output=True,
+            timeout=60,
+        )  # fmt: skip
+        stream = json.loads(result.stdout)["streams"][0]
+        rate = Fraction(stream["avg_frame_rate"])
+        frames = int(stream["nb_frames"])
+        if rate <= 0 or rate.denominator != 1 or rate != Fraction(stream["r_frame_rate"]):
+            raise ValueError("unsupported frame rate")
+        if frames <= 0:
+            raise ValueError("missing frames")
+        return rate.numerator, frames
+    except (
+        OSError,
+        subprocess.SubprocessError,
+        ValueError,
+        TypeError,
+        KeyError,
+        IndexError,
+        ZeroDivisionError,
+    ) as exc:
+        raise PrivacyError(message) from exc
+
+
 def _egoblur(source: Path, output: Path, mosaic_size: int) -> None:
+    """Keep Gen1's redacted frames at the source rate and restore its audio."""
     del mosaic_size  # EgoBlur applies Gaussian blur; tile size is not applicable.
     binary = _executable(
         "R4_EGOBLUR_BINARY",
@@ -100,20 +139,42 @@ def _egoblur(source: Path, output: Path, mosaic_size: int) -> None:
     model = os.environ.get("R4_EGOBLUR_FACE_MODEL")
     if not model or not Path(model).is_file():
         raise PrivacyError("EgoBlur 얼굴 모델이 없습니다. R4_EGOBLUR_FACE_MODEL을 설정하세요.")
-    _run(
-        [
-            binary,
-            "--face_model_path",
-            model,
-            "--input_video_path",
-            str(source),
-            "--output_video_path",
-            str(output),
-        ],
-        output,
-        3600,
-        "EgoBlur 얼굴 블러 실패: 모델·입력 영상을 확인하세요.",
-    )
+    timing = _egoblur_timing(source)
+    ffmpeg = _executable("R4_FFMPEG_BINARY", "ffmpeg", "EgoBlur 원음 보존에는 FFmpeg가 필요합니다.")
+    with tempfile.TemporaryDirectory(prefix="r4-egoblur-") as directory:
+        redacted, merged = Path(directory) / "redacted.mp4", Path(directory) / "merged.mp4"
+        _run(
+            [
+                binary,
+                "--face_model_path",
+                model,
+                "--input_video_path",
+                str(source),
+                "--output_video_path",
+                str(redacted),
+                "--output_video_fps",
+                str(timing[0]),
+            ],
+            redacted,
+            3600,
+            "EgoBlur 얼굴 블러 실패: 모델·입력 영상을 확인하세요.",
+        )
+        if _egoblur_timing(redacted) != timing:
+            raise PrivacyError("EgoBlur 결과의 프레임률·개수가 원본과 달라 적용하지 않았습니다.")
+        # Gen1 writes an image sequence without audio. Only the redacted video
+        # stream is copied; audio comes from the already edited/rendered source.
+        _run(
+            [
+                ffmpeg, "-nostdin", "-v", "error",
+                "-i", str(redacted), "-i", str(source),
+                "-map", "0:v:0", "-map", "1:a:0?", "-c", "copy",
+                "-movflags", "+faststart", str(merged),
+            ],
+            merged,
+            600,
+            "EgoBlur 원음 결합에 실패했습니다.",
+        )  # fmt: skip
+        shutil.copyfile(merged, output)
 
 
 def redact_faces(
