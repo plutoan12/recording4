@@ -27,7 +27,26 @@ def finite(value):
 
 
 def prepare(template_path, reviewed_path):
-    template, reviewed = load_json(template_path), load_json(reviewed_path)
+    result = inspect_review(template_path, load_json(reviewed_path))
+    result["received_sha256"] = sha(reviewed_path)
+    return result
+
+
+def same_json(left, right):
+    """JSON number representations may differ; booleans are never numbers."""
+    if isinstance(left, bool) or isinstance(right, bool):
+        return type(left) is type(right) and left == right
+    if isinstance(left, dict) and isinstance(right, dict):
+        return left.keys() == right.keys() and all(same_json(v, right[k]) for k, v in left.items())
+    if isinstance(left, list) and isinstance(right, list):
+        return len(left) == len(right) and all(
+            same_json(a, b) for a, b in zip(left, right, strict=True)
+        )
+    return left == right
+
+
+def inspect_review(template_path, reviewed):
+    template = load_json(template_path)
     if not isinstance(template, dict) or not isinstance(reviewed, dict):
         raise ValueError("Expected review objects")
     if (
@@ -37,9 +56,10 @@ def prepare(template_path, reviewed_path):
         or reviewed["schema"] != 1
     ):
         raise ValueError("Unsupported template")
-    if {k: v for k, v in template.items() if k != "items"} != {
-        k: v for k, v in reviewed.items() if k != "items"
-    }:
+    if not same_json(
+        {k: v for k, v in template.items() if k != "items"},
+        {k: v for k, v in reviewed.items() if k != "items"},
+    ):
         raise ValueError("Review provenance changed")
     original, items = template.get("items"), reviewed.get("items")
     if not isinstance(original, list) or not original or not isinstance(items, list):
@@ -50,9 +70,12 @@ def prepare(template_path, reviewed_path):
     for base, item in zip(original, items, strict=True):
         if not isinstance(base, dict) or not isinstance(item, dict):
             raise ValueError("Invalid review item")
-        if {k: v for k, v in base.items() if k not in HUMAN_FIELDS} != {
-            k: v for k, v in item.items() if k not in HUMAN_FIELDS
-        }:
+        if not HUMAN_FIELDS <= item.keys():
+            raise ValueError("Missing annotation fields")
+        if not same_json(
+            {k: v for k, v in base.items() if k not in HUMAN_FIELDS},
+            {k: v for k, v in item.items() if k not in HUMAN_FIELDS},
+        ):
             raise ValueError("Candidate metadata changed")
         index = item.get("review_id")
         if type(index) is not int or index in seen:
@@ -111,7 +134,6 @@ def prepare(template_path, reviewed_path):
         "received": reviewed,
         "measurements": measurements,
         "template_sha256": sha(template_path),
-        "received_sha256": sha(reviewed_path),
     }
 
 

@@ -45,6 +45,24 @@ Python 3.11 이상 표준 라이브러리만 사용한다. 출력은 템플릿�
 
 실제 로컬 화면은 검수팩의 `review-v2.html`이며 기존 loopback 서버에서 `http://127.0.0.1:8765/review-v2.html`로 연다. 외부에 공개하지 않는다. 후보 재생은 HTTP로 열어야 하며 실제 디코딩된 음원 끝을 넘어 무음을 추가하지 않는다. 문맥 재생 시에도 후보의 상대 시각과 범위를 표시한다.
 
-내보내기는 기존 schema 1 메타데이터·15개 항목을 보존하고 항목에 `annotation_scope`, 최상위에 `review_ui`를 추가한다. `review_ui`는 version 2, template/received SHA, 생성 당시 WAV별 SHA·실제 길이·누락 여부, `score_approved:false`를 포함한다. **현재 생성기의 입력은 기존 schema 1 제출본이며 v2 내보내기 재수신은 별도 검증 연결이 필요하다.** 이 파일은 DER/CER 정답이나 운영 승인 파일이 아니다. 사용할 때 현재 음원과 해시·시각을 다시 검사해야 한다.
+내보내기는 기존 schema 1 메타데이터·15개 항목을 보존하고 항목에 `annotation_scope`, 최상위에 `review_ui`를 추가한다. `review_ui`는 version 2, template/received SHA, 생성 당시 WAV별 SHA·실제 길이·누락 여부, `score_approved:false`를 포함한다. 생성기의 입력은 기존 schema 1 제출본이다. v2 내보내기는 아래 재수신 명령으로 검증·보존한다. 생성기로 직접 재입력하지 않는다. 이 파일은 DER/CER 정답이나 운영 승인 파일이 아니다. 사용할 때 현재 음원과 해시·시각을 다시 검사해야 한다.
 
 검증: Python 회귀 6개, Ruff 검사와 형식 통과. 실제 15개 표시 및 후보13 부분 음원·13/14 문맥 길이 경고를 브라우저에서 확인했다. 별도 합성 입력으로 false→null 전환, 확신도0, 범위candidate를 다운로드한 JSON과 대조하고 새로고침 복원·부분 재생을 확인했다. 다운로드 이벤트 대기 API는 시간 초과했지만 파일 자체는 생성됐으며 로컬 파일을 읽어 값을 검증했다. 실제 사람 라벨은 시험 중 수정하지 않았다. 음성 품질 청취나 화자 정확도 향상을 증명한 검사가 아니다.
+
+
+## v2 재수신
+
+```sh
+python3 scripts/import_speaker_review.py \
+  --template /private/review-pack/labels.template.json \
+  --parent-review /private/import/labels.received.json \
+  --submission /private/labels.reviewed.v2.json \
+  --source-video /private/source.mp4 \
+  --output /private/import-v2-new
+```
+
+부모 제출본은 v2 화면을 생성할 때 사용한 원래 schema1 파일이다. 템플릿·부모 제출본 SHA, 생성 시 WAV 측정과 현재 파일, 실제 원본 영상 SHA, 후보 메타데이터가 같아야 한다. 허용된 v2 필드를 먼저 검증한 후 라벨 계약을 재사용하므로 필드 삭제로 검증을 우회하지 않는다. 누락/미판단을 기본값으로 바꾸지 않으며 모든 후보를 감사 보고서에 남긴다. 승인 필드의 false와 숫자0도 구분한다.
+
+출력 디렉터리는 새로 만들어야 한다. 수신 원문은 바이트 그대로 보존하며 별도 감사 JSON에는 원시 대사와 검수자 이름을 싣지 않는다. 해시는 파일 대응을 검증할 뿐 사람 주석의 진위나 내용의 정확성을 증명하지 않는다. 모든 라벨이 입력돼도 익명 화자 대응 확인이 필요하며 전체 영상 DER/CER에는 전 구간 정답 시각과 대사가 필요하다. `accuracy/der/cer`는 null이고 `deploy_allowed`는 false다.
+
+검증: 관련 생성/재수신 회귀 총11개와 Ruff 검사/형식 통과. 원본·WAV·부모 해시 변경, boolean/숫자 혼동, 필수 필드 누락 거부와 수신 바이트/분모/unknown/부분 음원 보존, 기존 출력 덮어쓰기 차단을 합성 자료로 검사했다. 실제 v2 수신이나 정확도 향상 실측은 아직 없다.
