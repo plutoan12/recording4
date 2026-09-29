@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="ko">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>화자 검수 · 입력 확인</title>
+<style>
+:root{font:16px system-ui,sans-serif;color:#17263a;background:#f4f6fa}
+body{max-width:900px;margin:24px auto;padding:0 20px}header{position:sticky;top:0;background:#f4f6fa;padding:12px 0;z-index:2;border-bottom:1px solid #abb9c9}
+h1{font-size:1.5rem}h2{font-size:1.1rem}section{background:white;border:1px solid #bac7d6;border-radius:12px;margin:18px 0;padding:18px}
+label{display:inline-flex;gap:8px;align-items:center;margin:8px 16px 8px 0}input,select,button{font:inherit;padding:8px}button{cursor:pointer;margin:8px 8px 8px 0}audio{width:100%}.warn{color:#8a3100;background:#fff2df;padding:10px;border-radius:6px}.muted{color:#485870}.bar{height:12px;background:#e0e7ef;position:relative;margin:10px 0}.core{height:100%;position:absolute;background:#1a65bb}.clock{font-variant-numeric:tabular-nums}input[type=number]{width:90px}small{display:block}
+</style>
+<body>
+<header><h1>화자 검수 · 입력 확인</h1><div id="progress"></div><div id="notice" role="status"></div><button id="download">현재 입력 JSON 내려받기</button></header>
+<p>앞서 기록한 값을 불러왔습니다. 빈 값은 <strong>미판단</strong>으로 표시합니다. 겹말은 두 음성이 동시에 들리는 경우입니다. 같은 목소리에는 같은 화자 번호를 사용하세요. 모델의 번호와 자동으로 대응되지는 않습니다.</p>
+<p>파란 막대는 원래 후보 구간입니다. 전체 오디오에는 앞뒤 문맥이 포함됩니다. <strong>판단 범위</strong>를 선택해 주세요. 아주 짧거나 불명확한 구간은 ‘판단 범위 불확실’로 남길 수 있습니다.</p>
+<main id="items"></main>
+<script id="data" type="application/json">__REVIEW_DATA__</script>
+<script>
+'use strict';
+const data=JSON.parse(document.getElementById('data').textContent);
+const received=data.received;
+const cacheKey='r4-review-v2-'+data.template_sha256+'-'+data.received_sha256;
+let state=Object.fromEntries(received.items.map(x=>[x.review_id,{
+  human_speakers:x.human_speakers, human_overlap:x.human_overlap,
+  human_confidence:x.human_confidence, reviewer:x.reviewer, annotation_scope:null
+}]));
+const notice=document.getElementById('notice');
+function valid(s){
+  return s && (s.human_speakers===null || (Array.isArray(s.human_speakers) &&
+    s.human_speakers.every(x=>['speaker_0','speaker_1','unknown'].includes(x)) &&
+    new Set(s.human_speakers).size===s.human_speakers.length &&
+    (!s.human_speakers.includes('unknown') || s.human_speakers.length===1))) &&
+    (s.human_overlap===null || typeof s.human_overlap==='boolean') &&
+    (s.human_confidence===null || (typeof s.human_confidence==='number' && Number.isFinite(s.human_confidence) && s.human_confidence>=0 && s.human_confidence<=1)) &&
+    (s.reviewer===null || typeof s.reviewer==='string') &&
+    [null,'candidate','context','uncertain'].includes(s.annotation_scope);
+}
+try{
+  const cached=JSON.parse(localStorage.getItem(cacheKey)||'null');
+  if(cached && received.items.every(x=>valid(cached[x.review_id]))) state=cached;
+}catch(_){notice.textContent='임시 저장을 사용할 수 없습니다. JSON 내려받기로 보관하세요.';}
+function complete(s){return s.human_speakers?.length>0 && typeof s.human_overlap==='boolean' && s.human_confidence!==null && s.reviewer?.trim() && ['candidate','context'].includes(s.annotation_scope);}
+function progress(){
+  const done=received.items.filter(x=>complete(state[x.review_id])).length;
+  document.getElementById('progress').textContent=`필수 입력 ${done}/${received.items.length} · 채점 승인과는 별도입니다.`;
+}
+function change(id,key,value){
+  state[id][key]=value;
+  try{localStorage.setItem(cacheKey,JSON.stringify(state));notice.textContent='이 브라우저에 임시 저장했습니다. 작업 후 JSON을 내려받아 주세요.';}
+  catch(_){notice.textContent='임시 저장에 실패했습니다. JSON을 내려받아 주세요.';}
+  progress();
+}
+function element(tag,text,parent){const x=document.createElement(tag);if(text!==undefined)x.textContent=text;if(parent)parent.append(x);return x;}
+function selection(card,title,key,id,options){
+  const label=element('label',title,card),select=element('select',undefined,label);
+  select.setAttribute('aria-label',`${id} ${title}`);
+  options.forEach(([value,text])=>{const option=element('option',text,select);option.value=value===null?'':String(value);});
+  const value=state[id][key];select.value=value===null?'':String(value);
+  select.onchange=()=>change(id,key,select.value===''?null:key==='human_overlap'?select.value==='true':select.value);
+}
+let audioContext,playing;
+for(const item of received.items){
+  const id=item.review_id,m=data.measurements[id],card=element('section',undefined,document.getElementById('items'));
+  card.dataset.reviewId=id;
+  element('h2',`후보 ${String(id).padStart(2,'0')} · 원본 ${item.candidate_start.toFixed(2)}–${item.candidate_end.toFixed(2)}초`,card);
+  const start=item.candidate_start-item.audio_start,end=item.candidate_end-item.audio_start;
+  element('small',`재생 파일의 ${start.toFixed(2)}–${end.toFixed(2)}초가 후보입니다. 실제 파일 길이 ${m.duration.toFixed(6)}초`,card);
+  const bar=element('div',undefined,card);bar.className='bar';
+  const core=element('div',undefined,bar);core.className='core';
+  core.style.left=`${Math.min(100,100*start/m.duration)}%`;
+  core.style.width=`${Math.max(0,100*(Math.min(end,m.duration)-start)/m.duration)}%`;
+  if(!m.declared_duration_matches){const w=element('p','문맥의 실제 길이가 원래 안내와 다릅니다. 기존 시각과 라벨을 보존했습니다.',card);w.className='warn';}
+  if(!m.candidate_fully_audible){const w=element('p','후보 끝부분이 이 음원에 없습니다. 부분 재생만 가능하며 채점 전에 이 누락을 확인해야 합니다.',card);w.className='warn';}
+  const audio=element('audio',undefined,card);audio.controls=true;audio.preload='metadata';audio.src='./'+encodeURIComponent(item.audio_file);
+  const clock=element('small','',card);clock.className='clock';
+  audio.ontimeupdate=()=>{clock.textContent=`재생 ${audio.currentTime.toFixed(2)}초 · ${audio.currentTime>=start && audio.currentTime<end?'후보 구간':'문맥 구간'}`;};
+  const play=element('button',m.candidate_fully_audible?'후보만 재생':'후보의 남은 부분 재생',card);
+  play.onclick=async()=>{
+    play.disabled=true;
+    try{
+      document.querySelectorAll('audio').forEach(a=>a.pause());if(playing){playing.stop();playing=null;}
+      audioContext ||= new AudioContext();await audioContext.resume();
+      const response=await fetch(audio.src);if(!response.ok)throw new Error('audio');
+      const buffer=await audioContext.decodeAudioData(await response.arrayBuffer());
+      const length=Math.min(end,m.duration,buffer.duration)-start;if(length<=0)throw new Error('range');
+      playing=audioContext.createBufferSource();playing.buffer=buffer;playing.connect(audioContext.destination);playing.start(0,start,length);
+      notice.textContent=m.candidate_fully_audible?'후보 구간을 재생합니다.':'실제 음원에 있는 후보 부분만 재생합니다.';
+    }catch(_){notice.textContent='후보 재생 실패: 로컬 HTTP 주소로 열었는지 확인하세요. 전체 오디오 제어로 재생할 수도 있습니다.';}
+    finally{play.disabled=false;}
+  };
+  audio.onplay=()=>{if(playing){playing.stop();playing=null;}document.querySelectorAll('audio').forEach(a=>{if(a!==audio)a.pause();});};
+  const voices=element('div',undefined,card);
+  for(const [value,title] of [['speaker_0','화자 0'],['speaker_1','화자 1'],['unknown','모르겠음']]){
+    const label=element('label',undefined,voices),input=element('input',undefined,label);input.type='checkbox';input.value=value;input.checked=(state[id].human_speakers||[]).includes(value);input.setAttribute('aria-label',`${id} ${title}`);label.append(document.createTextNode(title));
+    input.onchange=()=>{
+      if(input.checked) voices.querySelectorAll('input').forEach(x=>{if(x!==input && (value==='unknown'||x.value==='unknown'))x.checked=false;});
+      const chosen=[...voices.querySelectorAll('input:checked')].map(x=>x.value);change(id,'human_speakers',chosen.length?chosen:null);
+    };
+  }
+  selection(card,'겹말','human_overlap',id,[[null,'미판단'],[false,'없음'],[true,'있음']]);
+  selection(card,'판단 범위','annotation_scope',id,[[null,'선택 필요'],['candidate','후보 구간만'],['context','문맥 포함 전체'],['uncertain','판단 범위 불확실']]);
+  const label=element('label','확신도 (0~1)',card),confidence=element('input',undefined,label);confidence.type='number';confidence.min=0;confidence.max=1;confidence.step='any';confidence.placeholder='미판단';confidence.value=state[id].human_confidence??'';confidence.setAttribute('aria-label',`${id} 확신도`);
+  confidence.oninput=()=>{change(id,'human_confidence',confidence.value!=='' && confidence.validity.valid?Number(confidence.value):null);};
+  const rl=element('label','검수자',card),reviewer=element('input',undefined,rl);reviewer.value=state[id].reviewer??'';reviewer.setAttribute('aria-label',`${id} 검수자`);reviewer.oninput=()=>change(id,'reviewer',reviewer.value.trim()||null);
+}
+document.getElementById('download').onclick=()=>{
+  if([...document.querySelectorAll('input[type=number]')].some(x=>!x.validity.valid)){notice.textContent='확신도에는 0~1 사이 숫자 또는 빈 값을 입력하세요.';return;}
+  const output=structuredClone(received);
+  output.items=received.items.map(item=>({...item,...Object.fromEntries(['human_speakers','human_overlap','human_confidence','reviewer','annotation_scope'].map(k=>[k,state[item.review_id][k]]))}));
+  output.review_ui={version:2,template_sha256:data.template_sha256,received_sha256:data.received_sha256,measurements:data.measurements,score_approved:false};
+  const link=document.createElement('a');link.href=URL.createObjectURL(new Blob([JSON.stringify(output,null,2)+'\n'],{type:'application/json'}));link.download='labels.reviewed.v2.json';document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(link.href),1000);
+  notice.textContent='현재 입력을 내보냈습니다. 미판단 값과 음원 길이 문제도 함께 보존됩니다.';
+};
+progress();
+</script>
+</body>
+</html>

@@ -28,3 +28,23 @@
 제출본에는 15개 후보에 대한 화자 집합·겹말 여부만 있다. 전체 영상의 화자별 시작/끝과 정답 대사가 없어 전체 DER/CER 채점은 불가능하다. 앞선 '라벨을 채우면 DER/CER를 계산한다'는 안내는 이 추가 정답을 명시하지 않아 불완전했다.
 
 현재 결과는 `incomplete_reference`, 정확도·DER·CER는 null이며 운영 승인은 false다. unknown을 오답/정답으로 바꾸지 않고, 제출 화자 번호와 모델 번호가 같은 사람이라는 가정도 하지 않는다. 사용자 확인 뒤 범위가 맞는 후보의 비교부터 진행하되 미확인·시간축 문제와 전체 15개 분모를 함께 표시한다.
+
+
+## 검수 화면 v2
+
+수신한 라벨을 보존한 새 화면을 생성한다. 원본 검수팩의 HTML, WAV, 수신 JSON은 수정하지 않는다.
+
+```sh
+python3 scripts/build_speaker_review.py \
+  --template /private/review-pack/labels.template.json \
+  --reviewed /private/import/labels.received.json \
+  --output /private/review-pack/review-v2.html
+```
+
+Python 3.11 이상 표준 라이브러리만 사용한다. 출력은 템플릿과 같은 폴더의 새 `.html`이어야 하며 권한은 0600이다. 겹말은 null(미판단)/false(없음)/true(있음), 확신도는 null 또는 0~1로 저장한다. 판단 범위는 candidate/context/uncertain/null이며 이전 검수의 범위를 임의로 채우지 않는다. 브라우저 임시 저장은 템플릿과 수신 파일 SHA에 묶인다. 내려받은 JSON은 별도로 보관해야 한다.
+
+실제 로컬 화면은 검수팩의 `review-v2.html`이며 기존 loopback 서버에서 `http://127.0.0.1:8765/review-v2.html`로 연다. 외부에 공개하지 않는다. 후보 재생은 HTTP로 열어야 하며 실제 디코딩된 음원 끝을 넘어 무음을 추가하지 않는다. 문맥 재생 시에도 후보의 상대 시각과 범위를 표시한다.
+
+내보내기는 기존 schema 1 메타데이터·15개 항목을 보존하고 항목에 `annotation_scope`, 최상위에 `review_ui`를 추가한다. `review_ui`는 version 2, template/received SHA, 생성 당시 WAV별 SHA·실제 길이·누락 여부, `score_approved:false`를 포함한다. **현재 생성기의 입력은 기존 schema 1 제출본이며 v2 내보내기 재수신은 별도 검증 연결이 필요하다.** 이 파일은 DER/CER 정답이나 운영 승인 파일이 아니다. 사용할 때 현재 음원과 해시·시각을 다시 검사해야 한다.
+
+검증: Python 회귀 6개, Ruff 검사와 형식 통과. 실제 15개 표시 및 후보13 부분 음원·13/14 문맥 길이 경고를 브라우저에서 확인했다. 별도 합성 입력으로 false→null 전환, 확신도0, 범위candidate를 다운로드한 JSON과 대조하고 새로고침 복원·부분 재생을 확인했다. 다운로드 이벤트 대기 API는 시간 초과했지만 파일 자체는 생성됐으며 로컬 파일을 읽어 값을 검증했다. 실제 사람 라벨은 시험 중 수정하지 않았다. 음성 품질 청취나 화자 정확도 향상을 증명한 검사가 아니다.
