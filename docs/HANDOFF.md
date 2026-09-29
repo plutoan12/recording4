@@ -1,3 +1,13 @@
+## 2026-09-30 자막 다운로드 수정 배포·실행 검증 완료
+
+- [PR #41](https://github.com/plutoan12/recording4/pull/41)은 HEAD `8c9b0ea`의 [CI36585568013](https://github.com/plutoan12/recording4/actions/runs/36585568013)에서 Python·웹·Linux 워커·전체 스택을 통과했다. CodeRabbit 두 지적을 재현/수정했고 두 검토 항목 해결 및 최종 SUCCESS/CLEAN을 확인한 뒤 main `9bcdd8c`로 squash 병합했다. 로컬 전체633통과/2skip, CI Python621통과/1skip이다. CI는 dev/providers 설치, 로컬은 analysis/privacy 의존성이 있는 환경이며 두 실행을 같은 검사 집합으로 표현하지 않는다.
+- 운영 `recording4` main을 깨끗한 상태에서 fast-forward했다. 진행 중/대기/예약 Celery·미전송 outbox·실행 중 media 모두0을 확인하고, 검토 HEAD에서 빌드한 API/worker 이미지의 소스가 main과 같음을 비교한 뒤 API·worker·dispatcher·monitor에 적용했다. 설치 모듈 SHA-256과 이미지 레이어/설정 일치, **9개 서비스 실행·상태 검사5개 healthy**, API 준비·관리화면/검수 화면 HTTP200을 확인했다. 웹·MinIO·DB·Redis·백업 컨테이너와 모든 데이터 볼륨은 그대로다.
+- 전환 전 DB `manual-20260929T144546Z.dump`(목록119항목)와 영상80객체 `media-20260929T144547Z.json`을 백업했다. API/worker 기반 서비스별 `before-caption-20260929` 이미지 태그를 남겼다. 비공개 환경 파일 해시는 전후 같고 실제 검수 서버 artifact 두 개 및 로컬 보완 영상/자막 해시도 유지됐다. 실제 영상 승인0, 전역 승인/게시/비용 예약 건수 변화0이다.
+- **운영 API의 무료 합성 표본 두 건 통과**: 구운 task `debaa576-49cc-4f5d-9189-b4dd2f7408fb`, 트랙 전용 task `11bb9a19-17f2-4b78-9239-eb2096172362`. 기존8초 합성 원본을 재사용했다. SRT/VTT 다운로드와 저장한 `subtitle_files`가 바이트 단위로 같고 제목은 제외되며 두 영상 모두 전체 디코딩 통과다. 워커 ASS 재현과 대조해 구운 자막3개/트랙 전용 ASS 대사0개를 확인했다. API의 기존 재계산은2개로 다른 문장/시각을 반환하지만 새 다운로드는 워커가 결정한3개를 보존한다. 대사 정확도나 모자이크 검출률 실측은 아니다.
+- 비공개 근거는 `recording4-local-tools/experiments/caption-snapshot-{before,backup,after}-20260929.json`, `caption-snapshot-build-8c9b0ea.json`, `caption-snapshot-smoke-20260929/report.json` 및 `legacy-comparison.json`이다. 검증 스크립트가 저장한 합성 작업 ID를 재사용하므로 같은 샘플을 반복 생성할 필요가 없다. 초기 보존 검사의 볼륨 배열 순서 차이는 이름·마운트 대상 기준으로 비교해 확인했으며 실제 볼륨은 바뀌지 않았다.
+- **다음은 사람 검수다.** `http://127.0.0.1:8766/`의 `final-review-repaired.mp4`와 `captions-repaired.srt/.vtt`를 대상으로 세 불확실 대사 및 전체 자막/음질/모자이크를 확인한다. 사람 청취·화자 정답·게시 승인을 대신 완료하지 않았다. 보완 MP4는 서버 미등록 로컬 파생본이므로 부모 artifact 승인으로 대체하지 않는다. 기존 결과물·번역/더빙의 재계산 경로는 이번 배포로 자동 복구되지 않는다. 연구 초안 #37은 보류다. 새 유료 호출·구독·YouTube 업로드·승인·데이터 삭제는 없으며 사람 검수 대기 동안 시간별 반복 실행은 일시 중지한다.
+- 이 배포 후 문서는 제작 브랜치와 병합된 PR 본문에 저장한다. 운영 코드 기준은 main `9bcdd8c`이며 사후 문서 저장을 추가 코드 배포로 표현하지 않는다.
+
 ## 2026-09-29 실제 영상 후속 검수·자막 파일 불일치 수정
 
 - [PR #41](https://github.com/plutoan12/recording4/pull/41) 검토에서 저장 자막이 문자열이지만 내용이 깨진 경우 HTTP200이 가능한 점을 확인했다. 추가5조건을 수정 전 실패로 재현하고, SRT/VTT를 각각 파싱해 빈 이벤트·빈 글자·잘못된 시각을 거부하도록 보완했다. 원래 파일 글자를 그대로 반환하며 다시 계산하지 않는다. 편집 API31개 및 격리 전체 Python **633통과/2skip**, Ruff0.8.4/포맷 통과다. 이전 파일/보완본 검수 안내도 구분했다. 수정 HEAD의 CI·검토 완료 후 병합/배포한다.

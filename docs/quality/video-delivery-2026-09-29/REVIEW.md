@@ -53,4 +53,17 @@
 
 `manual-mosaic-repair.json`, `candidate-mosaic-review.json`, `repaired-caption-verification.json`, `browser-verification.json`에 근거를 보관했다. `review.html`/`serve_review.py`는 localhost8766에서 보완본/이전본 비교·세 구간 재생·미확인 체크·JSON 저장을 제공한다. 브라우저에서32.6초 메타데이터, 재생/구간 정지/전후 전환을 확인했다. 사람 청취 체크는 모두 미선택이다. 입력은 로컬 화면에 머물고 JSON 저장은 게시 승인이 아니다.
 
-다음은 세 불확실 대사의 사람 청취와 전체 영상의 자막/음질/모자이크 검수, 후속 코드 검토·CI·배포다. 새 유료 호출·구독·더빙·YouTube 업로드·승인·데이터 삭제는 없다.
+## 2026-09-30 운영 반영 확인
+
+[PR #41](https://github.com/plutoan12/recording4/pull/41)의 최종 `8c9b0ea`에서 [Python·웹·워커 이미지·스택 CI](https://github.com/plutoan12/recording4/actions/runs/36585568013) 및 CodeRabbit 검토가 통과했다. main `9bcdd8c`로 병합하고 Mac의 API/worker/dispatcher/monitor를 전환했다. 9개 서비스 실행, 상태 검사5개 healthy, API 준비와 관리화면/검수 화면 HTTP200을 확인했다. 객체/DB 볼륨, 비공개 설정 및 실제 결과물 해시는 유지됐다.
+
+기존8초 합성 원본으로 운영 API에서 **구운 자막·트랙 전용 두 편집본**을 만들었다. 두 경우 모두 저장된 SRT/VTT와 HTTP 다운로드 바이트가 같고, 화면 제목이 제외되며 전체 영상/음성 디코딩이 통과했다. 같은 워커 ASS 재현과 비교한 표시 대사는 구운 경우3개, 트랙 전용0개다. 두 다운로드에는 모두3개 자막이 있다.
+
+| 합성 표본 | 기존 API 재계산 | 새 저장 파일의 표시 시각(ms) |
+|---|---|---|
+| 구운 자막 | 2개, 123–4109 / 4109–7653 | 3개, 120–2730 / 2730–5040 / 5040–7650 |
+| 트랙 전용 | 2개, 123–4109 / 4109–7653 | 3개, 123–2732 / 2732–5044 / 5044–7653 |
+
+API에는 KSS가 없는 실제 배포 조건이다. 이 비교는 문장/시각 재계산 불일치의 재발 방지 근거이며 음성 인식 정확도 수치가 아니다. 합성 task ID와 파일 해시는 비공개 `recording4-local-tools/experiments/caption-snapshot-smoke-20260929/report.json`, 재계산 대조는 `legacy-comparison.json`에 저장했다. 실제 영상 artifact 두 개와 보완 MP4/SRT 해시, 실제 영상 승인0을 확인했고 전역 승인/게시/비용 예약 건수도 변하지 않았다.
+
+다음은 세 불확실 대사의 사람 청취와 전체 영상의 자막/음질/모자이크 검수다. 보완 MP4는 아직 서버에 등록되지 않은 로컬 버전이며 기존 artifact를 승인하지 않는다. 새 유료 호출·구독·더빙·YouTube 업로드·승인·데이터 삭제는 없다.
