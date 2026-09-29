@@ -1,3 +1,14 @@
+## 2026-09-29 main 병합·Mac 운영 전환 완료
+
+- [PR #40](https://github.com/plutoan12/recording4/pull/40)을 최종 HEAD `6ceaadf`의 [CI36575098360](https://github.com/plutoan12/recording4/actions/runs/36575098360)에서 Python·웹·Linux 워커·전체 스택 통과를 확인한 뒤 main `3151ecb`로 squash 병합했다. 연구 초안 #37은 포함하지 않았다. CodeRabbit의 확인된 FPS·이미지 고정·CI 조건 지적은 반영했고, 최종 자동 재검토 표시는 병합 시 pending이었다. 기존 UID0을 유지하는 MinIO 비root 전환 제안은 별도 운영 과제로 남긴다.
+- 깨끗한 운영 checkout `recording4`의 main을 fast-forward하고 API·worker·dispatcher·monitor·web·MinIO를 이 소스로 빌드했다. 진행 중/대기/예약 Celery 작업이 모두0임을 확인한 뒤 볼륨을 보존하며 전환했다. **9개 서비스 실행, 상태 검사가 있는5개 모두 healthy**, API 준비 완료·관리화면 HTTP200·OpenCV4.14 단일 설치·캐스케이드 로드·`pip check` 통과다.
+- 실행 중5개 앱 이미지 ID는 main 빌드와 일치한다. 웹은 OCI index ID만 달랐고 파일시스템 레이어와 실행 설정이 같아 Compose가 기존 컨테이너를 재사용했다. 설치된 제작/모자이크 모듈4개의 SHA-256도 검토본과 일치한다. 애플리케이션 소스가 바뀌지 않아 완료한 모델/회귀 검사를 반복하지 않았다.
+- 기존 `recording4-stack_objects` 볼륨을 그대로 사용한다. 실제 검수 artifact `b0adaf9e-f65d-45ca-9099-8f52acf678b2`를 새 MinIO/API에서 내려받아 로컬 검수본과 SHA-256 `e844d6f8189bc2b573b8429f80ad06396fef3bac053d5d5c013d92e1db19321b`가 같고 승인 수가0임을 확인했다. 기존32.6초 영상·자막을 새로 만들거나 승인하지 않았다.
+- Mac LaunchAgent의 실행 스크립트/작업 폴더를 운영 `recording4` main 경로로 바꿨다. 원래 plist와 롤백 이미지는 보관했고 새 등록의 `login-start`가 **종료 코드0**으로 완료됐다. 실제 Mac 재부팅 시험은 하지 않았다. 다른 작업자의 `recording4-caption-delivery` checkout과 비공개 설정은 수정하지 않았다.
+- 비공개 근거는 `recording4-local-tools/experiments/delivery-after-main-20260929.json`, `delivery-main-services-20260929.json`, `startup-main-verified-20260929.json`에 있다. 이전 DB/79객체 백업·롤백 태그도 보존한다. 이번 작업에 새 유료 호출·구독·YouTube 업로드·승인·데이터 삭제는 없다.
+- 다음은 사람의 **최종 자막 내용/시각·음질·모자이크 누락/과도 가림 검수**다. 파일은 `recording4-deliveries/20260929-6LVyV8ueYc8/final-review-sensitive.mp4`, SRT/VTT와 `검수안내.md`를 재사용한다. 수정 시 새 결과물 버전을 만들고 그 버전만 승인한다. 화자 정확도 연구·EgoBlur 실제 CUDA 품질 검증·인터넷 공개 운영은 이번 배포 완료 범위에 포함하지 않는다.
+- 배포 후 기록은 `codex/video-delivery` 브랜치와 병합된 PR #40 본문에 저장한다. 운영 코드 기준은 main `3151ecb`이며 이 사후 문서 커밋이 main 코드 배포에 추가 포함됐다고 표현하지 않는다. 사람 검수 전 같은 시간별 작업을 반복하지 않도록 제작 자동화를 일시 중지한다.
+
 ## 2026-09-29 최종 검토 설정 정리
 
 - `b3f5464`의 [CI36573119591](https://github.com/plutoan12/recording4/actions/runs/36573119591)는 Python **611통과/1skip**, 웹·Linux 워커·전체 스택 모두 통과했다. EgoBlur 수정은 최종 로컬 이미지에서도17검사를 통과했다. 현재 운영 OpenCV4 워커는 정상이며 기존 검수 결과의 승인 수는0이다.
