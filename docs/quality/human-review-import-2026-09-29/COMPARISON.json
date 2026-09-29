@@ -1,0 +1,191 @@
+{
+  "schema": 1,
+  "experiment": "same_pcm_v21_vs_v1_development_overlap",
+  "candidate_count": 15,
+  "submission_sha256": "f596d05f851fa8adb8b4e7814f297f60c1aa9f3545f0a5a910205ea3b97131eb",
+  "protocol_sha256": "92f3f5d242d45751a8f8cd97a9fddafb94f5241ac031fd3fc897521543bb631f",
+  "baseline_name": "Sortformer v2.1",
+  "candidate_name": "Sortformer v1",
+  "baseline_diagnostic_sha256": "c45704b56e4152f955a53b57d7d536ba0104930c789dd980a238b1945dfbe664",
+  "candidate_diagnostic_sha256": "8fa89c6bab158e3898c4a93404a3253b3674030148c047d9292d120bda076f29",
+  "baseline_counts": {
+    "disagrees": 2,
+    "model_validation_failed": 7,
+    "agrees": 4,
+    "incomplete_audio": 2
+  },
+  "candidate_counts": {
+    "disagrees": 0,
+    "model_validation_failed": 9,
+    "agrees": 4,
+    "incomplete_audio": 2
+  },
+  "criteria": {
+    "more_agreements": false,
+    "no_more_disagreements": true,
+    "no_more_failures": false
+  },
+  "improvement_demonstrated": false,
+  "four_language_improvement_demonstrated": false,
+  "overall_accuracy": null,
+  "der": null,
+  "cer": null,
+  "deploy_allowed": false,
+  "items": [
+    {
+      "review_id": 0,
+      "audio_sha256": "45a37f0c237ae5164d6013b1020e3e073ae6c7fefeed5ef243e2ef7c796d5e51",
+      "scope": "context",
+      "baseline_status": "disagrees",
+      "candidate_status": "agrees",
+      "baseline_prediction_sha256": "4118e6a891980f3e20273917e4647a8b3f783d4b9518fb17b0542328b9bc1732",
+      "candidate_prediction_sha256": "dc80480855e8ff3ffa8d70326428059624032197f7309a7e74429b131e296b82"
+    },
+    {
+      "review_id": 1,
+      "audio_sha256": "5d68fa62c6a579d927421a40bf8e5cf4429c5ecad3e9267d2ec88ba0713425ac",
+      "scope": "context",
+      "baseline_status": "model_validation_failed",
+      "candidate_status": "model_validation_failed",
+      "baseline_prediction_sha256": "79f9c4a668f6f0b6e54a5de4fb872659c547191359294d9105c08eaf1f595c92",
+      "candidate_prediction_sha256": "a41238a44805aceaa7fb9661df2b55be9e911c12b48e95ec70fcdd4e0dc6b477"
+    },
+    {
+      "review_id": 2,
+      "audio_sha256": "8a559919d213c37cb1f3bbb6e99858fa05b459839241e3a82a3fbfb0b48d8a96",
+      "scope": "context",
+      "baseline_status": "model_validation_failed",
+      "candidate_status": "model_validation_failed",
+      "baseline_prediction_sha256": "cc6876a5df5f541c8defdda47e3dfa683499ed965619b112b50e15218bcc74ba",
+      "candidate_prediction_sha256": "b5721853152c7ab15bb9fe94d8e4d44b6245a735cf17854e622203d03c5ed679"
+    },
+    {
+      "review_id": 3,
+      "audio_sha256": "bba84e4a7d27d97de2bbbf995d022047161c6a79c378bbc8f73b46b83137f6f0",
+      "scope": "context",
+      "baseline_status": "agrees",
+      "candidate_status": "model_validation_failed",
+      "baseline_prediction_sha256": "7813bd4c218b92f6ac911d827b30683821d5501865d61257cbf0f871ddb34e07",
+      "candidate_prediction_sha256": "97e6a68f25dac91094db93e7db02414ad80c3c3113e625cdc56ac3c1b4d86d54"
+    },
+    {
+      "review_id": 4,
+      "audio_sha256": "02c26c44f2bdb9f9e9a0f58505fb8a7110bc44edc8bd57f2a51d17a1d2e99dd9",
+      "scope": "context",
+      "baseline_status": "model_validation_failed",
+      "candidate_status": "agrees",
+      "baseline_prediction_sha256": "eef64ca6cbb6862f0c25b1e58efbe9e440b8ed2156381a952707ff5d0d0d0bde",
+      "candidate_prediction_sha256": "ed4decb22407ed213e36a1e9bf1469f3430d13280b10c554d169bceb5143cabb"
+    },
+    {
+      "review_id": 5,
+      "audio_sha256": "272f8302400b9fdf74af43892423c2aa915e82f20d45abfa716f8ce587a3a709",
+      "scope": "context",
+      "baseline_status": "agrees",
+      "candidate_status": "agrees",
+      "baseline_prediction_sha256": "9c02cc4914e913d5cf2c792921a4433d0cbca163fabbfc9b707446a09e20e5aa",
+      "candidate_prediction_sha256": "4ccd1ab297a1a14d7f09c1b75789d4fed34df1df49ff8ce9ff6032b404cc22cb"
+    },
+    {
+      "review_id": 6,
+      "audio_sha256": "0541a2ff5df75a6da30be3eada93ce749b4df36b8b626599398aa6a81e3386af",
+      "scope": "context",
+      "baseline_status": "model_validation_failed",
+      "candidate_status": "model_validation_failed",
+      "baseline_prediction_sha256": "fe4cfd1bc45230e9fd523f66ecec0592a1d531a1b2ef9dbe211e782b42c22ea9",
+      "candidate_prediction_sha256": "a915efabc2d02561016d607ebffa1c16ff594ada5bde0856305e862cae497eb1"
+    },
+    {
+      "review_id": 7,
+      "audio_sha256": "6b4572064f47a0d051b915917f39628d9bbe1bb3f6edb938ceb85a3ef8ff869f",
+      "scope": "context",
+      "baseline_status": "model_validation_failed",
+      "candidate_status": "model_validation_failed",
+      "baseline_prediction_sha256": "25e20b1ea14977884fef29b5d890a2a1c6e21988fb4fb58e77a47aa6bedb4e3b",
+      "candidate_prediction_sha256": "bd345eb4df6ecd5a56688b14f206eb1d5d6aed750258a2745f5b1926c7eb9241"
+    },
+    {
+      "review_id": 8,
+      "audio_sha256": "638028d6a5d8622e2045d4d10a8ff95c07ad3107e8367f63595d8bf874fc6d31",
+      "scope": "context",
+      "baseline_status": "agrees",
+      "candidate_status": "agrees",
+      "baseline_prediction_sha256": "3466340350fd3aaa682267caafe7131eb02de947a0a63f753f8d6d22535995b6",
+      "candidate_prediction_sha256": "12287c983092ce85c174e7cf9e34ee391358209ea860bbc762284e46a68a2704"
+    },
+    {
+      "review_id": 9,
+      "audio_sha256": "2a8778cf17541e9faab1cfe9c79e02b0655242c6c2450725a09a24e996b9103f",
+      "scope": "context",
+      "baseline_status": "model_validation_failed",
+      "candidate_status": "model_validation_failed",
+      "baseline_prediction_sha256": "b7e73292af76ac797f899e6dc54717f138ba65e118eb992b86111a57be5e6ff2",
+      "candidate_prediction_sha256": "c8444ca703af10393230c7647a9cbedab59391e76ac60aa3283fc2e429808b50"
+    },
+    {
+      "review_id": 10,
+      "audio_sha256": "18d2c332adebc0f3c7370e54f514d166b34003fdc0f72a60d9c5a31913839335",
+      "scope": "context",
+      "baseline_status": "agrees",
+      "candidate_status": "model_validation_failed",
+      "baseline_prediction_sha256": "7423ac6abb8e3f3a0910d1e3e22ae1149ba04d7f9caa5e2bd6c500f31ef1bfda",
+      "candidate_prediction_sha256": "2d71961036f2faaf20048b20d3a342f3d293c5e83711fb015dd2885cc90553dd"
+    },
+    {
+      "review_id": 11,
+      "audio_sha256": "b12d007b90dcff365010a855fa5c7182fc1919528d7887edf666e12d94b33d12",
+      "scope": "context",
+      "baseline_status": "disagrees",
+      "candidate_status": "model_validation_failed",
+      "baseline_prediction_sha256": "f9c6fd6bd155aa878bd22652e5b3048f1feabae03a0fe0248212a9b7f25a84fa",
+      "candidate_prediction_sha256": "77cf004df00beed65392cbe2148ab28601313125de106d2d085cbcb64aa0d074"
+    },
+    {
+      "review_id": 12,
+      "audio_sha256": "6c64841a1f987ec10795208d9b579f85b278fe23eb55ec399878154b1c5c1d18",
+      "scope": "candidate",
+      "baseline_status": "model_validation_failed",
+      "candidate_status": "model_validation_failed",
+      "baseline_prediction_sha256": "e10a75d424d3b93edbfe3411fb756f94a089da3fbed4d5b5a2ac79cabec1ce9d",
+      "candidate_prediction_sha256": "46dd0868b8c293b0198f91e720be88d95d7f7c2f717c15af1d4542b813fe9c76"
+    },
+    {
+      "review_id": 13,
+      "audio_sha256": "f3416d6bf1d9e419a76575635990aff86c180b3cbc9ddcdc2adfb6ac5ef66915",
+      "scope": "context",
+      "baseline_status": "incomplete_audio",
+      "candidate_status": "incomplete_audio",
+      "baseline_prediction_sha256": "3683e95206b93645e139578f22a979d73ee9384bd1d44f0058a2599f0d13fb37",
+      "candidate_prediction_sha256": "93bc1f7c06ce8adc1ef4a0374467ab4b6eaf9aff1242890feb71486e142864d8"
+    },
+    {
+      "review_id": 14,
+      "audio_sha256": "f3416d6bf1d9e419a76575635990aff86c180b3cbc9ddcdc2adfb6ac5ef66915",
+      "scope": "context",
+      "baseline_status": "incomplete_audio",
+      "candidate_status": "incomplete_audio",
+      "baseline_prediction_sha256": "bce61f5cb2c781090b75299adc57a94e9c5bdd17c02a807b4d547b27538ee785",
+      "candidate_prediction_sha256": "94c5f4a75adcc155737e5fa887e6220e5bfa1622a62e9489de4911c8da4826bb"
+    }
+  ],
+  "boundary_trace": {
+    "trace_sha256": "00859b6269382f5b748c5face2bfd086222df733e84902a7a1635eeebe07636e",
+    "input_samples": 32640,
+    "sample_rate": 16000,
+    "duration_seconds": 2.04,
+    "valid_feature_frames": 204,
+    "subsampling_factor": 8,
+    "prediction_frames": 26,
+    "expanded_10ms_frames": 208,
+    "last_frame_timestamp_seconds": 2.07,
+    "reproduced_prior_output": true,
+    "synthetic_formula_cases": 7,
+    "model_source_sha256": "81390e913130c047a80f6120dfd4e3aa3c6fbeedb6fd832536b300048b067bda",
+    "postprocessing_source_sha256": "5b96b3637ebaf597ad33ead6fc20419053699549e28c40f7b74d99b5706f48dc"
+  },
+  "limitations": [
+    "selected development cohort, overlapping windows",
+    "no full timed reference or speaker mapping",
+    "not four-language proof"
+  ]
+}
