@@ -52,7 +52,10 @@ def ffmpeg_binary() -> str:
     return binary
 
 
-def write_subtitles(path: Path, spec: EditSpec, rules: SubtitleRules = DEFAULT_RULES) -> None:
+def write_subtitles(
+    path: Path, spec: EditSpec, rules: SubtitleRules = DEFAULT_RULES
+) -> dict[str, str]:
+    """Write ASS once and freeze downloadable captions from the same decisions."""
     subs = pysubs2.SSAFile()
     subs.info.update(PlayResX=str(spec.width), PlayResY=str(spec.height), WrapStyle="0")
     style = pysubs2.SSAStyle(
@@ -67,19 +70,21 @@ def write_subtitles(path: Path, spec: EditSpec, rules: SubtitleRules = DEFAULT_R
     subs.styles["Default"] = style
     # 줄바꿈과 분할을 여기서 확정합니다. libass 자동 줄바꿈에 맡기지 않습니다.
     segments = getattr(spec, "segments", None)
-    if not getattr(spec, "burn_subtitles", True):
-        shown = []
-    elif segments:
+    if segments:
         # 이어 붙인 시간축으로 옮깁니다. 빠진 구간의 자막은 함께 빠집니다.
         shown = concat_cues(spec.cues, segments)
     else:
         shown = clip_cues(spec.cues, spec.start, spec.end)
+    captions = pysubs2.SSAFile()
     for cue in apply_rules(shown, rules):
-        subs.append(
+        captions.append(
             pysubs2.SSAEvent(
                 start=round(cue.start * 1000), end=round(cue.end * 1000), text=plain_ass(cue.text)
             )
         )
+    burn = getattr(spec, "burn_subtitles", True)
+    if burn:
+        subs.events.extend(captions.events)
     if spec.title:
         title_style = style.copy()
         title_style.alignment = pysubs2.Alignment.TOP_CENTER
@@ -94,6 +99,12 @@ def write_subtitles(path: Path, spec: EditSpec, rules: SubtitleRules = DEFAULT_R
             )
         )
     subs.save(str(path), encoding="utf-8")
+    if burn:
+        # ASS stores centiseconds. Export the serialized times FFmpeg actually
+        # reads, not the earlier millisecond values or a second KSS calculation.
+        captions = pysubs2.load(str(path), encoding="utf-8")
+        captions.events = [event for event in captions if event.style != "Title"]
+    return {format_name: captions.to_string(format_name) for format_name in ("srt", "vtt")}
 
 
 def video_filter(spec: EditSpec) -> str:
@@ -269,7 +280,7 @@ def render_clip(
     rules: SubtitleRules = DEFAULT_RULES,
     music: Path | None = None,
     has_audio: bool | None = None,
-) -> None:
+) -> dict[str, str]:
     source, output = source.resolve(), output.resolve()
     if not source.is_file() or source == output:
         raise RenderError("유효한 원본과 별도 출력 경로가 필요합니다.")
@@ -278,7 +289,7 @@ def render_clip(
     output.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="r4-render-") as directory:
         temp = Path(directory)
-        write_subtitles(temp / "captions.ass", spec, rules)
+        subtitle_files = write_subtitles(temp / "captions.ass", spec, rules)
         command = (
             simple_command(source, temp, spec)
             if simple(spec) and music is None
@@ -292,6 +303,7 @@ def render_clip(
                 rendered, redacted, spec.mosaic_size, spec.privacy_backend, spec.deface_sensitive
             )
             shutil.copyfile(redacted, output)
+        return subtitle_files
 
 
 ENCODE = [

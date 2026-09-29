@@ -109,12 +109,11 @@ def run_media(task_id: str) -> dict:
             turns: list[SpeakerTurn] = []
             if kind == "render":
                 output = directory / "clip.mp4"
-                # 이 규칙을 결과에 남깁니다. 설정을 렌더 뒤에 바꾸면 자막 파일이
-                # 영상에 구워진 자막과 달라지는데, 사람은 같은 자막이라고 믿고
-                # 올립니다. 남겨 두면 내보내기가 그때 쓴 규칙으로 만듭니다.
+                # 규칙은 감사용으로 남기고, 실제 ASS에서 확정한 다운로드 파일도
+                # 함께 보관합니다. API의 선택 문장 분리기로 다시 계산하지 않습니다.
                 rules = rules_from_settings(settings)
                 edit = EditSpec.model_validate(spec)
-                render_clip(
+                subtitle_files = render_clip(
                     source,
                     output,
                     edit,
@@ -126,7 +125,11 @@ def run_media(task_id: str) -> dict:
                     checksum = hashlib.file_digest(stream, "sha256").hexdigest()
                 output_key = f"renders/{task_id}/{attempt}.mp4"
                 storage.upload_file(output_key, output, "video/mp4")
-                result = {"storage_key": output_key, "subtitle_rules": asdict(rules)}
+                result = {
+                    "storage_key": output_key,
+                    "subtitle_rules": asdict(rules),
+                    "subtitle_files": subtitle_files,
+                }
             elif kind == "silence":
                 # 남길 구간을 **제안**만 합니다. 여기서 영상을 자르지 않습니다.
                 speech = vad_spans(source) or silence_spans(source)

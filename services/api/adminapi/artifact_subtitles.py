@@ -2,8 +2,9 @@
 
 자막 데이터는 만든 경로마다 다른 곳에 있습니다. 숏폼 편집본은 렌더 요청의 설정
 사본(`MediaTask.settings`)에, 번역·더빙 작업은 `Job.workflow_data`에 있습니다.
-어느 쪽이든 렌더가 그때 쓴 표시 규칙(`subtitle_rules` 기록)으로 계산하므로 파일
-자막과 화면 자막의 줄이 같습니다.
+새 편집본은 렌더 때 확정한 `subtitle_files`를 그대로 내보냅니다. 이전 편집본과
+번역·더빙 작업은 저장한 표시 규칙으로 계산하는 기존 경로를 유지합니다. 이 경로는
+선택 문장 분리기의 설치 상태가 다르면 화면과 분할이 달라질 수 있습니다.
 
 자막이 없거나 아직 만들 단계가 아니면 이유를 담은 `Missing`을 돌려줍니다. 부르는
 쪽이 HTTP 응답으로 바꾸거나 기록에 남깁니다. 여기서는 예외를 던지지 않습니다.
@@ -13,6 +14,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import pysubs2
 from pydantic import ValidationError
 from sqlalchemy import select
 
@@ -54,6 +56,37 @@ def clip_subtitles(session, clip_edit_id, subtitle_format: SubtitleFormat) -> Su
     )
     if task is None:
         return Missing("편집본의 렌더 요청을 찾을 수 없습니다.")
+    clip = session.get(ClipEdit, clip_edit_id)
+    language = clip.output_language if clip else None
+    # Numeric rules alone cannot reproduce optional KSS segmentation, cut/speed
+    # decisions or ASS timestamp rounding in a different API environment.
+    if "subtitle_files" in (task.result or {}):
+        files = task.result["subtitle_files"]
+        if not isinstance(files, dict) or not all(
+            isinstance(files.get(name), str) for name in ("srt", "vtt")
+        ):
+            return Missing("렌더 때 저장한 자막 파일을 읽을 수 없습니다. 렌더 기록을 확인하세요.")
+        if not files["srt"].strip():
+            return Missing("이 편집본에는 내보낼 자막이 없습니다.")
+        for format_name in ("srt", "vtt"):
+            try:
+                captions = pysubs2.SSAFile.from_string(files[format_name], format_=format_name)
+            except (pysubs2.exceptions.Pysubs2Error, ValueError, OverflowError):
+                return Missing(
+                    "렌더 때 저장한 자막 파일을 읽을 수 없습니다. 렌더 기록을 확인하세요."
+                )
+            if not captions or any(
+                event.start < 0 or event.end <= event.start or not event.plaintext.strip()
+                for event in captions
+            ):
+                return Missing(
+                    "렌더 때 저장한 자막 파일을 읽을 수 없습니다. 렌더 기록을 확인하세요."
+                )
+        return Subtitles(
+            files[subtitle_format], None if language == UNKNOWN_LANGUAGE else language, "rendered"
+        )
+    # Legacy renders have no frozen file. Keep their existing fallback; do not
+    # claim to backfill the text actually burned into an old video.
     rules, source = rules_from_record((task.result or {}).get("subtitle_rules"))
     try:
         spec = EditSpec.model_validate(task.settings)
@@ -62,8 +95,6 @@ def clip_subtitles(session, clip_edit_id, subtitle_format: SubtitleFormat) -> Su
     text = clip_subtitle_file(spec, subtitle_format, rules)
     if not text.strip():
         return Missing("이 편집본에는 내보낼 자막이 없습니다.")
-    clip = session.get(ClipEdit, clip_edit_id)
-    language = clip.output_language if clip else None
     return Subtitles(text, None if language == UNKNOWN_LANGUAGE else language, source)
 
 
