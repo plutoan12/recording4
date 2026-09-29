@@ -11,7 +11,13 @@ from types import SimpleNamespace
 
 from pipeline.editing import Cue, EditSpec
 from pipeline.subtitles import DEFAULT_RULES, SubtitleRules
-from worker.rendering import _mosaic_faces, ffmpeg_binary, video_filter, write_subtitles
+from worker.rendering import (
+    _mosaic_faces,
+    apply_mosaic_regions,
+    ffmpeg_binary,
+    video_filter,
+    write_subtitles,
+)
 
 RATE = 48000
 
@@ -229,4 +235,8 @@ def render_final(
                 rendered, redacted, clip.mosaic_size, clip.privacy_backend, clip.deface_sensitive
             )
             rendered = redacted
+        if clip and clip.mosaic_regions:
+            masked = temp / "masked.mp4"
+            apply_mosaic_regions(rendered, masked, clip)
+            rendered = masked
         shutil.copyfile(rendered, output)

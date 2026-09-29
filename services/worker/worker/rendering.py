@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import os
 import shutil
 import subprocess
@@ -190,7 +191,10 @@ def render_preview(
             "1",
             str(temp / "result.png"),
         ]
-        run_ffmpeg(command, temp, output, produced="result.png")
+        rendered = temp / "unmasked.png" if spec.mosaic_regions else output
+        run_ffmpeg(command, temp, rendered, produced="result.png")
+        if spec.mosaic_regions:
+            apply_mosaic_regions(rendered, output, spec, at=at)
 
 
 def tempo_chain(speed: float) -> str:
@@ -295,15 +299,99 @@ def render_clip(
             if simple(spec) and music is None
             else graph_command(source, temp, spec, music, has_audio)
         )
-        rendered = temp / "unredacted.mp4" if spec.mosaic_faces else output
+        needs_redaction = spec.mosaic_faces or bool(spec.mosaic_regions)
+        rendered = temp / "unredacted.mp4" if needs_redaction else output
         run_ffmpeg(command, temp, rendered)
         if spec.mosaic_faces:
             redacted = temp / "redacted.mp4"
             _mosaic_faces(
                 rendered, redacted, spec.mosaic_size, spec.privacy_backend, spec.deface_sensitive
             )
-            shutil.copyfile(redacted, output)
+            rendered = redacted
+        if spec.mosaic_regions:
+            masked = temp / "masked.mp4"
+            apply_mosaic_regions(rendered, masked, spec)
+            rendered = masked
+        if needs_redaction:
+            shutil.copyfile(rendered, output)
         return subtitle_files
+
+
+def apply_mosaic_regions(
+    source: Path, output: Path, spec: EditSpec, *, at: float | None = None
+) -> None:
+    """Mask the already edited video, keeping encoded audio and staging failures privately.
+
+    Coordinates round outwards to even pixels so yuv420p never leaves a requested
+    edge exposed. Preview images use the same regions selected at output time `at`.
+    """
+    regions = [r for r in spec.mosaic_regions if at is None or r.start <= at < r.end]
+    if not regions:
+        shutil.copyfile(source, output)
+        return
+    graph = ["[0:v:0]setpts=PTS-STARTPTS[mask0]"]
+    for i, region in enumerate(regions):
+        x = 2 * math.floor(region.x * spec.width / 2)
+        y = 2 * math.floor(region.y * spec.height / 2)
+        right = min(spec.width, 2 * math.ceil((region.x + region.width) * spec.width / 2))
+        bottom = min(spec.height, 2 * math.ceil((region.y + region.height) * spec.height / 2))
+        w, h = right - x, bottom - y
+        cols, rows = math.ceil(w / region.block_size), math.ceil(h / region.block_size)
+        graph.extend(
+            [
+                f"[mask{i}]split[base{i}][area{i}]",
+                f"[area{i}]crop={w}:{h}:{x}:{y},scale={cols}:{rows}:flags=area,"
+                f"scale={w}:{h}:flags=neighbor[pixels{i}]",
+                f"[base{i}][pixels{i}]overlay={x}:{y}:"
+                + (f"enable='gte(t,{region.start})*lt(t,{region.end})':" if at is None else "")
+                + f"eof_action=pass[mask{i + 1}]",
+            ]
+        )
+    with tempfile.TemporaryDirectory(prefix="r4-mosaic-regions-") as directory:
+        rendered = Path(directory) / ("result.mp4" if at is None else "result.png")
+        command = [
+            ffmpeg_binary(),
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-nostdin",
+            "-y",
+            "-i",
+            str(source),
+            "-filter_complex",
+            ";".join(graph),
+            "-map",
+            f"[mask{len(regions)}]",
+        ]
+        if at is None:
+            command += [
+                "-map",
+                "0:a:0?",
+                "-c:v",
+                "libx264",
+                "-preset",
+                "fast",
+                "-crf",
+                "22",
+                "-pix_fmt",
+                "yuv420p",
+                "-vsync",
+                "0",
+                "-c:a",
+                "copy",
+                "-movflags",
+                "+faststart",
+            ]
+        else:
+            command += ["-frames:v", "1", "-update", "1"]
+        command.append(str(rendered))
+        try:
+            completed = subprocess.run(command, capture_output=True, timeout=3600)
+        except (subprocess.TimeoutExpired, OSError) as exc:
+            raise RenderError("구간 모자이크 실행에 실패했습니다.") from exc
+        if completed.returncode or not rendered.is_file() or rendered.stat().st_size == 0:
+            raise RenderError("구간 모자이크 합성에 실패했습니다.")
+        shutil.copyfile(rendered, output)
 
 
 ENCODE = [

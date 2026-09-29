@@ -30,6 +30,35 @@ def test_auth_required(client):
     assert client.post("/clips", json={}).status_code == 401
 
 
+def test_manual_masks_are_saved_per_clip_and_use_output_bounds(
+    client, auth_headers, asset, session
+):
+    from adminapi.models import MediaTask
+
+    region = {
+        "start": 1,
+        "end": 2,
+        "x": 0.25,
+        "y": 0.25,
+        "width": 0.5,
+        "height": 0.5,
+        "block_size": 30,
+    }
+    payload = {"source_asset_id": str(asset.id), "start": 10, "end": 20, "mosaic_regions": [region]}
+    first = client.post("/clips", headers=auth_headers, json=payload)
+    assert first.status_code == 202
+    task = session.get(MediaTask, uuid.UUID(first.json()["id"]))
+    assert task.settings["mosaic_regions"] == [region]
+    second = client.post("/clips", headers=auth_headers, json={**payload, "mosaic_regions": []})
+    assert second.status_code == 202
+    assert second.json()["clip_edit_id"] != first.json()["clip_edit_id"]
+    assert task.settings["mosaic_regions"] == [region]
+    rejected = client.post(
+        "/clips", headers=auth_headers, json={**payload, "mosaic_regions": [{**region, "end": 11}]}
+    )
+    assert rejected.status_code == 422
+
+
 def test_range_validation_and_independent_clips(client, auth_headers, asset):
     data = {"source_asset_id": str(asset.id), "start": 100, "end": 130}
     assert client.post("/clips", headers=auth_headers, json=data).status_code == 422

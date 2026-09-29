@@ -41,6 +41,27 @@ class TimeSpan(BaseModel):
         return (self.end - self.start) / self.speed
 
 
+class MosaicRegion(BaseModel):
+    """A rectangle on the final canvas, active on the output timeline [start, end)."""
+
+    model_config = ConfigDict(allow_inf_nan=False, extra="forbid")
+    start: float = Field(ge=0)
+    end: float = Field(gt=0)
+    x: float = Field(ge=0, lt=1)
+    y: float = Field(ge=0, lt=1)
+    width: float = Field(gt=0, le=1)
+    height: float = Field(gt=0, le=1)
+    block_size: int = Field(default=30, ge=4, le=100)
+
+    @model_validator(mode="after")
+    def valid_region(self):
+        if self.end <= self.start:
+            raise ValueError("모자이크 종료는 시작보다 뒤여야 합니다.")
+        if self.x + self.width > 1 + 1e-9 or self.y + self.height > 1 + 1e-9:
+            raise ValueError("모자이크 영역은 출력 화면 안에 있어야 합니다.")
+        return self
+
+
 class EditSpec(BaseModel):
     model_config = ConfigDict(allow_inf_nan=False, extra="forbid")
     start: float = Field(ge=0)
@@ -56,6 +77,7 @@ class EditSpec(BaseModel):
     mosaic_size: int = Field(default=20, ge=4, le=100)
     deface_sensitive: bool = False
     privacy_backend: Literal["deface", "openscrub", "egoblur"] = "deface"
+    mosaic_regions: list[MosaicRegion] = Field(default_factory=list, max_length=20)
     caption_language: str | None = Field(default=None, pattern=r"^[a-z]{2,3}$")
     font_size: int = Field(default=64, ge=20, le=120)
     cues: list[Cue] = Field(default_factory=list, max_length=3000)
@@ -96,6 +118,8 @@ class EditSpec(BaseModel):
             raise ValueError("숏폼 길이는 0초 초과, 180초 이하여야 합니다.")
         if self.fade_in + self.fade_out > self.output_seconds:
             raise ValueError("페이드 길이가 결과 길이를 넘습니다.")
+        if any(region.end > self.output_seconds for region in self.mosaic_regions):
+            raise ValueError("모자이크 구간은 결과 영상 길이 안에 있어야 합니다.")
         return self
 
 
