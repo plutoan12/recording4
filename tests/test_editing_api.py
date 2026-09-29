@@ -303,7 +303,25 @@ def test_caption_download_keeps_renderer_segmentation(
             assert all(event.style == "Title" for event in burned)
 
 
-@pytest.mark.parametrize("saved", [None, {}, {"srt": 123, "vtt": "text"}])
+@pytest.mark.parametrize(
+    "saved",
+    [
+        None,
+        {},
+        {"srt": 123, "vtt": "text"},
+        {"srt": "broken captions", "vtt": "WEBVTT\n\n"},
+        {"srt": "1\n00:00:00,000 --> 00:00:01,000\ncaption\n", "vtt": " \n"},
+        {"srt": "1\n00:00:02,000 --> 00:00:01,000\ncaption\n", "vtt": "WEBVTT\n\n"},
+        {
+            "srt": "1\n00:00:00,000 --> 00:00:01,000\ncaption\n",
+            "vtt": "WEBVTT\n\n00:00:02.000 --> 00:00:01.000\ncaption\n",
+        },
+        {
+            "srt": "1\n00:00:00,000 --> 00:00:01,000\n \n",
+            "vtt": "WEBVTT\n\n00:00:00.000 --> 00:00:01.000\ncaption\n",
+        },
+    ],
+)
 def test_corrupt_rendered_caption_snapshot_does_not_silently_recompute(
     client, auth_headers, asset, session, saved
 ):
@@ -322,8 +340,11 @@ def test_corrupt_rendered_caption_snapshot_does_not_silently_recompute(
     task = session.get(MediaTask, uuid.UUID(created["id"]))
     task.result = {"subtitle_files": saved}
     session.commit()
-    response = client.get(f"/clips/{created['clip_edit_id']}/subtitles", headers=auth_headers)
-    assert response.status_code == 409
+    for format_name in ("srt", "vtt"):
+        response = client.get(
+            f"/clips/{created['clip_edit_id']}/subtitles?format={format_name}", headers=auth_headers
+        )
+        assert response.status_code == 409
 
 
 def test_broken_rules_record_falls_back_instead_of_failing() -> None:

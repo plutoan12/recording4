@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import pysubs2
 from pydantic import ValidationError
 from sqlalchemy import select
 
@@ -67,6 +68,20 @@ def clip_subtitles(session, clip_edit_id, subtitle_format: SubtitleFormat) -> Su
             return Missing("렌더 때 저장한 자막 파일을 읽을 수 없습니다. 렌더 기록을 확인하세요.")
         if not files["srt"].strip():
             return Missing("이 편집본에는 내보낼 자막이 없습니다.")
+        for format_name in ("srt", "vtt"):
+            try:
+                captions = pysubs2.SSAFile.from_string(files[format_name], format_=format_name)
+            except (pysubs2.exceptions.Pysubs2Error, ValueError, OverflowError):
+                return Missing(
+                    "렌더 때 저장한 자막 파일을 읽을 수 없습니다. 렌더 기록을 확인하세요."
+                )
+            if not captions or any(
+                event.start < 0 or event.end <= event.start or not event.plaintext.strip()
+                for event in captions
+            ):
+                return Missing(
+                    "렌더 때 저장한 자막 파일을 읽을 수 없습니다. 렌더 기록을 확인하세요."
+                )
         return Subtitles(
             files[subtitle_format], None if language == UNKNOWN_LANGUAGE else language, "rendered"
         )
