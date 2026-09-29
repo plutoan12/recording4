@@ -55,7 +55,7 @@
 
 ## 2026-09-30 운영 반영 확인
 
-[PR #41](https://github.com/plutoan12/recording4/pull/41)의 최종 `8c9b0ea`에서 [Python·웹·워커 이미지·스택 CI](https://github.com/plutoan12/recording4/actions/runs/36585568013) 및 CodeRabbit 검토가 통과했다. main `9bcdd8c`로 병합하고 Mac의 API/worker/dispatcher/monitor를 전환했다. 9개 서비스 실행, 상태 검사5개 healthy, API 준비와 관리화면/검수 화면 HTTP200을 확인했다. 객체/DB 볼륨, 비공개 설정 및 실제 결과물 해시는 유지됐다.
+[PR #41](https://github.com/plutoan12/recording4/pull/41)의 최종 `8c9b0ea`에서 [Python·웹·워커 이미지·스택 CI](https://github.com/plutoan12/recording4/actions/runs/36585568013) 및 CodeRabbit 검토가 통과했다. main `9bcdd8c`로 병합하고 Mac의 API/worker/dispatcher/monitor를 전환했다. 9개 서비스 실행, 상태 검사5개 healthy, API 준비와 관리화면/검수 화면 HTTP200을 확인했다. 객체/DB 볼륨, 비공개 설정 및 실제 결과물 해시는 유지됐다. main squash 메시지의 기존 `[skip ci]` 표기로 별도 main push CI는 실행되지 않았다. main과 검사 완료 HEAD의 전체 파일 트리가 동일함을 확인했으며 CI 통과 근거는 위 PR 실행이다.
 
 기존8초 합성 원본으로 운영 API에서 **구운 자막·트랙 전용 두 편집본**을 만들었다. 두 경우 모두 저장된 SRT/VTT와 HTTP 다운로드 바이트가 같고, 화면 제목이 제외되며 전체 영상/음성 디코딩이 통과했다. 같은 워커 ASS 재현과 비교한 표시 대사는 구운 경우3개, 트랙 전용0개다. 두 다운로드에는 모두3개 자막이 있다.
 
