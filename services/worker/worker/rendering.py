@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import json
 import math
 import os
 import shutil
 import subprocess
 import tempfile
+from fractions import Fraction
 from pathlib import Path
 
 import pysubs2
@@ -27,6 +29,8 @@ __all__ = [
 
 # 배경음악을 깔 때 말소리 기준으로 음량을 낮추는 값. 잰 값이 아니라 정한 값입니다.
 DUCK = "sidechaincompress=threshold=0.03:ratio=8:attack=20:release=400"
+# Resampling must not expand malformed rate metadata into millions of frames.
+MAX_RENDER_FPS = 240
 
 
 class RenderError(RuntimeError):
@@ -217,7 +221,9 @@ def simple(spec: EditSpec) -> bool:
     return not spec.segments and not spec.fade_in and not spec.fade_out
 
 
-def complex_filter(spec: EditSpec, *, audio: str, music: str | None) -> tuple[str, str]:
+def complex_filter(
+    spec: EditSpec, *, audio: str, music: str | None, frame_rate: str
+) -> tuple[str, str]:
     """(filter_complex, 소리 출력 이름). 영상 출력은 늘 [vout]입니다.
 
     구간마다 잘라 배속을 걸고 이어 붙인 뒤(concat), 화면을 맞추고 자막을 굽습니다.
@@ -254,7 +260,14 @@ def complex_filter(spec: EditSpec, *, audio: str, music: str | None) -> tuple[st
         fades.append(f"fade=t=in:st=0:d={spec.fade_in}")
     if spec.fade_out:
         fades.append(f"fade=t=out:st={round(total - spec.fade_out, 3)}:d={spec.fade_out}")
-    parts.append(video_label + ",".join([video_filter(spec), *fades]) + "[vout]")
+    # setpts clears duration/FPS, and mixed-speed concat produces a variable
+    # cadence. Resample before captions/fades so the encoder receives a complete
+    # constant timeline, including a defined duration for the final frame.
+    parts.append(
+        video_label
+        + ",".join([f"fps=fps={frame_rate}:start_time=0", video_filter(spec), *fades])
+        + "[vout]"
+    )
 
     sound = [f.replace("fade=", "afade=") for f in fades]
     if sound:
@@ -438,6 +451,42 @@ def simple_command(source: Path, temp: Path, spec: EditSpec) -> list[str]:
     ]
 
 
+def source_frame_rate(source: Path) -> str:
+    """Keep rational source cadence; use the measured average for VFR inputs."""
+    message = "원본 프레임률을 확인할 수 없습니다. FFprobe와 영상 파일을 확인하세요."
+    binary = os.environ.get("R4_FFPROBE_BINARY") or shutil.which("ffprobe")
+    if not binary:
+        raise RenderError(message)
+    try:
+        result = subprocess.run(
+            [
+                binary,
+                "-v", "error", "-select_streams", "v:0",
+                "-show_entries", "stream=avg_frame_rate,r_frame_rate", "-of", "json",
+                str(source),
+            ],
+            capture_output=True, text=True, timeout=30,
+        )  # fmt: skip
+        if result.returncode:
+            raise RenderError(message)
+        stream = json.loads(result.stdout)["streams"][0]
+        for key in ("avg_frame_rate", "r_frame_rate"):
+            try:
+                raw = stream[key]
+                if not isinstance(raw, str):
+                    continue
+                rate = Fraction(raw)
+            except (KeyError, TypeError, ValueError, ZeroDivisionError):
+                continue
+            if rate > MAX_RENDER_FPS:
+                raise RenderError("합성 프레임률은 최대240fps까지 지원합니다.")
+            if rate > 0 and max(rate.numerator, rate.denominator) <= 2**31 - 1:
+                return f"{rate.numerator}/{rate.denominator}"
+    except (OSError, subprocess.TimeoutExpired, ValueError, KeyError, IndexError, TypeError):
+        raise RenderError(message) from None
+    raise RenderError(message)
+
+
 def graph_command(
     source: Path, temp: Path, spec: EditSpec, music: Path | None, has_audio: bool | None
 ) -> list[str]:
@@ -457,7 +506,9 @@ def graph_command(
         # 음악이 짧으면 되풀이합니다. 길면 아래 -t가 잘라 냅니다.
         command += ["-stream_loop", "-1", "-i", str(music)]
         music_label = f"[{len(command_inputs(command)) - 1}:a]"
-    graph, audio_out = complex_filter(spec, audio=audio, music=music_label)
+    graph, audio_out = complex_filter(
+        spec, audio=audio, music=music_label, frame_rate=source_frame_rate(source)
+    )
     command += ["-filter_complex", graph, "-map", "[vout]", "-map", audio_out]
     command += [
         *ENCODE,

@@ -206,11 +206,8 @@ def test_real_masks_use_output_time_preserve_other_areas_and_audio(ffmpeg, tmp_p
         source, masked, EditSpec(**values, mosaic_regions=[REGION]), has_audio=kind != "no_audio"
     )
     before, after = frame_timing(baseline), frame_timing(masked)
-    # A joined/speed baseline can contain a packet its MP4 edit list discards.
-    # Preserve every decodable frame and its presentation time, not that packet.
-    assert {k: after[k] for k in ("nb_read_frames", "duration", "r_frame_rate")} == {
-        k: before[k] for k in ("nb_read_frames", "duration", "r_frame_rate")
-    }
+    assert before["nb_read_frames"] == before["nb_frames"]
+    assert after == before
     assert display_timeline(masked) == display_timeline(baseline)
     for at, hidden in [(0.5, False), (1, True), (1.9, True), (2, False), (2.5, False)]:
         frame = gray_frame(ffmpeg, masked, at)
