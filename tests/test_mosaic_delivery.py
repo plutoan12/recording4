@@ -37,6 +37,7 @@ def test_mosaic_keeps_multicut_and_music_settings(monkeypatch, tmp_path):
         target.write_bytes(b"redacted")
 
     monkeypatch.setattr(rendering, "run_ffmpeg", encode)
+    monkeypatch.setattr(rendering, "source_frame_rate", lambda source: "30/1")
     monkeypatch.setattr(rendering, "redact_faces", redact)
     rendering.render_clip(source, output, spec, music=music, has_audio=True)
     assert output.read_bytes() == b"redacted"
