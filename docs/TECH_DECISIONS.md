@@ -1,5 +1,11 @@
 # 기술 선택과 결정 기록
 
+## 2026-10-02: 사람 검수 화면을 Mac 로그인 세션에서 유지
+
+일시적인 터미널 실행으로 열었던8767 검수 서버가 다음 작업 시점에 중지돼 있었다. 기존 읽기 전용 서버를 사용자 LaunchAgent `com.recording4.delivery-review`로 관리한다. `RunAtLoad`와 `KeepAlive`를 사용하고 별도 비공개 로그를 둔다. 운영 스택의 `com.recording4.stack` 설정과 검수 HTML·영상·자막은 변경하지 않는다. 프로세스 종료 후 자동 복구는 확인했으며 실제 Mac 재부팅/로그인 검증은 남아 있다.
+
+현재 서버 결과물 ID와 파일 해시를 고정한 로컬 ZIP을 별도로 제공한다. 이전 결과물의 확인·승인을 이어받지 않으며 자동 서버 실행이나 파일 내려받기를 사람 청취로 계산하지 않는다. 서버는 localhost의 허용된 검수 파일만 읽어 제공하며 검수 결과는 사용자가 JSON으로 내려받는다. [실행·중지와 검수 절차](LOCAL_REVIEW.md)를 참고한다.
+
 ## 2026-10-01: 여러 컷·배속 합성의 출력 FPS를 고정
 
 FFmpeg7.1.5의 [setpts 구현](https://github.com/FFmpeg/FFmpeg/blob/n7.1.5/libavfilter/setpts.c)은 프레임 길이와 FPS 정보를 지운다. [concat 문서](https://ffmpeg.org/ffmpeg-filters.html#concat)도 서로 다른 FPS를 이어 붙이면 가변 FPS가 된다고 명시한다. 기존 합성은 이를 MP4 기본 동작에 맡겨 마지막 프레임이 표시되지 않거나 끝 길이가 짧아졌다. 구간별 FPS 복구만으로는 모든 배속 순서의 끝 길이를 보존하지 못했다.
