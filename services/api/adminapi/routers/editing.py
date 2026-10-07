@@ -4,11 +4,15 @@ from __future__ import annotations
 
 import base64
 import binascii
+import io
+import re
 import uuid
+import zipfile
 from datetime import UTC, datetime
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 
@@ -39,7 +43,27 @@ from pipeline.subtitle_files import (
     encoding_choices,
     parse_subtitles,
 )
-from pipeline.subtitles import check
+from pipeline.subtitle_metrics import font_file_for
+from pipeline.subtitle_motion import ANIMATION_LABELS
+from pipeline.subtitle_presets import (
+    PACK_LABELS,
+    PRESET_NAME,
+    PRESET_README,
+    MotionPreset,
+    all_presets,
+    get_preset,
+    presets_by_pack,
+    user_presets_dir,
+)
+from pipeline.subtitle_stickers import STICKER_LABELS, Sticker, add_sticker_events
+from pipeline.subtitle_templates import (
+    CATEGORY_LABELS,
+    TEMPLATE_NAME,
+    get_template,
+    styled_document,
+    templates_by_category,
+)
+from pipeline.subtitles import PACING_LABELS, apply_rules, check, pacing_rules
 from pipeline.time import as_utc
 
 router = APIRouter(tags=["editing"])
@@ -113,7 +137,14 @@ class TranscriptRequest(BaseModel):
 def get_transcript(asset_id: uuid.UUID, user: CurrentUser, session: SessionDep):
     asset_for_edit(session, asset_id)
     return [
-        {"start": float(s.start_seconds), "end": float(s.end_seconds), "text": s.text}
+        {
+            "start": float(s.start_seconds),
+            "end": float(s.end_seconds),
+            "text": s.text,
+            # 단어 시각은 있을 때만 붙입니다. 편집기는 이를 그대로 돌려보내고 글자를
+            # 고친 자막에서는 비웁니다.
+            **({"words": s.words} if s.words else {}),
+        }
         for s in transcript(session, asset_id)
     ]
 
@@ -132,6 +163,7 @@ def save_transcript(session, asset, cues: list[Cue]) -> dict:  # noqa: ANN001
                 end_seconds=c.end,
                 text=c.text,
                 transcript_version=version,
+                words=[w.model_dump() for w in c.words] if c.words else None,
             )
             for c in cues
         ]
@@ -217,8 +249,11 @@ def import_subtitles(
 
 class AnalysisRequest(BaseModel):
     # faces는 세로로 자를 때 어디를 남길지 제안만 합니다. 적용하지 않습니다.
-    kind: Literal["transcribe", "scenes", "faces"]
+    # highlights는 장면 경계와 발화 구간으로 후보 구간을 셉니다(무료).
+    kind: Literal["transcribe", "scenes", "faces", "highlights"]
     language: str | None = Field(default=None, pattern=r"^[a-z]{2,3}$")
+    # 추천 구간의 목표 길이(초). `highlights`에서만 씁니다.
+    target: float | None = Field(default=None, ge=5, le=600)
 
 
 class DiarizeRequest(BaseModel):
@@ -250,7 +285,9 @@ def analyze(asset_id: uuid.UUID, payload: AnalysisRequest, user: CurrentUser, se
     return schedule(
         session,
         MediaTask(
-            source_asset_id=asset_id, kind=payload.kind, settings={"language": payload.language}
+            source_asset_id=asset_id,
+            kind=payload.kind,
+            settings={"language": payload.language, "target": payload.target},
         ),
     )
 
@@ -422,6 +459,18 @@ def create_clip(payload: ClipRequest, user: CurrentUser, session: SessionDep):
     if payload.end > float(asset.duration_seconds):
         raise HTTPException(422, "선택 구간이 원본 길이를 넘습니다.")
     spec = EditSpec.model_validate(payload.model_dump(exclude={"source_asset_id"}))
+    try:
+        pacing_rules(spec.subtitle_pacing)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from None
+    try:
+        template = get_template(spec.subtitle_template)
+        if spec.subtitle_preset:
+            template = template.with_preset(spec.subtitle_preset)
+        if spec.subtitle_animation:
+            template = template.with_animation(spec.subtitle_animation)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from None
     # Client sends its edited captions explicitly; an empty list means no captions.
     version = (
         session.scalar(
@@ -438,7 +487,13 @@ def create_clip(payload: ClipRequest, user: CurrentUser, session: SessionDep):
         output_height=spec.height,
         screen_title=spec.title,
         publish_title=spec.title,
-        subtitle_style={"font_size": spec.font_size},
+        subtitle_style={
+            "template": template.name,
+            "font_size": spec.font_size or template.font_size,
+            "animation": template.animation,
+            "preset": template.preset,
+            "pacing": spec.subtitle_pacing or "broadcast",
+        },
     )
     session.add(clip)
     session.flush()
@@ -458,6 +513,253 @@ def create_clip(payload: ClipRequest, user: CurrentUser, session: SessionDep):
             kind="render",
             settings=spec.model_dump(),
         ),
+    )
+
+
+@router.get("/subtitle-templates")
+def subtitle_templates(user: CurrentUser) -> list[dict]:
+    """편집기가 고를 수 있는 내장 자막 템플릿. 이름을 `subtitle_template`로 보냅니다.
+
+    카테고리 순서대로 돌려주고 `category_label`을 붙입니다. 화면은 이 값으로 묶어
+    보여 주고, CSS로 모양을 흉내 낸 미리보기를 그립니다(실제 렌더는 libass).
+    """
+    return [
+        {
+            **t.model_dump(),
+            "category_label": CATEGORY_LABELS[t.category],
+            "animation_label": t.animation_label,
+        }
+        for templates in templates_by_category().values()
+        for t in templates
+    ]
+
+
+@router.get("/stickers")
+def stickers(user: CurrentUser) -> list[dict]:
+    """편집기가 붙일 수 있는 스티커 종류. `kind`를 `stickers[].kind`로 보냅니다.
+
+    `image`는 워커의 스티커 디렉터리(R4_STICKERS_DIR)에 있는 PNG 파일 이름을 `image`로
+    함께 보냅니다. 파일 목록은 서버 설정(R4_STICKERS_DIR)이 API에도 있을 때만 붙습니다.
+    """
+    import os
+
+    directory = os.environ.get("R4_STICKERS_DIR", "").strip()
+    images = []
+    if directory and os.path.isdir(directory):
+        images = sorted(name for name in os.listdir(directory) if name.lower().endswith(".png"))
+    return [
+        {"kind": kind, "label": label, **({"images": images} if kind == "image" else {})}
+        for kind, label in STICKER_LABELS.items()
+    ]
+
+
+@router.get("/subtitle-presets")
+def subtitle_presets(user: CurrentUser) -> list[dict]:
+    """편집기가 고를 수 있는 모션 프리셋. 이름을 `subtitle_preset`으로 보냅니다.
+
+    프리셋은 동작(등장·사라짐·계속)을 겹쳐 만든 움직임 한 벌로, 고르면 템플릿과
+    `subtitle_animation`보다 먼저 쓰입니다. 빈 문자열이면 템플릿 값으로 돌아갑니다.
+    팩(`pack`)으로 묶어 보여 주면 됩니다.
+    """
+    return [
+        {
+            "name": preset.name,
+            "label": preset.label,
+            "pack": pack,
+            "pack_label": PACK_LABELS[pack],
+            "summary": preset.summary,
+            "description": preset.description,
+            # 내 프리셋만 지울 수 있습니다(내장은 파일이 없습니다).
+            "editable": pack == "user",
+        }
+        for pack, presets in presets_by_pack().items()
+        for preset in presets
+    ]
+
+
+def _preset_or_404(name: str) -> MotionPreset:
+    if not re.fullmatch(PRESET_NAME, name):
+        raise HTTPException(422, "프리셋 이름 형식이 아닙니다.")
+    try:
+        return get_preset(name)
+    except ValueError:
+        raise HTTPException(404, f"모르는 프리셋입니다: {name}") from None
+
+
+def _attachment(filename: str) -> dict[str, str]:
+    return {"Content-Disposition": f'attachment; filename="{filename}"'}
+
+
+@router.get("/subtitle-presets/{name}/file")
+def subtitle_preset_file(name: str, user: CurrentUser) -> Response:
+    """프리셋 하나를 JSON 파일로 내려줍니다. 고쳐서 다시 올리거나 명령줄에서 씁니다."""
+    preset = _preset_or_404(name)
+    return Response(
+        content=preset.to_json(),
+        media_type="application/json",
+        headers=_attachment(f"{preset.name}.json"),
+    )
+
+
+@router.get("/subtitle-preset-packs/{pack}")
+def subtitle_preset_pack(pack: str, user: CurrentUser) -> Response:
+    """팩 하나를 통째로 zip으로 내려줍니다. 프리셋 JSON과 읽어보기 파일이 들어갑니다."""
+    grouped = presets_by_pack()
+    if pack not in grouped:
+        raise HTTPException(404, f"모르는 팩입니다: {pack}. 쓸 수 있는 것: {', '.join(grouped)}")
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("읽어보기.txt", PRESET_README)
+        for preset in grouped[pack]:
+            archive.writestr(f"{preset.name}.json", preset.to_json())
+    return Response(
+        content=buffer.getvalue(),
+        media_type="application/zip",
+        headers=_attachment(f"r4-presets-{pack}.zip"),
+    )
+
+
+@router.post("/subtitle-presets", status_code=201)
+def save_subtitle_preset(payload: MotionPreset, user: CurrentUser) -> dict:
+    """프리셋 파일을 올려 "내 프리셋"으로 저장합니다(서버의 R4_PRESETS_DIR).
+
+    내장 프리셋과 같은 이름은 받지 않습니다. 저장한 프리셋은 목록·편집기·렌더에서
+    바로 쓸 수 있습니다. 실제로 영상에 구우려면 워커도 같은 디렉터리를 봐야 합니다.
+    """
+    directory = user_presets_dir()
+    if directory is None:
+        raise HTTPException(503, "서버에 프리셋 디렉터리(R4_PRESETS_DIR)가 없습니다.")
+    builtin = {name for name, preset in all_presets().items() if preset.pack != "user"}
+    if payload.name in builtin:
+        raise HTTPException(409, f"내장 프리셋과 같은 이름입니다: {payload.name}")
+    target = directory / f"{payload.name}.json"
+    if not target.exists() and len(list(directory.glob("*.json"))) >= 200:
+        raise HTTPException(409, "프리셋 디렉터리가 가득 찼습니다(200개).")
+    stored = payload.model_copy(update={"pack": "user"})
+    try:
+        target.write_text(stored.to_json(), encoding="utf-8")
+    except OSError:
+        raise HTTPException(503, "프리셋을 저장하지 못했습니다.") from None
+    return {"name": stored.name, "label": stored.label, "pack": "user"}
+
+
+@router.delete("/subtitle-presets/{name}", status_code=204)
+def delete_subtitle_preset(name: str, user: CurrentUser) -> Response:
+    """내 프리셋을 지웁니다. 내장 프리셋은 지울 수 없습니다."""
+    preset = _preset_or_404(name)
+    directory = user_presets_dir()
+    if preset.pack != "user" or directory is None:
+        raise HTTPException(409, "내 프리셋만 지울 수 있습니다.")
+    target = directory / f"{name}.json"
+    if not target.is_file():
+        raise HTTPException(404, f"프리셋 파일이 없습니다: {name}")
+    target.unlink()
+    return Response(status_code=204)
+
+
+@router.get("/subtitle-pacings")
+def subtitle_pacings(user: CurrentUser) -> list[dict]:
+    """자막을 끊는 방식. 이름을 `subtitle_pacing`으로 보냅니다.
+
+    `shortform`은 말한 시각(대본의 단어 시각)에 맞춰 한 줄로 짧게 끊습니다. 단어 시각이
+    없거나 사람이 글자를 고친 자막은 글자 수로 끊는 방식으로 자동으로 돌아갑니다.
+    """
+    return [{"name": name, "label": label} for name, label in PACING_LABELS.items()]
+
+
+@router.get("/subtitle-animations")
+def subtitle_animations(user: CurrentUser) -> list[dict]:
+    """편집기가 고를 수 있는 자막 움직임. 이름을 `subtitle_animation`으로 보냅니다.
+
+    비우면 템플릿의 움직임을 쓰고, `none`이면 움직임을 뺍니다.
+    """
+    return [{"name": name, "label": label} for name, label in ANIMATION_LABELS.items()]
+
+
+class PreviewRequest(BaseModel):
+    template: str = Field(default="default", pattern=TEMPLATE_NAME)
+    animation: str | None = Field(default=None, pattern=r"^[a-z][a-z-]{0,19}$")
+    preset: str | None = Field(default=None, pattern=r"^$|^[a-z][a-z0-9-]{1,39}$")
+    pacing: str | None = Field(default=None, pattern=r"^(broadcast|shortform)$")
+    text: str | None = Field(default=None, max_length=200)
+    width: int = Field(default=540, ge=180, le=1080, multiple_of=2)
+    height: int = Field(default=960, ge=180, le=1920, multiple_of=2)
+    seconds: float = Field(default=3.0, gt=0, le=10)
+    font_size: int | None = Field(default=None, ge=20, le=120)
+    # 벡터 스티커만 미리보기에 그립니다(이미지는 합성 단계라 빠집니다). 시각은 0초 기준입니다.
+    stickers: list[Sticker] = Field(default_factory=list, max_length=20)
+
+
+_FONT_TAG = re.compile(r"\\fn([^\\}]+)")
+
+
+@router.post("/subtitle-preview")
+def subtitle_preview(payload: PreviewRequest, user: CurrentUser) -> dict:
+    """편집기의 정확 미리보기용 ASS 문서. 워커가 굽는 것과 같은 코드로 만듭니다.
+
+    브라우저는 이 ASS를 libass WASM(jassub)으로 그립니다. `fonts`는 문서가 쓰는 글꼴
+    이름이며 `/subtitle-fonts/{family}`로 받아 렌더러에 넣습니다. 글자 크기는 화면
+    크기에 맞춰 줄이지 않고 템플릿 값(1080x1920 기준)을 그대로 두므로, 화면을 그
+    비율로 주면 실제 영상과 같은 배치가 됩니다.
+    """
+    try:
+        template = get_template(payload.template)
+        if payload.preset is not None:
+            template = template.with_preset(payload.preset) if payload.preset else template
+        if payload.animation:
+            template = template.with_animation(payload.animation)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from None
+    text = (payload.text or "").strip() or template.sample or template.label
+    rules = pacing_rules(payload.pacing) if payload.pacing else subtitle_rules()
+    cues = apply_rules([Cue(start=0, end=payload.seconds, text=text)], rules)
+    document = styled_document(
+        cues,
+        template,
+        width=payload.width,
+        height=payload.height,
+        duration=payload.seconds,
+        font_size=payload.font_size,
+    )
+    add_sticker_events(
+        document,
+        payload.stickers,
+        width=payload.width,
+        height=payload.height,
+        duration=payload.seconds,
+    )
+    ass = document.to_string("ass")
+    families = {style.fontname for style in document.styles.values()}
+    families.update(name.strip() for name in _FONT_TAG.findall(ass))
+    return {
+        "ass": ass,
+        "seconds": payload.seconds,
+        "width": payload.width,
+        "height": payload.height,
+        "fonts": sorted(families),
+    }
+
+
+_FONT_MEDIA = {".ttf": "font/ttf", ".otf": "font/otf", ".ttc": "font/collection"}
+_FAMILY = re.compile(r"^[^,{}\\\r\n\t/]{1,80}$")
+
+
+@router.get("/subtitle-fonts/{family}")
+def subtitle_font(family: str, user: CurrentUser) -> FileResponse:
+    """미리보기 렌더러에 넣을 글꼴 파일. 설치된 글꼴(R4_FONTS_DIR 또는 시스템)만 내려줍니다.
+
+    이름으로 파일을 찾으므로 경로를 받지 않습니다. 없으면 404이고 화면은 그 글꼴 없이
+    (다른 글꼴로 대체돼) 그립니다.
+    """
+    if not _FAMILY.match(family):
+        raise HTTPException(422, "글꼴 이름 형식이 아닙니다.")
+    path = font_file_for(family)
+    if path is None or not path.is_file():
+        raise HTTPException(404, f"설치되지 않은 글꼴입니다: {family}")
+    return FileResponse(
+        path,
+        media_type=_FONT_MEDIA.get(path.suffix.lower(), "application/octet-stream"),
+        headers={"Cache-Control": "private, max-age=86400"},
     )
 
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import inspect
 import math
+import os
 import re
 import subprocess
 import tempfile
@@ -12,6 +13,7 @@ from pathlib import Path
 
 from pipeline.alignment import (
     WordTiming,
+    cue_words,
     cues_for_lines,
     merge_spans,
     snap_starts,
@@ -64,10 +66,21 @@ def transcribe(
         **(tuning or {}),
     )
     return [
-        Cue(start=s.start, end=s.end, text=s.text.strip())
+        Cue(start=s.start, end=s.end, text=s.text.strip(), words=segment_words(s))
         for s in segments
         if s.text.strip() and s.end > s.start
     ]
+
+
+def segment_words(segment) -> list | None:  # noqa: ANN001
+    """전사·정렬 구간 하나의 단어 시각을 자막 `words`로. 단어가 없으면 None입니다."""
+    found = []
+    for word in getattr(segment, "words", None) or []:
+        text = getattr(word, "word", "") or ""
+        start, end = getattr(word, "start", None), getattr(word, "end", None)
+        if text.strip() and start is not None and end is not None:
+            found.append(WordTiming(start=float(start), end=float(end), text=text))
+    return cue_words(found)
 
 
 def mask_outside(audio, spans: list[tuple[float, float]], rate: int = 16000):  # noqa: ANN001, ANN201
@@ -167,7 +180,7 @@ def align_text(
     )
     result = engine.align(str(source), text, language=language)
     cues = cues_for_lines(text.splitlines(), word_timings(result)) or [
-        Cue(start=s.start, end=s.end, text=s.text.strip())
+        Cue(start=s.start, end=s.end, text=s.text.strip(), words=segment_words(s))
         for s in result.segments
         if s.text.strip() and s.end > s.start
     ]
@@ -471,6 +484,165 @@ def word_timings(result) -> list[WordTiming]:  # noqa: ANN001
             if text.strip() and start is not None and end is not None:
                 found.append(WordTiming(start=float(start), end=float(end), text=text))
     return found
+
+
+# 얼굴을 볼 간격. 초당 4장이면 사람이 움직이는 속도를 따라가기에 충분하고
+# 1분 영상에서 240장이라 CPU로도 견딥니다. 잰 값이 아니라 정한 값입니다.
+FACE_FPS = 4.0
+
+
+def _largest_face(boxes: list[tuple[float, float, float, float]]) -> float | None:
+    """가장 큰 얼굴의 가로 중심(0~1). 누가 말하는지는 알 수 없어 크기로 고릅니다."""
+    if not boxes:
+        return None
+    x, _, w, _ = max(boxes, key=lambda box: box[2] * box[3])
+    return min(1.0, max(0.0, x + w / 2))
+
+
+def face_model() -> Path | None:
+    """MediaPipe 얼굴 모델 파일. `R4_FACE_MODEL`로 알려 줍니다.
+
+    MediaPipe 1.0에는 모델이 **들어 있지 않습니다.** 모델을 품고 있던 옛
+    `mediapipe.solutions` API는 사라졌고, 지금의 Tasks API는 `.tflite`를 따로
+    받아 경로를 넘겨야 합니다(`scripts/fetch_face_model.py`).
+    """
+    value = os.environ.get("R4_FACE_MODEL", "").strip()
+    path = Path(value) if value else None
+    return path if path and path.is_file() else None
+
+
+def _mediapipe_detector(model: Path):  # noqa: ANN202
+    """MediaPipe Tasks 얼굴 검출. 쓸 수 없으면 `None`입니다.
+
+    `libEGL`·`libGLESv2`가 없으면 라이브러리를 여는 데서 실패하므로(워커
+    이미지에 넣어 둡니다) 여기서 한 번 실제로 열어 보고 판단합니다.
+    """
+    try:
+        import mediapipe
+        from mediapipe.tasks.python.core.base_options import BaseOptions
+        from mediapipe.tasks.python.vision import FaceDetector, FaceDetectorOptions
+
+        detector = FaceDetector.create_from_options(
+            FaceDetectorOptions(base_options=BaseOptions(model_asset_path=str(model)))
+        )
+    except Exception:  # noqa: BLE001 - 없거나 GL 라이브러리가 빠졌으면 내려갑니다.
+        return None
+
+    def detect(frame):  # noqa: ANN001, ANN202
+        import cv2
+
+        height, width = frame.shape[:2]
+        image = mediapipe.Image(
+            image_format=mediapipe.ImageFormat.SRGB,
+            data=cv2.cvtColor(frame, cv2.COLOR_BGR2RGB),
+        )
+        found = detector.detect(image)
+        # Tasks API는 픽셀 좌표를 줍니다. 비율로 바꿔 화면 크기와 무관하게 씁니다.
+        return [
+            (
+                box.origin_x / width,
+                box.origin_y / height,
+                box.width / width,
+                box.height / height,
+            )
+            for box in (item.bounding_box for item in found.detections)
+        ]
+
+    return detect
+
+
+def _opencv_detector():  # noqa: ANN202
+    """OpenCV 얼굴 검출. 쓸 수 없으면 `None`입니다.
+
+    캐스케이드를 찾고 읽는 일은 `worker.faces`가 이미 합니다(설정 →
+    `cv2.data` 순서, objdetect가 빠진 5.x 휠과 빈 분류기를 걸러 냅니다).
+    같은 일을 두 번 적지 않으려고 그쪽을 씁니다. 여기서는 그 분류기를
+    **시간에 따라 따라가는 데** 맞게 비율 좌표로 싸기만 합니다.
+    """
+    try:
+        import cv2
+
+        from worker.faces import _cascade
+    except ImportError:
+        return None
+    try:
+        cascade = _cascade()
+    except Exception:  # noqa: BLE001 - 검출기가 없으면 리프레이밍만 끕니다.
+        return None
+
+    def detect(frame):  # noqa: ANN001, ANN202
+        height, width = frame.shape[:2]
+        grey = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        return [
+            (x / width, y / height, w / width, h / height)
+            for x, y, w, h in cascade.detectMultiScale(grey, 1.2, 5, minSize=(40, 40))
+        ]
+
+    return detect
+
+
+def _open_face_detector():  # noqa: ANN202
+    """(검출 함수 또는 `None`, 검출기 이름). 모델이 있으면 MediaPipe입니다.
+
+    MediaPipe 쪽이 정확하지만 모델 파일과 GL 라이브러리가 있어야 합니다.
+    OpenCV는 받을 것이 없는 대신 정확도가 낮습니다. **어느 쪽을 썼는지 결과에
+    적어 둡니다**(조용히 품질이 달라지지 않게).
+    """
+    model = face_model()
+    if model is not None:
+        detect = _mediapipe_detector(model)
+        if detect is not None:
+            return detect, "mediapipe"
+    detect = _opencv_detector()
+    if detect is not None:
+        return detect, "opencv-haar"
+    # 쓸 수 있는 검출기가 없습니다. 얼굴을 0개로 보고하는 대신 **없다고**
+    # 말합니다. 리프레이밍은 `focus_x` 고정으로 돌아갑니다.
+    return None, "none"
+
+
+def face_track(
+    source: Path, *, start: float = 0.0, end: float | None = None, fps: float = FACE_FPS
+) -> tuple[list[tuple[float, float]], str]:
+    """얼굴 가로 중심을 시각과 함께. (점 목록, 쓴 검출기) 순입니다.
+
+    시각은 **구간 시작을 0으로** 셉니다. 얼굴을 못 찾은 순간은 건너뜁니다
+    (`pipeline.reframe.follow`가 마지막 위치를 유지합니다).
+
+    쓸 수 있는 검출기가 없으면 빈 목록과 `"none"`입니다. 그때 리프레이밍은
+    `focus_x` 고정으로 돌아갑니다(지금까지와 같은 동작입니다).
+
+    **여기서는 예외를 내지 않습니다.** 리프레이밍은 곁다리 기능이라
+    `[analysis]`를 깔지 않은 워커에서도 렌더는 끝까지 가야 합니다. 의존성이
+    없으면 고정 위치로 돌아갈 뿐입니다.
+    """
+    detect, name = _open_face_detector()
+    if detect is None:
+        return [], name
+    try:
+        import cv2
+    except ImportError:
+        # 검출기는 있는데 프레임을 읽을 방법이 없습니다(MediaPipe만 있는 경우).
+        return [], "none"
+    capture = cv2.VideoCapture(str(source))
+    if not capture.isOpened():
+        return [], name
+    points: list[tuple[float, float]] = []
+    try:
+        moment = start
+        step = 1.0 / max(fps, 0.1)
+        while end is None or moment < end:
+            capture.set(cv2.CAP_PROP_POS_MSEC, moment * 1000)
+            ok, frame = capture.read()
+            if not ok:
+                break
+            center = _largest_face(detect(frame))
+            if center is not None:
+                points.append((moment - start, center))
+            moment += step
+    finally:
+        capture.release()
+    return points, name
 
 
 def detect_scenes(source: Path, *, threshold: float = 27.0) -> list[dict]:

@@ -6,9 +6,17 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 
+# 편집기의 정확 미리보기가 글꼴 파일을 API에서 받습니다(/subtitle-fonts). 워커와 같은
+# 글꼴을 같은 자리에 설치하고 fontconfig로 시스템 글꼴(Noto Sans CJK KR)도 찾습니다.
+RUN apt-get update \
+    && apt-get install --no-install-recommends -y fontconfig fonts-noto-cjk \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY pyproject.toml ./
 COPY packages ./packages
-RUN pip install --no-cache-dir .
+RUN pip install --no-cache-dir ".[fonts]"
+COPY scripts/fetch_fonts.py ./scripts/fetch_fonts.py
+RUN python scripts/fetch_fonts.py --out /usr/share/fonts/truetype/r4 && fc-cache -f
 
 COPY services ./services
 COPY migrations ./migrations

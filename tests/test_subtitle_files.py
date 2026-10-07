@@ -115,7 +115,7 @@ SAMPLE_SRT = """1
 def test_import_reads_srt_and_joins_the_file_wrapping():
     """파일의 줄바꿈은 그 도구가 그 화면에 맞춰 끊은 것이라 공백으로 합칩니다."""
     cues, notes = parse_subtitles(SAMPLE_SRT)
-    assert [c.model_dump() for c in cues] == [
+    assert [c.model_dump(exclude_none=True) for c in cues] == [
         {"start": 1.0, "end": 3.5, "text": "첫 줄 둘째 줄"},
         {"start": 4.0, "end": 6.0, "text": "기울임 글자"},
     ]
@@ -125,7 +125,9 @@ def test_import_reads_srt_and_joins_the_file_wrapping():
 def test_import_reads_webvtt_and_strips_speaker_tags():
     text = "WEBVTT\n\n00:00:01.000 --> 00:00:02.000\n<v 진행자>안녕하세요\n"
     cues, _ = parse_subtitles(text)
-    assert [c.model_dump() for c in cues] == [{"start": 1.0, "end": 2.0, "text": "안녕하세요"}]
+    assert [c.model_dump(exclude_none=True) for c in cues] == [
+        {"start": 1.0, "end": 2.0, "text": "안녕하세요"}
+    ]
 
 
 def test_import_says_what_it_skipped_instead_of_dropping_it_silently():
