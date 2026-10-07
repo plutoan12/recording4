@@ -109,3 +109,76 @@ def test_transition_speed_and_mosaic_preserve_every_output_frame(tmp_path, rate,
     ).stdout
     assert len(pcm) / 96000 == pytest.approx(spec.output_seconds, abs=0.06)
     assert any(pcm)
+
+
+@pytest.mark.parametrize("burn", [True, False])
+def test_frozen_download_strips_emphasis_without_losing_timing(tmp_path, burn):
+    spec = joined(
+        burn_subtitles=burn, cues=[{"start": 5, "end": 7, "text": "This is [[important]]"}]
+    )
+    files = write_subtitles(tmp_path / "captions.ass", spec)
+    for fmt in ("srt", "vtt"):
+        cue = pysubs2.SSAFile.from_string(files[fmt])[0]
+        assert cue.plaintext == "This is important"
+        assert (cue.start, cue.end) == (2200, 3200)
+
+
+def test_automatic_reframe_matches_explicit_source_timed_track(tmp_path, monkeypatch):
+    from test_render_integration import ffmpeg_or_skip, make_source
+    from worker import analysis
+    from worker.rendering import render_clip
+
+    source = tmp_path / "source.mp4"
+    make_source(ffmpeg_or_skip(), source, 6)
+    spec = EditSpec(
+        start=4,
+        end=6,
+        width=180,
+        height=320,
+        mode="crop",
+        reframe={"deadzone": 0, "max_speed": 2},
+        burn_subtitles=False,
+    )
+    automatic, expected = tmp_path / "automatic.mp4", tmp_path / "expected.mp4"
+    # The detection boundary emits times relative to the requested window.
+    monkeypatch.setattr(analysis, "face_track", lambda source, **kw: ([(0, 0.2), (1, 0.8)], "stub"))
+    render_clip(source, automatic, spec, has_audio=True)
+    render_clip(source, expected, spec, faces=[(4, 0.2), (5, 0.8)], has_audio=True)
+    assert automatic.read_bytes() == expected.read_bytes()
+
+
+@pytest.mark.parametrize("start", [0, 1])
+def test_animated_preview_shows_elapsed_caption_on_nonzero_frame(tmp_path, start):
+    import subprocess
+
+    from test_render_integration import ffmpeg_or_skip
+    from worker.rendering import render_preview
+
+    source = tmp_path / "black.mp4"
+    subprocess.run(
+        [
+            ffmpeg_or_skip(),
+            "-v",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=black:s=180x320:r=30:d=5",
+            "-c:v",
+            "libx264",
+            str(source),
+        ],
+        check=True,
+    )
+    spec = EditSpec(
+        start=start,
+        end=start + 3,
+        width=180,
+        height=320,
+        subtitle_animation="fade",
+        cues=[{"start": start, "end": start + 3, "text": "hello"}],
+    )
+    animated, blank = tmp_path / "animated.png", tmp_path / "blank.png"
+    render_preview(source, animated, spec, 1.5)
+    render_preview(source, blank, spec.model_copy(update={"cues": []}), 1.5)
+    assert animated.read_bytes() != blank.read_bytes()

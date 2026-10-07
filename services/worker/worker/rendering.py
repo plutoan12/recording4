@@ -14,9 +14,9 @@ from pathlib import Path
 
 import pysubs2
 
-from pipeline.editing import Cue, EditSpec, clip_cues, concat_cues
+from pipeline.editing import EditSpec, clip_cues, concat_cues
 from pipeline.reframe import Point, crop_x, follow
-from pipeline.subtitle_files import plain_ass
+from pipeline.subtitle_files import export_text, plain_ass
 from pipeline.subtitle_stickers import (
     add_sticker_events,
     clip_stickers,
@@ -267,7 +267,7 @@ def write_subtitles(
     for cue in shown:
         captions.append(
             pysubs2.SSAEvent(
-                start=round(cue.start * 1000), end=round(cue.end * 1000), text=plain_ass(cue.text)
+                start=round(cue.start * 1000), end=round(cue.end * 1000), text=export_text(cue.text)
             )
         )
     if burn:
@@ -307,19 +307,8 @@ def source_time(spec: EditSpec, at: float) -> float:
 def write_preview_subtitles(
     path: Path, spec: EditSpec, at: float, rules: SubtitleRules = DEFAULT_RULES
 ) -> None:
-    """그 순간에 떠 있는 자막만 0초로 옮겨 담습니다. 한 장을 뽑을 때 씁니다."""
-    frozen = spec.model_copy(update={"fade_in": 0.0, "fade_out": 0.0})
-    shown = (
-        concat_cues(spec.cues, spec.segments, overlap=spec.transition_seconds)
-        if spec.segments
-        else clip_cues(spec.cues, spec.start, spec.end)
-    )
-    now = [
-        Cue(start=0, end=1, text=cue.text)
-        for cue in apply_rules(shown, rules)
-        if cue.start <= at < cue.end
-    ]
-    write_subtitles(path, frozen.model_copy(update={"cues": now, "segments": []}), rules)
+    """전체 출력 시각을 유지합니다. 프레임의 PTS를 at으로 옮겨 움직임까지 평가합니다."""
+    write_subtitles(path, spec, rules)
 
 
 def render_preview(
@@ -339,8 +328,9 @@ def render_preview(
     output.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="r4-preview-") as directory:
         temp = Path(directory)
-        # 자막을 0초에 두었으므로 그 자리에 seek해서 한 장만 뽑습니다.
+        # 영상은 원본 시각에서 구하되 자막은 출력 시각 at에서 평가합니다.
         write_preview_subtitles(temp / "captions.ass", spec, at, rules)
+        path = clip_path(spec, detected_faces(source, spec))
         command = [
             ffmpeg_binary(),
             "-hide_banner",
@@ -355,7 +345,7 @@ def render_preview(
             "-map",
             "0:v:0",
             "-vf",
-            video_filter(spec),
+            f"setpts=PTS-STARTPTS+{at}/TB,{video_filter(spec, path)},setpts=PTS-STARTPTS",
             "-frames:v",
             "1",
             "-update",
@@ -447,6 +437,7 @@ def complex_filter(
     """
     spans, parts = spec.spans, []
     count = len(spans)
+    overlap = transition_seconds(spec)
     if count > 1:
         parts.append(f"[0:v]split={count}" + "".join(f"[vin{i}]" for i in range(count)))
         parts.append(f"{audio}asplit={count}" + "".join(f"[ain{i}]" for i in range(count)))
@@ -455,15 +446,17 @@ def complex_filter(
         sources = [("[0:v]", audio)]
     for index, span in enumerate(spans):
         video_in, audio_in = sources[index]
+        # FFmpeg 7 clears cadence at setpts; xfade requires equal constant rates
+        # and time bases before combining the inputs, not only after xfade.
+        cadence = f",fps=fps={frame_rate}:start_time=0,settb=AVTB" if overlap else ""
         parts.append(
             f"{video_in}trim=start={span.start}:end={span.end},"
-            f"setpts=(PTS-STARTPTS)/{span.speed}[v{index}]"
+            f"setpts=(PTS-STARTPTS)/{span.speed}{cadence}[v{index}]"
         )
         parts.append(
             f"{audio_in}atrim=start={span.start}:end={span.end},"
             f"asetpts=PTS-STARTPTS{tempo_chain(span.speed)}[a{index}]"
         )
-    overlap = transition_seconds(spec)
     if count > 1 and overlap:
         parts += transition_graph(spec, count, overlap)
         video_label, audio_label = "[vx]", "[ax]"
@@ -540,6 +533,19 @@ def clip_path(spec: EditSpec, faces: Sequence[Point] | None) -> list[Point]:
     return follow([(at, value) for at, value in moved if at is not None], settings=settings)
 
 
+def detected_faces(source: Path, spec: EditSpec) -> list[Point]:
+    """필요한 구간만 분석하고 검출기의 상대 시각을 원본 시각으로 복구합니다."""
+    if spec.reframe is None or spec.mode != "crop":
+        return []
+    from worker.analysis import face_track
+
+    points = []
+    for span in spec.spans:
+        track, _ = face_track(source, start=span.start, end=span.end)
+        points.extend((span.start + at, center) for at, center in track)
+    return points
+
+
 def render_clip(
     source: Path,
     output: Path,
@@ -559,7 +565,7 @@ def render_clip(
     with tempfile.TemporaryDirectory(prefix="r4-render-") as directory:
         temp = Path(directory)
         subtitle_files = write_subtitles(temp / "captions.ass", spec, rules)
-        path = clip_path(spec, faces)
+        path = clip_path(spec, detected_faces(source, spec) if faces is None else faces)
         try:
             command = (
                 simple_command(source, temp, spec, path)
