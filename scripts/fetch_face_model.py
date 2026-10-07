@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """자동 리프레이밍의 얼굴 검출 모델을 받습니다(MediaPipe BlazeFace, 230KB).
 
-MediaPipe 1.0에는 모델이 **들어 있지 않습니다.** 옛 `mediapipe.solutions`는
+현재 Tasks API에는 모델이 **들어 있지 않습니다.** 옛 `mediapipe.solutions`는
 모델을 품고 있었지만 그 API는 사라졌고, 지금의 Tasks API는 `.tflite` 파일을
 따로 받아 경로를 넘겨야 합니다.
 

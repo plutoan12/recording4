@@ -140,7 +140,7 @@ def test_no_usable_detector_says_so_instead_of_reporting_zero_faces(monkeypatch,
 
 
 def test_the_mediapipe_model_is_only_used_when_the_file_is_there(monkeypatch, tmp_path):
-    """MediaPipe 1.0 에는 모델이 들어 있지 않습니다. 파일이 있어야 씁니다."""
+    """Tasks API에는 모델이 들어 있지 않습니다. 파일이 있어야 씁니다."""
     from worker import analysis
 
     monkeypatch.delenv("R4_FACE_MODEL", raising=False)

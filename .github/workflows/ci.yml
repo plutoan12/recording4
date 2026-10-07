@@ -248,6 +248,10 @@ jobs:
               if dist.metadata['Name'].startswith('opencv-')
           )
           assert opencv == ['opencv-python'], opencv
+          import mediapipe
+          from mediapipe.tasks.python.core.base_options import BaseOptions
+          from mediapipe.tasks.python.vision import FaceDetector, FaceDetectorOptions
+          print('mediapipe', mediapipe.__version__, '/ Tasks 얼굴 검출 진입점', FaceDetector.__module__)
           print('CascadeClassifier 있음', hasattr(cv2, 'CascadeClassifier'))
           print('FaceDetectorYN 있음', hasattr(cv2, 'FaceDetectorYN'))
           print('얼굴 관련 이름', sorted(n for n in dir(cv2) if 'ascade' in n or 'FaceDetector' in n))

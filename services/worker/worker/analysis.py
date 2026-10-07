@@ -502,7 +502,7 @@ def _largest_face(boxes: list[tuple[float, float, float, float]]) -> float | Non
 def face_model() -> Path | None:
     """MediaPipe 얼굴 모델 파일. `R4_FACE_MODEL`로 알려 줍니다.
 
-    MediaPipe 1.0에는 모델이 **들어 있지 않습니다.** 모델을 품고 있던 옛
+    현재 Tasks API에는 모델이 **들어 있지 않습니다.** 모델을 품고 있던 옛
     `mediapipe.solutions` API는 사라졌고, 지금의 Tasks API는 `.tflite`를 따로
     받아 경로를 넘겨야 합니다(`scripts/fetch_face_model.py`).
     """
