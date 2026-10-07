@@ -25,6 +25,7 @@ import pysubs2
 from charset_normalizer import from_bytes
 
 from pipeline.editing import Cue, EditSpec, clip_cues
+from pipeline.subtitle_markup import strip_markup
 from pipeline.subtitles import DEFAULT_RULES, SubtitleRules, apply_rules, normalize
 
 SubtitleFormat = Literal["srt", "vtt"]
@@ -46,6 +47,11 @@ def plain_ass(text: str) -> str:
     남기고, 파일로 쓸 때 각 형식의 줄바꿈으로 돌아갑니다.
     """
     return text.replace("\\", "＼").replace("{", "｛").replace("}", "｝").replace("\n", r"\N")
+
+
+def export_text(text: str) -> str:
+    """파일로 내보내는 글자. 강조 표기 `[[...]]`는 굽는 자막 전용이라 뺍니다."""
+    return plain_ass(strip_markup(text))
 
 
 def output_cues(
@@ -74,7 +80,7 @@ def subtitle_file(
             pysubs2.SSAEvent(
                 start=round(cue.start * 1000),
                 end=round(cue.end * 1000),
-                text=plain_ass(cue.text),
+                text=export_text(cue.text),
             )
         )
     return subs.to_string(subtitle_format)
@@ -100,7 +106,7 @@ def dump_subtitles(cues: list[Cue], subtitle_format: SubtitleFormat = "srt") -> 
             pysubs2.SSAEvent(
                 start=round(cue.start * 1000),
                 end=round(cue.end * 1000),
-                text=plain_ass(cue.text),
+                text=export_text(cue.text),
             )
         )
     return subs.to_string(subtitle_format)
