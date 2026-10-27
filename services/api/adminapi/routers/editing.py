@@ -9,7 +9,7 @@ from datetime import UTC, datetime
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import func, select
 
 from adminapi.artifact_subtitles import Missing
@@ -105,15 +105,33 @@ def violations(cues: list[Cue]) -> list[dict]:
     ]
 
 
+class TranscriptCue(Cue):
+    """저장 요청의 한 줄. 읽기 응답을 그대로 돌려보낼 수 있게 화자·겹침을 받아 **버립니다**.
+
+    둘은 화자 분리가 잰 값입니다. 사람이 대본을 고치면 시각이 바뀔 수 있어 그 표시를
+    새 버전에 그대로 물려줄 수 없습니다. 다시 재기 전까지 새 버전은 표시가 없습니다.
+    """
+
+    model_config = ConfigDict(allow_inf_nan=False, extra="ignore")
+
+
 class TranscriptRequest(BaseModel):
-    cues: list[Cue] = Field(min_length=1, max_length=20000)
+    cues: list[TranscriptCue] = Field(min_length=1, max_length=20000)
 
 
 @router.get("/source-assets/{asset_id}/transcript")
 def get_transcript(asset_id: uuid.UUID, user: CurrentUser, session: SessionDep):
     asset_for_edit(session, asset_id)
+    # 화자와 겹침 표시를 함께 줍니다. 둘 다 **측정 결과**이고 사람이 고치는 값이
+    # 아닙니다. 그대로 돌려보내도 저장이 되도록 저장 요청은 이 두 값을 무시합니다.
     return [
-        {"start": float(s.start_seconds), "end": float(s.end_seconds), "text": s.text}
+        {
+            "start": float(s.start_seconds),
+            "end": float(s.end_seconds),
+            "text": s.text,
+            "speaker": s.speaker,
+            "overlap": s.overlap,
+        }
         for s in transcript(session, asset_id)
     ]
 
@@ -349,10 +367,20 @@ def speakers(asset_id: uuid.UUID, user: CurrentUser, session: SessionDep):
         entry = found.setdefault(row.speaker, {"speaker": row.speaker, "seconds": 0.0, "count": 0})
         entry["seconds"] += float(row.end_seconds) - float(row.start_seconds)
         entry["count"] += 1
+    # 겹침 표시. `checked`가 거짓이면 아직 안 재 본 것이지 "겹치지 않음"이 아닙니다.
+    flagged = [index for index, row in enumerate(rows) if row.overlap]
     return {
         "version": rows[0].transcript_version if rows else None,
         "unlabeled": sum(1 for row in rows if not row.speaker),
         "speakers": sorted(found.values(), key=lambda e: (-e["seconds"], e["speaker"])),
+        "overlap": {
+            "checked": any(row.overlap is not None for row in rows),
+            "count": len(flagged),
+            "seconds": round(
+                sum(float(rows[i].end_seconds) - float(rows[i].start_seconds) for i in flagged), 3
+            ),
+            "cue_numbers": [index + 1 for index in flagged],
+        },
     }
 
 

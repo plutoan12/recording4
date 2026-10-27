@@ -253,3 +253,162 @@ def test_voice_assignments_reject_empty_values(
         json={"assignments": {"SPEAKER_00": "  "}},
     )
     assert response.status_code == 422
+
+
+def test_worker_marks_cues_that_land_on_overlapping_speech(
+    session: Session, user, storage, monkeypatch
+) -> None:  # noqa: ANN001
+    """겹말 구간에 걸친 자막에 표시가 붙습니다. 걸치지 않은 자막은 표시가 없습니다."""
+    from worker import media_tasks
+
+    asset = verified_asset(session, user)
+    with_transcript(session, asset)
+    task = MediaTask(source_asset_id=asset.id, kind="diarize", settings={})
+    session.add(task)
+    session.commit()
+
+    def fake_diarize(source, **kwargs):  # noqa: ANN001, ANN202
+        # 두 번째 자막(2~4초)의 절반 넘게 두 사람이 같이 말합니다.
+        return [
+            SpeakerTurn(start=0, end=4, speaker="SPEAKER_00"),
+            SpeakerTurn(start=2.5, end=4, speaker="SPEAKER_01"),
+        ]
+
+    monkeypatch.setattr(media_tasks, "get_storage", lambda: storage)
+    monkeypatch.setattr(media_tasks, "diarize", fake_diarize)
+
+    result = media_tasks.run_media.run(str(task.id))
+    assert result["status"] == "succeeded"
+    assert result["overlap_regions"] == 1
+    assert result["overlap_seconds"] == 1.5
+    assert result["overlapped"] == 1
+
+    session.expire_all()
+    rows = (
+        session.query(TranscriptSegment)
+        .filter_by(source_asset_id=asset.id, transcript_version=2)
+        .order_by(TranscriptSegment.start_seconds)
+        .all()
+    )
+    assert [(r.text, r.overlap) for r in rows] == [("안녕하세요", False), ("반갑습니다", True)]
+    # 예전 버전은 아직 안 재 본 상태로 남습니다. False가 아니라 None입니다.
+    old = session.query(TranscriptSegment).filter_by(transcript_version=1).all()
+    assert [r.overlap for r in old] == [None, None]
+
+
+def test_worker_reports_no_overlap_when_speakers_take_turns(
+    session: Session, user, storage, monkeypatch
+) -> None:  # noqa: ANN001
+    """번갈아 말하면 겹말이 없고, 모든 자막이 '겹치지 않음'으로 기록됩니다."""
+    from worker import media_tasks
+
+    asset = verified_asset(session, user)
+    with_transcript(session, asset)
+    task = MediaTask(source_asset_id=asset.id, kind="diarize", settings={})
+    session.add(task)
+    session.commit()
+
+    monkeypatch.setattr(media_tasks, "get_storage", lambda: storage)
+    monkeypatch.setattr(
+        media_tasks,
+        "diarize",
+        lambda source, **kwargs: [
+            SpeakerTurn(start=0, end=2, speaker="SPEAKER_00"),
+            SpeakerTurn(start=2, end=4, speaker="SPEAKER_01"),
+        ],
+    )
+
+    result = media_tasks.run_media.run(str(task.id))
+    assert (result["overlap_regions"], result["overlap_seconds"], result["overlapped"]) == (0, 0, 0)
+
+    session.expire_all()
+    rows = session.query(TranscriptSegment).filter_by(transcript_version=2).all()
+    assert [r.overlap for r in rows] == [False, False]
+
+
+def test_transcript_read_shows_the_flags_and_can_be_saved_back(
+    client: TestClient, auth_headers, session: Session, user
+) -> None:  # noqa: ANN001
+    """읽은 응답을 그대로 저장해도 됩니다. 화자·겹침은 측정값이라 새 버전에 안 옮깁니다."""
+    asset = verified_asset(session, user)
+    session.add(
+        TranscriptSegment(
+            source_asset_id=asset.id,
+            transcript_version=1,
+            start_seconds=0,
+            end_seconds=2,
+            text="겹쳐 말한 줄",
+            speaker="SPEAKER_00",
+            overlap=True,
+        )
+    )
+    session.commit()
+
+    read = client.get(f"/source-assets/{asset.id}/transcript", headers=auth_headers)
+    assert read.json() == [
+        {
+            "start": 0.0,
+            "end": 2.0,
+            "text": "겹쳐 말한 줄",
+            "speaker": "SPEAKER_00",
+            "overlap": True,
+        }
+    ]
+
+    saved = client.put(
+        f"/source-assets/{asset.id}/transcript", headers=auth_headers, json={"cues": read.json()}
+    )
+    assert saved.status_code == 200
+    assert saved.json()["version"] == 2
+    session.expire_all()
+    fresh = session.query(TranscriptSegment).filter_by(transcript_version=2).all()
+    assert [(r.speaker, r.overlap) for r in fresh] == [(None, None)]
+
+
+def test_speakers_endpoint_reports_the_overlap_summary(
+    client: TestClient, auth_headers, session: Session, user
+) -> None:  # noqa: ANN001
+    asset = verified_asset(session, user)
+    session.add_all(
+        [
+            TranscriptSegment(
+                source_asset_id=asset.id,
+                transcript_version=3,
+                start_seconds=0,
+                end_seconds=2,
+                text="멀쩡한 줄",
+                speaker="SPEAKER_00",
+                overlap=False,
+            ),
+            TranscriptSegment(
+                source_asset_id=asset.id,
+                transcript_version=3,
+                start_seconds=2,
+                end_seconds=4.5,
+                text="겹쳐 말한 줄",
+                speaker="SPEAKER_01",
+                overlap=True,
+            ),
+        ]
+    )
+    session.commit()
+
+    body = client.get(f"/source-assets/{asset.id}/speakers", headers=auth_headers).json()
+    assert body["overlap"] == {
+        "checked": True,
+        "count": 1,
+        "seconds": 2.5,
+        "cue_numbers": [2],
+    }
+
+
+def test_speakers_endpoint_says_not_measured_instead_of_no_overlap(
+    client: TestClient, auth_headers, session: Session, user
+) -> None:  # noqa: ANN001
+    """화자 분리를 안 돌린 대본은 '겹침 0'이 아니라 '안 재 봄'입니다."""
+    asset = verified_asset(session, user)
+    with_transcript(session, asset)
+
+    body = client.get(f"/source-assets/{asset.id}/speakers", headers=auth_headers).json()
+    assert body["overlap"]["checked"] is False
+    assert body["overlap"]["count"] == 0

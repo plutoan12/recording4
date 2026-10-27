@@ -123,6 +123,10 @@ class TranscriptSegment(Base, TimestampMixin):
     end_seconds: Mapped[Decimal] = mapped_column(Numeric(12, 3))
     text: Mapped[str] = mapped_column(Text)
     transcript_version: Mapped[int] = mapped_column(Integer, default=1)
+    # 이 자막이 두 사람이 동시에 말한 시간에 걸쳤는지. **None은 "아직 안 재 봤다"**입니다.
+    # 화자 분리를 돌린 버전만 True/False를 갖습니다. 사람이 대본을 고쳐 새 버전을
+    # 만들면 시각이 바뀔 수 있으므로 다시 재기 전까지 None입니다.
+    overlap: Mapped[bool | None] = mapped_column(Boolean, default=None)
 
     __table_args__ = (
         Index("ix_transcript_segments_asset_start", "source_asset_id", "start_seconds"),

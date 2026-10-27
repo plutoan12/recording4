@@ -4,7 +4,10 @@ import { PublicationForm } from './PublicationForm'
 import { MosaicRegionEditor, mosaicRegionIssue, type MosaicRegion } from './MosaicRegionEditor'
 import type { WorkflowDraft } from './WorkflowPanel'
 
-type Cue = { start: number; end: number; text: string }
+// speaker와 overlap은 화자 분리가 잰 값입니다. 읽기만 하고 저장 요청에는 보내지 않습니다.
+type Cue = { start: number; end: number; text: string; speaker?: string | null; overlap?: boolean | null }
+type Speakers = { version: number | null; unlabeled: number; speakers: {speaker: string; seconds: number; count: number}[];
+  overlap: { checked: boolean; count: number; seconds: number; cue_numbers: number[] } }
 type Suggestion = { start: number; end: number; title: string; reason: string }
 type Violation = { index: number; kind: string; detail: string }
 type Segment = { start: number; end: number; speed?: number }
@@ -14,7 +17,9 @@ type Task = { id: string; source_asset_id: string; clip_edit_id: string | null; 
     focus?: {focus_x: number; samples: number; found: number; reason: string};
     clips?: Suggestion[]; rejected?: {first: number; last: number; why: string}[];
     segments?: Segment[]; kept_seconds?: number; removed_seconds?: number; source_seconds?: number;
-    storage_key?: string; at?: number } }
+    storage_key?: string; at?: number;
+    speakers?: {speaker: string; seconds: number; count: number}[]; labeled?: number;
+    overlapped?: number; overlap_regions?: number; overlap_seconds?: number; transcript_version?: number } }
 
 export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWorkflow: (draft:WorkflowDraft)=>void }) {
   const [assetId, setAssetId] = useState('')
@@ -31,6 +36,7 @@ export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWo
   const [captionLanguage,setCaptionLanguage] = useState('ko')
   const [title, setTitle] = useState('')
   const [captions, setCaptions] = useState<Cue[]>([])
+  const [speakers, setSpeakers] = useState<Speakers | null>(null)
   const [suggestions, setSuggestions] = useState<Suggestion[]>([])
   const [violations, setViolations] = useState<Violation[]>([])
   const [plainScript, setPlainScript] = useState('')
@@ -75,17 +81,18 @@ export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWo
   async function loadSource(id: string) {
     selection.current = id
     setAssetId(id); setSourceUrl(''); setSuggestions([]); setCaptions([])
-    setSegments([]); setFrameUrl(''); setMosaicRegions([])
+    setSegments([]); setFrameUrl(''); setSpeakers(null); setMosaicRegions([])
     const asset = assets.find(a => a.id === id)
     setStart(0); setEnd(Math.min(30, Number(asset?.duration_seconds ?? 30)))
     if (!id) return
     await act(async () => {
-      const [preview, cues] = await Promise.all([
+      const [preview, cues, found] = await Promise.all([
         request<{url: string}>(`/source-assets/${id}/preview-url`),
         request<Cue[]>(`/source-assets/${id}/transcript`),
+        request<Speakers>(`/source-assets/${id}/speakers`),
       ])
       if (selection.current !== id) return
-      setSourceUrl(preview.url); setCaptions(cues)
+      setSourceUrl(preview.url); setCaptions(cues); setSpeakers(found)
     })
   }
   async function bring(file: File, encoding?: string) {
@@ -102,7 +109,8 @@ export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWo
         ? {file, used: imported.encoding,
            choices: (imported.choices ?? []).filter(c => c.encoding !== imported.encoding)}
         : null)
-      setCaptions(await request<Cue[]>(`/source-assets/${assetId}/transcript`))
+      // 새 버전은 아직 안 재 본 대본입니다. 겹침 요약도 같이 새로 읽어 옛 표시를 지웁니다.
+      await loadTranscript()
       setViolations(imported.violations)
       setMessage(`자막 ${imported.count}개를 대본 ${imported.version}번으로 들였습니다`
         + ` (${imported.encoding}${imported.encoding_detected ? ' 자동 판별' : ''}).`
@@ -112,6 +120,15 @@ export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWo
   function updateCue(index: number, patch: Partial<Cue>) {
     setCaptions(current => current.map((cue, i) => i === index ? {...cue, ...patch} : cue))
   }
+  // 저장·렌더 요청에는 시각과 글자만 보냅니다. 화자·겹침은 사람이 고치는 값이 아닙니다.
+  const plain = (rows: Cue[]) => rows.map(({start, end, text}) => ({start, end, text}))
+  const loadTranscript = async () => {
+    const [rows, found] = await Promise.all([
+      request<Cue[]>(`/source-assets/${assetId}/transcript`),
+      request<Speakers>(`/source-assets/${assetId}/speakers`),
+    ])
+    setCaptions(rows); setSpeakers(found)
+  }
   const outputSeconds = segments.length
     ? segments.reduce((total, seg) => total + (seg.end - seg.start) / (seg.speed || 1), 0)
     : Math.max(0, end - start)
@@ -119,7 +136,7 @@ export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWo
   // 렌더와 미리보기가 **같은 설정**을 씁니다. 갈라지면 미리본 것과 다른 결과가 나옵니다.
   const clipSpec = () => ({
     start, end, mode, focus_x: focus, title, burn_subtitles: burn, mosaic_faces: mosaicFaces, mosaic_size: mosaicSize, deface_sensitive: defaceSensitive, caption_language: captionLanguage,
-    cues: captions, segments, fade_in: fadeIn, fade_out: fadeOut, mosaic_regions: mosaicRegions,
+    cues: plain(captions), segments, fade_in: fadeIn, fade_out: fadeOut, mosaic_regions: mosaicRegions,
     music_asset_id: musicId || null, music_gain_db: musicGain, music_duck: musicDuck,
   })
   return <section className="clip-editor">
@@ -194,8 +211,10 @@ export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWo
           setMessage('얼굴 위치를 찾고 있습니다. 결과는 제안일 뿐이고 좌우 중심은 바뀌지 않습니다.'); await refresh()
         })}>좌우 중심 제안</button>
         <button disabled={busy} onClick={() => void act(async () => {
-          setCaptions(await request<Cue[]>(`/source-assets/${assetId}/transcript`))
-        })}>대본 다시 읽기</button>
+          await request(`/source-assets/${assetId}/diarize`, {method:'POST', body: JSON.stringify({})})
+          setMessage('화자 분리를 요청했습니다. 끝나면 대본 다시 읽기를 누르세요. 겹쳐 말한 자막에 표시가 붙습니다.'); await refresh()
+        })}>화자 분리·겹침 표시</button>
+        <button disabled={busy} onClick={() => void act(loadTranscript)}>대본 다시 읽기</button>
       </div>
       <details>
         <summary>자막 파일 가져오기 (SRT·VTT·ASS)</summary>
@@ -238,7 +257,14 @@ export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWo
       <p>시간은 원본 영상 기준입니다. 선택 구간 밖의 자막은 최종 영상에서 자동으로 제외됩니다.</p>
       <label>자막 표시<select value={burn?'burn':'track'} onChange={e=>setBurn(e.target.value==='burn')}><option value="burn">영상에 굽기 · 트랙 업로드 안 함</option><option value="track">YouTube 트랙만 · 영상에 굽지 않음</option></select></label>
       <label>자막 언어<input value={captionLanguage} onChange={e=>setCaptionLanguage(e.target.value)} pattern="[a-z]{2,3}" placeholder="ko, en, ja" /></label>
+      {speakers?.overlap.checked && <aside role="note" aria-label="겹쳐 말한 자막 안내">
+        <strong>겹쳐 말한 자막 {speakers.overlap.count}개 · {speakers.overlap.seconds}초</strong>
+        <p>두 사람이 동시에 말한 시간에 걸친 자막입니다. <strong>받아쓴 글자를 믿을 수 없습니다.</strong> 원본을 들어 보고 직접 고치세요. 자동으로 고치지 않습니다.</p>
+        {speakers.overlap.count > 0 && <p>자막 번호: {speakers.overlap.cue_numbers.join(', ')}</p>}
+        {speakers.speakers.length > 0 && <p>화자 {speakers.speakers.map(s => `${s.speaker} ${s.seconds.toFixed(1)}초`).join(' · ')}{speakers.unlabeled > 0 && ` · 화자 없음 ${speakers.unlabeled}개`}</p>}
+      </aside>}
       {captions.map((cue, index) => <div className="caption-row" key={index}>
+        {cue.overlap && <p role="note"><strong>겹쳐 말한 구간입니다. 글자를 믿을 수 없습니다.</strong>{cue.speaker && ` (${cue.speaker})`}</p>}
         <label>시작(초)<input type="number" min="0" step="0.01" value={cue.start} onChange={e => updateCue(index,{start:Number(e.target.value)})} /></label>
         <label>종료(초)<input type="number" min="0" step="0.01" value={cue.end} onChange={e => updateCue(index,{end:Number(e.target.value)})} /></label>
         <label>자막 내용<textarea rows={2} maxLength={2000} value={cue.text} onChange={e => updateCue(index,{text:e.target.value})} /></label>
@@ -247,7 +273,7 @@ export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWo
       <button onClick={() => setCaptions(current => [...current,{start,end,text:''}])}>자막 추가</button>
       <div className="editor-actions">
         <button disabled={busy} onClick={() => void act(async () => {
-          const saved = await request<{violations: Violation[]}>(`/source-assets/${assetId}/transcript`, {method:'PUT', body: JSON.stringify({cues:captions})})
+          const saved = await request<{violations: Violation[]}>(`/source-assets/${assetId}/transcript`, {method:'PUT', body: JSON.stringify({cues:plain(captions)})})
           setViolations(saved.violations)
           setMessage(saved.violations.length ? '저장했습니다. 아래 가독성 문제를 확인하세요.' : '대본을 새 버전으로 저장했습니다.')
         })}>대본 저장</button>
@@ -277,7 +303,7 @@ export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWo
           setMessage('새 편집본의 렌더를 요청했습니다.'); await refresh()
         })}>숏폼 렌더</button>
       </div>
-      <button disabled={busy||end<=start||end-start>180||!!invalidMosaic||segments.length>0} onClick={()=>{onWorkflow({source_asset_id:assetId,start,end,mode,focus_x:focus,title,burn_subtitles:burn,mosaic_faces:mosaicFaces,mosaic_size:mosaicSize,deface_sensitive:defaceSensitive,mosaic_regions:mosaicRegions,caption_language:captionLanguage,cues:captions});setMessage('아래 단계별 제작 화면에 선택 구간을 전달했습니다.')}}>선택 구간을 번역·더빙 단계로 보내기</button>
+      <button disabled={busy||end<=start||end-start>180||!!invalidMosaic||segments.length>0} onClick={()=>{onWorkflow({source_asset_id:assetId,start,end,mode,focus_x:focus,title,burn_subtitles:burn,mosaic_faces:mosaicFaces,mosaic_size:mosaicSize,deface_sensitive:defaceSensitive,mosaic_regions:mosaicRegions,caption_language:captionLanguage,cues:plain(captions)});setMessage('아래 단계별 제작 화면에 선택 구간을 전달했습니다.')}}>선택 구간을 번역·더빙 단계로 보내기</button>
       {segments.length>0 && <p>여러 구간·배속은 숏폼 렌더에서 적용됩니다. 번역·더빙으로 보내려면 단일 구간을 사용하세요.</p>}
       {suggestions.map((s,i) => <button key={i} onClick={() => {setStart(s.start);setEnd(s.end);setTitle(s.title)}}>{s.start.toFixed(1)}–{s.end.toFixed(1)}초 · {s.title}</button>)}
     </>}
