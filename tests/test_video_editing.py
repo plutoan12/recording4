@@ -152,7 +152,7 @@ def test_the_old_single_cut_path_is_kept_for_plain_edits():
 
 def test_each_segment_is_trimmed_then_joined_and_inputs_are_split_first():
     spec = EditSpec(start=0, end=100, segments=[{"start": 0, "end": 5}, {"start": 50, "end": 60}])
-    graph, audio = complex_filter(spec, audio="[0:a]", music=None)
+    graph, audio = complex_filter(spec, audio="[0:a]", music=None, frame_rate="30/1")
     # 같은 입력을 두 번 쓰려면 먼저 나눠야 합니다.
     assert "[0:v]split=2[vin0][vin1]" in graph and "[0:a]asplit=2[ain0][ain1]" in graph
     assert "[vin1]trim=start=50.0:end=60.0" in graph
@@ -161,13 +161,15 @@ def test_each_segment_is_trimmed_then_joined_and_inputs_are_split_first():
 
 
 def test_a_single_segment_does_not_split():
-    graph, _ = complex_filter(EditSpec(start=0, end=10, fade_in=1), audio="[0:a]", music=None)
+    graph, _ = complex_filter(
+        EditSpec(start=0, end=10, fade_in=1), audio="[0:a]", music=None, frame_rate="30/1"
+    )
     assert "split" not in graph
 
 
 def test_music_is_ducked_under_speech_and_mixed_without_halving_it():
     spec = EditSpec(start=0, end=10, music_asset_id=uuid.uuid4(), music_gain_db=-12)
-    graph, audio = complex_filter(spec, audio="[0:a]", music="[1:a]")
+    graph, audio = complex_filter(spec, audio="[0:a]", music="[1:a]", frame_rate="30/1")
     assert "volume=-12.0dB" in graph
     assert "sidechaincompress" in graph
     # normalize=0이 아니면 입력 수만큼 나눠 말소리가 절반이 됩니다.
@@ -176,13 +178,13 @@ def test_music_is_ducked_under_speech_and_mixed_without_halving_it():
 
 def test_music_without_ducking_just_mixes():
     spec = EditSpec(start=0, end=10, music_asset_id=uuid.uuid4(), music_duck=False)
-    graph, _ = complex_filter(spec, audio="[0:a]", music="[1:a]")
+    graph, _ = complex_filter(spec, audio="[0:a]", music="[1:a]", frame_rate="30/1")
     assert "sidechaincompress" not in graph and "amix=inputs=2" in graph
 
 
 def test_fades_are_placed_at_the_end_of_the_joined_result():
     spec = EditSpec(start=0, end=10, fade_in=0.5, fade_out=1.0)
-    graph, _ = complex_filter(spec, audio="[0:a]", music=None)
+    graph, _ = complex_filter(spec, audio="[0:a]", music=None, frame_rate="30/1")
     assert "fade=t=in:st=0:d=0.5" in graph and "fade=t=out:st=9.0:d=1.0" in graph
     assert "afade=t=out:st=9.0:d=1.0" in graph
 

@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import json
+import math
 import os
 import shutil
 import subprocess
 import tempfile
+from fractions import Fraction
 from pathlib import Path
 
 import pysubs2
@@ -13,6 +16,7 @@ import pysubs2
 from pipeline.editing import Cue, EditSpec, clip_cues, concat_cues
 from pipeline.subtitle_files import plain_ass
 from pipeline.subtitles import DEFAULT_RULES, SubtitleRules, apply_rules
+from worker.privacy import PrivacyBackend, PrivacyError, redact_faces
 
 __all__ = [
     "RenderError",
@@ -25,10 +29,25 @@ __all__ = [
 
 # 배경음악을 깔 때 말소리 기준으로 음량을 낮추는 값. 잰 값이 아니라 정한 값입니다.
 DUCK = "sidechaincompress=threshold=0.03:ratio=8:attack=20:release=400"
+# Resampling must not expand malformed rate metadata into millions of frames.
+MAX_RENDER_FPS = 240
 
 
 class RenderError(RuntimeError):
     pass
+
+
+def _mosaic_faces(
+    source: Path,
+    output: Path,
+    mosaic_size: int,
+    backend: PrivacyBackend = "deface",
+    deface_sensitive: bool = False,
+) -> None:
+    try:
+        redact_faces(source, output, mosaic_size, backend, deface_sensitive)
+    except PrivacyError as exc:
+        raise RenderError(str(exc)) from exc
 
 
 def ffmpeg_binary() -> str:
@@ -38,7 +57,10 @@ def ffmpeg_binary() -> str:
     return binary
 
 
-def write_subtitles(path: Path, spec: EditSpec, rules: SubtitleRules = DEFAULT_RULES) -> None:
+def write_subtitles(
+    path: Path, spec: EditSpec, rules: SubtitleRules = DEFAULT_RULES
+) -> dict[str, str]:
+    """Write ASS once and freeze downloadable captions from the same decisions."""
     subs = pysubs2.SSAFile()
     subs.info.update(PlayResX=str(spec.width), PlayResY=str(spec.height), WrapStyle="0")
     style = pysubs2.SSAStyle(
@@ -53,19 +75,21 @@ def write_subtitles(path: Path, spec: EditSpec, rules: SubtitleRules = DEFAULT_R
     subs.styles["Default"] = style
     # 줄바꿈과 분할을 여기서 확정합니다. libass 자동 줄바꿈에 맡기지 않습니다.
     segments = getattr(spec, "segments", None)
-    if not getattr(spec, "burn_subtitles", True):
-        shown = []
-    elif segments:
+    if segments:
         # 이어 붙인 시간축으로 옮깁니다. 빠진 구간의 자막은 함께 빠집니다.
         shown = concat_cues(spec.cues, segments)
     else:
         shown = clip_cues(spec.cues, spec.start, spec.end)
+    captions = pysubs2.SSAFile()
     for cue in apply_rules(shown, rules):
-        subs.append(
+        captions.append(
             pysubs2.SSAEvent(
                 start=round(cue.start * 1000), end=round(cue.end * 1000), text=plain_ass(cue.text)
             )
         )
+    burn = getattr(spec, "burn_subtitles", True)
+    if burn:
+        subs.events.extend(captions.events)
     if spec.title:
         title_style = style.copy()
         title_style.alignment = pysubs2.Alignment.TOP_CENTER
@@ -80,6 +104,12 @@ def write_subtitles(path: Path, spec: EditSpec, rules: SubtitleRules = DEFAULT_R
             )
         )
     subs.save(str(path), encoding="utf-8")
+    if burn:
+        # ASS stores centiseconds. Export the serialized times FFmpeg actually
+        # reads, not the earlier millisecond values or a second KSS calculation.
+        captions = pysubs2.load(str(path), encoding="utf-8")
+        captions.events = [event for event in captions if event.style != "Title"]
+    return {format_name: captions.to_string(format_name) for format_name in ("srt", "vtt")}
 
 
 def video_filter(spec: EditSpec) -> str:
@@ -165,7 +195,10 @@ def render_preview(
             "1",
             str(temp / "result.png"),
         ]
-        run_ffmpeg(command, temp, output, produced="result.png")
+        rendered = temp / "unmasked.png" if spec.mosaic_regions else output
+        run_ffmpeg(command, temp, rendered, produced="result.png")
+        if spec.mosaic_regions:
+            apply_mosaic_regions(rendered, output, spec, at=at)
 
 
 def tempo_chain(speed: float) -> str:
@@ -188,7 +221,9 @@ def simple(spec: EditSpec) -> bool:
     return not spec.segments and not spec.fade_in and not spec.fade_out
 
 
-def complex_filter(spec: EditSpec, *, audio: str, music: str | None) -> tuple[str, str]:
+def complex_filter(
+    spec: EditSpec, *, audio: str, music: str | None, frame_rate: str
+) -> tuple[str, str]:
     """(filter_complex, 소리 출력 이름). 영상 출력은 늘 [vout]입니다.
 
     구간마다 잘라 배속을 걸고 이어 붙인 뒤(concat), 화면을 맞추고 자막을 굽습니다.
@@ -225,7 +260,14 @@ def complex_filter(spec: EditSpec, *, audio: str, music: str | None) -> tuple[st
         fades.append(f"fade=t=in:st=0:d={spec.fade_in}")
     if spec.fade_out:
         fades.append(f"fade=t=out:st={round(total - spec.fade_out, 3)}:d={spec.fade_out}")
-    parts.append(video_label + ",".join([video_filter(spec), *fades]) + "[vout]")
+    # setpts clears duration/FPS, and mixed-speed concat produces a variable
+    # cadence. Resample before captions/fades so the encoder receives a complete
+    # constant timeline, including a defined duration for the final frame.
+    parts.append(
+        video_label
+        + ",".join([f"fps=fps={frame_rate}:start_time=0", video_filter(spec), *fades])
+        + "[vout]"
+    )
 
     sound = [f.replace("fade=", "afade=") for f in fades]
     if sound:
@@ -255,7 +297,7 @@ def render_clip(
     rules: SubtitleRules = DEFAULT_RULES,
     music: Path | None = None,
     has_audio: bool | None = None,
-) -> None:
+) -> dict[str, str]:
     source, output = source.resolve(), output.resolve()
     if not source.is_file() or source == output:
         raise RenderError("유효한 원본과 별도 출력 경로가 필요합니다.")
@@ -264,13 +306,107 @@ def render_clip(
     output.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="r4-render-") as directory:
         temp = Path(directory)
-        write_subtitles(temp / "captions.ass", spec, rules)
+        subtitle_files = write_subtitles(temp / "captions.ass", spec, rules)
         command = (
             simple_command(source, temp, spec)
             if simple(spec) and music is None
             else graph_command(source, temp, spec, music, has_audio)
         )
-        run_ffmpeg(command, temp, output)
+        needs_redaction = spec.mosaic_faces or bool(spec.mosaic_regions)
+        rendered = temp / "unredacted.mp4" if needs_redaction else output
+        run_ffmpeg(command, temp, rendered)
+        if spec.mosaic_faces:
+            redacted = temp / "redacted.mp4"
+            _mosaic_faces(
+                rendered, redacted, spec.mosaic_size, spec.privacy_backend, spec.deface_sensitive
+            )
+            rendered = redacted
+        if spec.mosaic_regions:
+            masked = temp / "masked.mp4"
+            apply_mosaic_regions(rendered, masked, spec)
+            rendered = masked
+        if needs_redaction:
+            shutil.copyfile(rendered, output)
+        return subtitle_files
+
+
+def apply_mosaic_regions(
+    source: Path, output: Path, spec: EditSpec, *, at: float | None = None
+) -> None:
+    """Mask the already edited video, keeping encoded audio and staging failures privately.
+
+    Coordinates round outwards to even pixels so yuv420p never leaves a requested
+    edge exposed. Preview images use the same regions selected at output time `at`.
+    """
+    regions = [r for r in spec.mosaic_regions if at is None or r.start <= at < r.end]
+    if not regions:
+        shutil.copyfile(source, output)
+        return
+    # Editing/composition already starts the video at zero. Applying setpts here
+    # clears the frame-rate metadata and can give the final MP4 frame zero duration.
+    graph = ["[0:v:0]null[mask0]"]
+    for i, region in enumerate(regions):
+        x = 2 * math.floor(region.x * spec.width / 2)
+        y = 2 * math.floor(region.y * spec.height / 2)
+        right = min(spec.width, 2 * math.ceil((region.x + region.width) * spec.width / 2))
+        bottom = min(spec.height, 2 * math.ceil((region.y + region.height) * spec.height / 2))
+        w, h = right - x, bottom - y
+        cols, rows = math.ceil(w / region.block_size), math.ceil(h / region.block_size)
+        graph.extend(
+            [
+                f"[mask{i}]split[base{i}][area{i}]",
+                f"[area{i}]crop={w}:{h}:{x}:{y},scale={cols}:{rows}:flags=area,"
+                f"scale={w}:{h}:flags=neighbor[pixels{i}]",
+                f"[base{i}][pixels{i}]overlay={x}:{y}:"
+                + (f"enable='gte(t,{region.start})*lt(t,{region.end})':" if at is None else "")
+                + f"eof_action=pass[mask{i + 1}]",
+            ]
+        )
+    with tempfile.TemporaryDirectory(prefix="r4-mosaic-regions-") as directory:
+        rendered = Path(directory) / ("result.mp4" if at is None else "result.png")
+        command = [
+            ffmpeg_binary(),
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-nostdin",
+            "-y",
+            "-i",
+            str(source),
+            "-filter_complex",
+            ";".join(graph),
+            "-map",
+            f"[mask{len(regions)}]",
+        ]
+        if at is None:
+            command += [
+                "-map",
+                "0:a:0?",
+                "-c:v",
+                "libx264",
+                "-preset",
+                "fast",
+                "-crf",
+                "22",
+                "-pix_fmt",
+                "yuv420p",
+                "-vsync",
+                "0",
+                "-c:a",
+                "copy",
+                "-movflags",
+                "+faststart",
+            ]
+        else:
+            command += ["-frames:v", "1", "-update", "1"]
+        command.append(str(rendered))
+        try:
+            completed = subprocess.run(command, capture_output=True, timeout=3600)
+        except (subprocess.TimeoutExpired, OSError) as exc:
+            raise RenderError("구간 모자이크 실행에 실패했습니다.") from exc
+        if completed.returncode or not rendered.is_file() or rendered.stat().st_size == 0:
+            raise RenderError("구간 모자이크 합성에 실패했습니다.")
+        shutil.copyfile(rendered, output)
 
 
 ENCODE = [
@@ -315,6 +451,42 @@ def simple_command(source: Path, temp: Path, spec: EditSpec) -> list[str]:
     ]
 
 
+def source_frame_rate(source: Path) -> str:
+    """Keep rational source cadence; use the measured average for VFR inputs."""
+    message = "원본 프레임률을 확인할 수 없습니다. FFprobe와 영상 파일을 확인하세요."
+    binary = os.environ.get("R4_FFPROBE_BINARY") or shutil.which("ffprobe")
+    if not binary:
+        raise RenderError(message)
+    try:
+        result = subprocess.run(
+            [
+                binary,
+                "-v", "error", "-select_streams", "v:0",
+                "-show_entries", "stream=avg_frame_rate,r_frame_rate", "-of", "json",
+                str(source),
+            ],
+            capture_output=True, text=True, timeout=30,
+        )  # fmt: skip
+        if result.returncode:
+            raise RenderError(message)
+        stream = json.loads(result.stdout)["streams"][0]
+        for key in ("avg_frame_rate", "r_frame_rate"):
+            try:
+                raw = stream[key]
+                if not isinstance(raw, str):
+                    continue
+                rate = Fraction(raw)
+            except (KeyError, TypeError, ValueError, ZeroDivisionError):
+                continue
+            if rate > MAX_RENDER_FPS:
+                raise RenderError("합성 프레임률은 최대240fps까지 지원합니다.")
+            if rate > 0 and max(rate.numerator, rate.denominator) <= 2**31 - 1:
+                return f"{rate.numerator}/{rate.denominator}"
+    except (OSError, subprocess.TimeoutExpired, ValueError, KeyError, IndexError, TypeError):
+        raise RenderError(message) from None
+    raise RenderError(message)
+
+
 def graph_command(
     source: Path, temp: Path, spec: EditSpec, music: Path | None, has_audio: bool | None
 ) -> list[str]:
@@ -334,7 +506,9 @@ def graph_command(
         # 음악이 짧으면 되풀이합니다. 길면 아래 -t가 잘라 냅니다.
         command += ["-stream_loop", "-1", "-i", str(music)]
         music_label = f"[{len(command_inputs(command)) - 1}:a]"
-    graph, audio_out = complex_filter(spec, audio=audio, music=music_label)
+    graph, audio_out = complex_filter(
+        spec, audio=audio, music=music_label, frame_rate=source_frame_rate(source)
+    )
     command += ["-filter_complex", graph, "-map", "[vout]", "-map", audio_out]
     command += [
         *ENCODE,

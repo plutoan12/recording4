@@ -29,7 +29,7 @@ COPY packages ./packages
 # 끝나면 같은 층에서 지워 최종 이미지에 남기지 않습니다.
 RUN apt-get update \
     && apt-get install --no-install-recommends -y build-essential \
-    && pip install --no-cache-dir ".[analysis,providers,imports,subtitles]" \
+    && pip install --no-cache-dir ".[analysis,privacy,providers,imports,subtitles]" \
     && apt-get purge -y --auto-remove build-essential \
     && rm -rf /var/lib/apt/lists/*
 

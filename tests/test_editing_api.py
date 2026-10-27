@@ -30,6 +30,35 @@ def test_auth_required(client):
     assert client.post("/clips", json={}).status_code == 401
 
 
+def test_manual_masks_are_saved_per_clip_and_use_output_bounds(
+    client, auth_headers, asset, session
+):
+    from adminapi.models import MediaTask
+
+    region = {
+        "start": 1,
+        "end": 2,
+        "x": 0.25,
+        "y": 0.25,
+        "width": 0.5,
+        "height": 0.5,
+        "block_size": 30,
+    }
+    payload = {"source_asset_id": str(asset.id), "start": 10, "end": 20, "mosaic_regions": [region]}
+    first = client.post("/clips", headers=auth_headers, json=payload)
+    assert first.status_code == 202
+    task = session.get(MediaTask, uuid.UUID(first.json()["id"]))
+    assert task.settings["mosaic_regions"] == [region]
+    second = client.post("/clips", headers=auth_headers, json={**payload, "mosaic_regions": []})
+    assert second.status_code == 202
+    assert second.json()["clip_edit_id"] != first.json()["clip_edit_id"]
+    assert task.settings["mosaic_regions"] == [region]
+    rejected = client.post(
+        "/clips", headers=auth_headers, json={**payload, "mosaic_regions": [{**region, "end": 11}]}
+    )
+    assert rejected.status_code == 422
+
+
 def test_range_validation_and_independent_clips(client, auth_headers, asset):
     data = {"source_asset_id": str(asset.id), "start": 100, "end": 130}
     assert client.post("/clips", headers=auth_headers, json=data).status_code == 422
@@ -75,6 +104,7 @@ def test_render_worker_and_version_approval(
 ):
     import worker.media_tasks as module
     from adminapi.db import get_session_factory
+    from worker.rendering import write_subtitles
 
     class Storage:
         def download_file(self, key, path):
@@ -84,9 +114,12 @@ def test_render_worker_and_version_approval(
             assert path.read_bytes() == b"rendered"
 
     monkeypatch.setattr(module, "get_storage", lambda: Storage())
-    monkeypatch.setattr(
-        module, "render_clip", lambda source, output, spec, **_: output.write_bytes(b"rendered")
-    )
+
+    def fake_render(source, output, spec, **kwargs):
+        output.write_bytes(b"rendered")
+        return write_subtitles(output.with_suffix(".ass"), spec, kwargs["rules"])
+
+    monkeypatch.setattr(module, "render_clip", fake_render)
     data = {"source_asset_id": str(asset.id), "start": 0, "end": 10}
     created = client.post("/clips", headers=auth_headers, json=data).json()
     result = module.run_media.run(created["id"])
@@ -185,6 +218,7 @@ def test_subtitle_export_uses_the_rules_the_render_used(client, auth_headers, as
     import worker.media_tasks as worker_module
     from adminapi.routers import editing
     from pipeline.subtitles import SubtitleRules
+    from worker.rendering import write_subtitles
 
     used: dict = {}
 
@@ -198,6 +232,7 @@ def test_subtitle_export_uses_the_rules_the_render_used(client, auth_headers, as
     def fake_render(source, output, spec, **kwargs):
         used["rules"] = kwargs["rules"]
         output.write_bytes(b"rendered")
+        return write_subtitles(output.with_suffix(".ass"), spec, kwargs["rules"])
 
     monkeypatch.setattr(worker_module, "get_storage", lambda: Storage())
     monkeypatch.setattr(worker_module, "render_clip", fake_render)
@@ -231,6 +266,117 @@ def test_subtitle_export_says_when_the_rendered_rules_are_unknown(client, auth_h
     srt = client.get(f"/clips/{created['clip_edit_id']}/subtitles", headers=auth_headers)
     assert srt.status_code == 200
     assert srt.headers["x-subtitle-rules"] == "settings"
+
+
+@pytest.mark.parametrize("burn_subtitles", [True, False])
+def test_caption_download_keeps_renderer_segmentation(
+    client, auth_headers, asset, storage, monkeypatch, burn_subtitles
+):
+    """API에 KSS가 없어도 렌더 때 나눈 문장·시각·줄바꿈을 그대로 받습니다."""
+    import pysubs2
+
+    import pipeline.subtitles as shaping
+    import worker.media_tasks as tasks
+    import worker.rendering as rendering
+
+    words = "가나다라마바 사아자차카타 파하가나다라 마바사아자차 카타파하가나 다라마바사아"
+
+    class SentenceEngine:
+        @staticmethod
+        def split_sentences(text):
+            tokens = text.split()
+            return [" ".join(tokens[:2]), " ".join(tokens[2:])]
+
+    burned = []
+
+    def encode(command, directory, output):
+        burned.extend(pysubs2.load(str(directory / "captions.ass")))
+        output.write_bytes(b"rendered")
+
+    monkeypatch.setattr(shaping, "_kss", lambda: SentenceEngine())
+    monkeypatch.setattr(tasks, "get_storage", lambda: storage)
+    monkeypatch.setattr(tasks, "source_audio", lambda _: True)
+    monkeypatch.setattr(rendering, "ffmpeg_binary", lambda: "ffmpeg")
+    monkeypatch.setattr(rendering, "run_ffmpeg", encode)
+    created = client.post(
+        "/clips",
+        headers=auth_headers,
+        json={
+            "source_asset_id": str(asset.id),
+            "start": 10,
+            "end": 20,
+            "title": "화면 제목",
+            "burn_subtitles": burn_subtitles,
+            "cues": [{"start": 10, "end": 18, "text": words}],
+        },
+    ).json()
+    assert tasks.run_media.run(created["id"])["status"] == "succeeded"
+    # 렌더 이후 API에서는 선택 의존성이 없어진 조건입니다.
+    monkeypatch.setattr(shaping, "_kss", lambda: None)
+    for format_name in ("srt", "vtt"):
+        response = client.get(
+            f"/clips/{created['clip_edit_id']}/subtitles?format={format_name}",
+            headers=auth_headers,
+        )
+        assert response.status_code == 200
+        exported = pysubs2.SSAFile.from_string(response.text)
+        assert len(exported) == 2
+        assert exported[0].plaintext.replace("\n", " ") == "가나다라마바 사아자차카타"
+        assert exported[0].start == 0
+        assert exported[0].end == (2630 if burn_subtitles else 2632)
+        assert exported[1].end == 8000
+        assert "화면 제목" not in response.text
+        if burn_subtitles:
+            displayed = [event for event in burned if event.style != "Title"]
+            assert [(e.start, e.end, e.text) for e in exported] == [
+                (e.start, e.end, e.text) for e in displayed
+            ]
+        else:
+            assert all(event.style == "Title" for event in burned)
+
+
+@pytest.mark.parametrize(
+    "saved",
+    [
+        None,
+        {},
+        {"srt": 123, "vtt": "text"},
+        {"srt": "broken captions", "vtt": "WEBVTT\n\n"},
+        {"srt": "1\n00:00:00,000 --> 00:00:01,000\ncaption\n", "vtt": " \n"},
+        {"srt": "1\n00:00:02,000 --> 00:00:01,000\ncaption\n", "vtt": "WEBVTT\n\n"},
+        {
+            "srt": "1\n00:00:00,000 --> 00:00:01,000\ncaption\n",
+            "vtt": "WEBVTT\n\n00:00:02.000 --> 00:00:01.000\ncaption\n",
+        },
+        {
+            "srt": "1\n00:00:00,000 --> 00:00:01,000\n \n",
+            "vtt": "WEBVTT\n\n00:00:00.000 --> 00:00:01.000\ncaption\n",
+        },
+    ],
+)
+def test_corrupt_rendered_caption_snapshot_does_not_silently_recompute(
+    client, auth_headers, asset, session, saved
+):
+    from adminapi.models import MediaTask
+
+    created = client.post(
+        "/clips",
+        headers=auth_headers,
+        json={
+            "source_asset_id": str(asset.id),
+            "start": 0,
+            "end": 8,
+            "cues": [{"start": 0, "end": 8, "text": "다시 계산하면 달라질 수 있는 자막"}],
+        },
+    ).json()
+    task = session.get(MediaTask, uuid.UUID(created["id"]))
+    task.result = {"subtitle_files": saved}
+    session.commit()
+    for format_name in ("srt", "vtt"):
+        response = client.get(
+            f"/clips/{created['clip_edit_id']}/subtitles?format={format_name}", headers=auth_headers
+        )
+        assert response.status_code == 409
 
 
 def test_broken_rules_record_falls_back_instead_of_failing() -> None:

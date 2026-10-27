@@ -2,6 +2,18 @@
 
 이 저장소에 옮겨 온 코드와 원 저작권·라이선스입니다. 구조만 참고한 것도 함께 적습니다.
 
+## minio/minio (AGPL-3.0-or-later) — 별도 저장소 서버 이미지
+
+`infra/Dockerfile.minio`는 기존 운영 릴리스 `RELEASE.2024-11-07T00-52-20Z`의
+[공식 소스](https://github.com/minio/minio/tree/cefc43e4daa4cbb490ef6726ea374e26a93eb85e)를
+수정 없이 빌드합니다. 사전 빌드 이미지 다운로드가 거부되어 같은 소스·Go 버전으로
+대체한 것이며 MinIO 릴리스 업그레이드는 아닙니다. 저작권자는 MinIO, Inc.입니다.
+
+이미지의 `/usr/share/minio/LICENSE`에 원문 라이선스,
+`/usr/share/minio/source.tar.gz`에 해당 소스 전체를 포함합니다. 빌드 방법과 소스
+SHA-256은 Dockerfile에 고정되어 있습니다. 이 별도 서버는 앱의 MIT/BSD 의존성과
+다른 라이선스이며 배포 이미지에도 해당 파일을 유지합니다.
+
 ## machinewrapped/llm-subtrans (MIT)
 
 `packages/pipeline/pipeline/batching.py`는 `PySubtrans/SubtitleBatcher.py`를 옮긴 것입니다.
@@ -66,4 +78,3 @@ style guide(honorifics keep, names keep_original) 구조를 따로 구현한 것
 **넣지 않았습니다.** 이 저장소는 실제 녹음에서 그 방식이 발화를 못 찾는 것을 이미
 쟀습니다(`worker.analysis.vad_spans` 주석). 발화 구간은 VAD가 찾고, auto-editor에서
 가져온 다듬기만 그 위에 겁니다.
-

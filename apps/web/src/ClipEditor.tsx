@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { downloadFile, importSubtitles, request, type EncodingChoice, type ImportResult, type SourceAsset } from './api'
 import { PublicationForm } from './PublicationForm'
+import { MosaicRegionEditor, mosaicRegionIssue, type MosaicRegion } from './MosaicRegionEditor'
 import type { WorkflowDraft } from './WorkflowPanel'
 
 // speaker와 overlap은 화자 분리가 잰 값입니다. 읽기만 하고 저장 요청에는 보내지 않습니다.
@@ -28,6 +29,10 @@ export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWo
   const [mode, setMode] = useState('pad')
   const [focus, setFocus] = useState(0.5)
   const [burn,setBurn] = useState(true)
+  const [mosaicFaces,setMosaicFaces] = useState(false)
+  const [mosaicSize,setMosaicSize] = useState(20)
+  const [defaceSensitive,setDefaceSensitive] = useState(false)
+  const [mosaicRegions,setMosaicRegions] = useState<MosaicRegion[]>([])
   const [captionLanguage,setCaptionLanguage] = useState('ko')
   const [title, setTitle] = useState('')
   const [captions, setCaptions] = useState<Cue[]>([])
@@ -76,7 +81,7 @@ export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWo
   async function loadSource(id: string) {
     selection.current = id
     setAssetId(id); setSourceUrl(''); setSuggestions([]); setCaptions([])
-    setSegments([]); setFrameUrl(''); setSpeakers(null)
+    setSegments([]); setFrameUrl(''); setSpeakers(null); setMosaicRegions([])
     const asset = assets.find(a => a.id === id)
     setStart(0); setEnd(Math.min(30, Number(asset?.duration_seconds ?? 30)))
     if (!id) return
@@ -127,10 +132,11 @@ export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWo
   const outputSeconds = segments.length
     ? segments.reduce((total, seg) => total + (seg.end - seg.start) / (seg.speed || 1), 0)
     : Math.max(0, end - start)
+  const invalidMosaic = mosaicRegionIssue(mosaicRegions, outputSeconds)
   // 렌더와 미리보기가 **같은 설정**을 씁니다. 갈라지면 미리본 것과 다른 결과가 나옵니다.
   const clipSpec = () => ({
-    start, end, mode, focus_x: focus, title, burn_subtitles: burn, caption_language: captionLanguage,
-    cues: plain(captions), segments, fade_in: fadeIn, fade_out: fadeOut,
+    start, end, mode, focus_x: focus, title, burn_subtitles: burn, mosaic_faces: mosaicFaces, mosaic_size: mosaicSize, deface_sensitive: defaceSensitive, caption_language: captionLanguage,
+    cues: plain(captions), segments, fade_in: fadeIn, fade_out: fadeOut, mosaic_regions: mosaicRegions,
     music_asset_id: musicId || null, music_gain_db: musicGain, music_duck: musicDuck,
   })
   return <section className="clip-editor">
@@ -151,9 +157,12 @@ export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWo
           <option value="pad">전체 화면 유지 + 여백</option><option value="crop">화면을 채우도록 자르기</option>
         </select></label>
         {mode === 'crop' && <label>좌우 중심<input type="range" min="0" max="1" step="0.01" value={focus} onChange={e => setFocus(Number(e.target.value))} /></label>}
+        <label><input type="checkbox" checked={mosaicFaces} onChange={e => setMosaicFaces(e.target.checked)} /> 얼굴 자동 모자이크</label>
+        {mosaicFaces && <><label>모자이크 크기<input type="number" min="4" max="100" value={mosaicSize} onChange={e => setMosaicSize(Number(e.target.value))} /></label><label><input type="checkbox" checked={defaceSensitive} onChange={e => setDefaceSensitive(e.target.checked)} /> 가장자리·작은 얼굴을 더 민감하게 감지</label><p>민감하게 감지하면 얼굴이 아닌 영역도 가릴 수 있습니다. 모자이크는 완성 영상에 적용되며 모든 얼굴이 가려졌는지 확인해야 합니다.</p></>}
         <label>화면 제목<input maxLength={120} value={title} onChange={e => setTitle(e.target.value)} /></label>
       </div>
       <p>선택 길이: {(end-start).toFixed(2)}초 · 결과 길이: {outputSeconds.toFixed(2)}초 · 출력: 1080 × 1920</p>
+      <MosaicRegionEditor regions={mosaicRegions} seconds={outputSeconds} busy={busy} onChange={setMosaicRegions} />
       <details><summary>여러 구간 이어 붙이기 · 무음 빼기 · 페이드 · 배경음악</summary>
         <p>구간을 고르지 않으면 시작~종료를 통째로 씁니다. 고르면 그것들만 순서대로 이어 붙이고, 자막 시각도 이어 붙인 시간축으로 옮깁니다.</p>
         <div className="editor-actions">
@@ -183,7 +192,7 @@ export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWo
           </>}
           <label>미리볼 시각(결과 기준, 초)<input type="number" min="0" step="0.1" value={previewAt} onChange={e => setPreviewAt(Number(e.target.value))} /></label>
         </div>
-        <button disabled={busy||previewAt>=outputSeconds} onClick={() => void act(async () => {
+        <button disabled={busy||previewAt>=outputSeconds||!!invalidMosaic} onClick={() => void act(async () => {
           await request(`/source-assets/${assetId}/preview-frame`, {method:'POST', body: JSON.stringify({at: previewAt, spec: clipSpec()})})
           setMessage('미리보기 한 장을 만들고 있습니다. 아래 작업 목록에서 열 수 있습니다.'); await refresh()
         })}>이 설정으로 한 장 미리보기</button>
@@ -289,12 +298,13 @@ export function ClipEditor({ assets, onWorkflow }: { assets: SourceAsset[]; onWo
           const dropped = latest.result.rejected?.length ?? 0
           setMessage(`AI 추천 ${latest.result.clips.length}건입니다. 버린 후보 ${dropped}건(대본에 없는 번호·겹침·길이). 자를지는 직접 정하세요.`)
         })}>AI 추천 결과 불러오기</button>
-        <button disabled={busy || end <= start || end-start > 180} onClick={() => void act(async () => {
+        <button disabled={busy || end <= start || outputSeconds > 180 || !!invalidMosaic} onClick={() => void act(async () => {
           await request('/clips', {method:'POST', body: JSON.stringify({source_asset_id:assetId, ...clipSpec()})})
           setMessage('새 편집본의 렌더를 요청했습니다.'); await refresh()
         })}>숏폼 렌더</button>
       </div>
-      <button disabled={busy||end<=start||end-start>180} onClick={()=>{onWorkflow({source_asset_id:assetId,start,end,mode,focus_x:focus,title,burn_subtitles:burn,caption_language:captionLanguage,cues:plain(captions)});setMessage('아래 단계별 제작 화면에 선택 구간을 전달했습니다.')}}>선택 구간을 번역·더빙 단계로 보내기</button>
+      <button disabled={busy||end<=start||end-start>180||!!invalidMosaic||segments.length>0} onClick={()=>{onWorkflow({source_asset_id:assetId,start,end,mode,focus_x:focus,title,burn_subtitles:burn,mosaic_faces:mosaicFaces,mosaic_size:mosaicSize,deface_sensitive:defaceSensitive,mosaic_regions:mosaicRegions,caption_language:captionLanguage,cues:plain(captions)});setMessage('아래 단계별 제작 화면에 선택 구간을 전달했습니다.')}}>선택 구간을 번역·더빙 단계로 보내기</button>
+      {segments.length>0 && <p>여러 구간·배속은 숏폼 렌더에서 적용됩니다. 번역·더빙으로 보내려면 단일 구간을 사용하세요.</p>}
       {suggestions.map((s,i) => <button key={i} onClick={() => {setStart(s.start);setEnd(s.end);setTitle(s.title)}}>{s.start.toFixed(1)}–{s.end.toFixed(1)}초 · {s.title}</button>)}
     </>}
     {message && <p role="status">{message}</p>}

@@ -31,7 +31,7 @@ services:
       timeout: 3s
       retries: 20
   minio:
-    image: quay.io/minio/minio:RELEASE.2024-11-07T00-52-20Z
+    build: {context: .., dockerfile: infra/Dockerfile.minio}
     restart: unless-stopped
     command: server /data --console-address ':9001'
     environment:
@@ -39,7 +39,7 @@ services:
       MINIO_ROOT_PASSWORD: ${R4_S3_SECRET_ACCESS_KEY:?}
     volumes: ['objects:/data']
     healthcheck:
-      test: ['CMD', 'mc', 'ready', 'local']
+      test: ['CMD', 'curl', '--fail', '--silent', '--max-time', '2', 'http://localhost:9000/minio/health/ready']
       interval: 5s
       timeout: 3s
       retries: 20
